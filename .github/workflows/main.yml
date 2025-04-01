@@ -43,11 +43,9 @@ jobs:
           profile: minimal
           override: true
       - name: Generate OAPI Code
-        working-directory: ltzf-backend/
         run: sh oapigen.sh
 
       - name: Run cargo tests
-        working-directory: ltzf-backend/
         run: cargo test
         env:
           DATABASE_URL: postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf
