@@ -1,0 +1,52 @@
+name: Testing the LTZF Project
+
+on: [push]
+
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Cargo fmt check
+        run: cargo fmt --check
+
+  tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: ltzf-user
+          POSTGRES_PASSWORD: ltzf-pass
+          POSTGRES_DB: ltzf
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Generate OAPI Code
+        run: sh oapigen.sh
+
+      - name: Run cargo tests
+        run: cargo test
+        env:
+          DATABASE_URL: postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf
+          SQLX_OFFLINE: true

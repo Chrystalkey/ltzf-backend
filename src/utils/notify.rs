@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::sync::{Arc, RwLock};
 
 use crate::{error::DataValidationError, LTZFServer, Result};
 use lettre::{message::header::ContentType, Message, Transport};
@@ -21,7 +18,7 @@ struct Mail {
 }
 
 pub struct MailBundle {
-    mailthread: Option<std::thread::JoinHandle<()>>,
+    mailthread: Option<tokio::task::JoinHandle<()>>,
     kill: Arc<RwLock<bool>>,
     cache: Arc<RwLock<Vec<Mail>>>,
 }
@@ -60,16 +57,17 @@ impl MailBundle {
                     message: format!("{}", e),
                 })?;
 
-        let thread = std::thread::spawn(move || {
+        let thread = tokio::spawn(async move {
             let mref = kclone;
+            let mut tick_interval = tokio::time::interval(std::time::Duration::from_secs(20));
             let mailer = cm.unwrap();
             let sender = sender;
             let recipient = recipient;
             while !*mref.read().unwrap() {
-                while !*mref.read().unwrap() {
-                    std::thread::sleep(Duration::from_secs(1));
+                tick_interval.tick().await;
+                if *mref.read().unwrap() {
+                    break;
                 }
-                tracing::error!("Starting Mail check");
                 if cclone.read().unwrap().is_empty() {
                     continue;
                 }
@@ -96,7 +94,7 @@ impl MailBundle {
                 if s_am != 0 {
                     let ambiguous_match_body =
                         ambiguous_match.iter().fold("".to_string(), |a, n| {
-                            format!("{a}\n======================={}\n\n{}", n.subject, n.body)
+                            format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                         });
                     let email = Message::builder()
                         .from(sender.clone())
@@ -110,7 +108,7 @@ impl MailBundle {
                 }
                 if s_va != 0 {
                     let variant_added_body = variant_added.iter().fold("".to_string(), |a, n| {
-                        format!("{a}\n======================={}\n\n{}", n.subject, n.body)
+                        format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                     });
                     let email = Message::builder()
                         .from(sender.clone())
@@ -125,7 +123,7 @@ impl MailBundle {
                 if s_su != 0 {
                     let sonstig_unwrapped_body =
                         sonstig_unwrapped.iter().fold("".to_string(), |a, n| {
-                            format!("{a}\n======================={}\n\n{}", n.subject, n.body)
+                            format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                         });
                     let email = Message::builder()
                         .from(sender.clone())
@@ -139,7 +137,7 @@ impl MailBundle {
                 }
                 if s_ot != 0 {
                     let other_body = other.iter().fold("".to_string(), |a, n| {
-                        format!("{a}\n======================={}\n\n{}", n.subject, n.body)
+                        format!("{a}\n=======================\n{}\n\n{}", n.subject, n.body)
                     });
                     let email = Message::builder()
                         .from(sender.clone())
@@ -169,7 +167,7 @@ impl Drop for MailBundle {
     fn drop(&mut self) {
         *self.kill.write().unwrap() = false;
         if let Some(handle) = self.mailthread.take() {
-            handle.join().unwrap()
+            handle.abort();
         }
     }
 }

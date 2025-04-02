@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
         .with_global_fallback(true)
         .with_extension(true)
         .default_handle_error();
-    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024 * 1024 * 16); // 16GB
+    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024 * 1024 * 64); // 64GB
     let app = openapi::server::new(state.clone())
         .layer(request_size_limit)
         .layer(rate_limiter);
