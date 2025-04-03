@@ -165,8 +165,8 @@ pub fn find_applicable_date_range(
 }
 
 pub async fn kal_get_by_param(
-    qparams: KalGetQueryParams,
-    hparams: KalGetHeaderParams,
+    qparams: &KalGetQueryParams,
+    hparams: &KalGetHeaderParams,
     tx: &mut PgTransaction<'_>,
     _srv: &LTZFServer,
 ) -> Result<KalGetResponse> {
@@ -184,7 +184,7 @@ pub async fn kal_get_by_param(
     }
 
     let params = retrieve::SitzungFilterParameters {
-        gremium_like: qparams.gr,
+        gremium_like: qparams.gr.clone(),
         limit: qparams.limit.map(|x| x as u32),
         offset: qparams.offset.map(|x| x as u32),
         parlament: qparams.p,

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use auth::APIScope;
-use axum::async_trait;
-use axum::extract::Host;
+use async_trait::async_trait;
 use axum::http::Method;
-use axum_extra::extract::cookie::CookieJar;
+use axum_extra::extract::{Host, cookie::CookieJar};
 
 use crate::db::delete::delete_ass_by_api_id;
+use crate::Result;
 use crate::error::{DataValidationError, DatabaseError, LTZFError};
 use crate::utils::notify;
 use crate::{db, Configuration};
@@ -39,9 +39,22 @@ impl LTZFServer {
     }
 }
 
+#[async_trait]
+impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer{
+    async fn handle_error(
+        &self,
+        _method: &axum::http::Method,
+        _host: &Host, 
+        _cookies: &axum_extra::extract::CookieJar, 
+        error: LTZFError) ->  std::result::Result<axum::response::Response, axum::http::StatusCode> {
+            tracing::error!("An error occurred that was not expected: {error}\n");
+            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+}
+
 #[allow(unused_variables)]
 #[async_trait]
-impl openapi::apis::default::Default for LTZFServer {
+impl openapi::apis::default::Default<LTZFError> for LTZFServer {
     type Claims = (auth::APIScope, i32);
 
     #[doc = "AuthPost - POST /api/v1/auth"]
@@ -49,31 +62,26 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_post(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        body: models::CreateApiKey,
-    ) -> Result<AuthPostResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::CreateApiKey,
+    ) -> Result<AuthPostResponse> {
         if claims.0 != auth::APIScope::KeyAdder {
             return Ok(AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let key = auth::auth_get(
-            self,
+        match auth::auth_get(           self,
             body.scope.clone().try_into().unwrap(),
             body.expires_at.map(|x| x),
-            claims.1,
-        )
-        .await;
-        match key {
+            claims.1).await {
             Ok(key) => {
                 return Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
                     key,
                 ))
             }
             Err(e) => {
-                tracing::error!("{}", e.to_string());
-                return Err(());
+                return Err(e);
             }
         }
     }
@@ -83,21 +91,17 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_delete(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        header_params: models::AuthDeleteHeaderParams,
-    ) -> Result<AuthDeleteResponse, ()> {
-        let key_to_delete = &header_params.api_key_delete;
-        let ret = auth::auth_delete(self, claims.0, key_to_delete).await;
-        match ret {
-            Ok(x) => return Ok(x),
-            Err(e) => {
-                tracing::error!("{}", e.to_string());
-                Err(())
-            }
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        header_params: &models::AuthDeleteHeaderParams,
+    ) -> Result<AuthDeleteResponse> {
+        if claims.0 != APIScope::KeyAdder {
+            return Ok(openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
+        let key_to_delete = &header_params.api_key_delete;
+        return auth::auth_delete(self, key_to_delete).await;
     }
 
     /// KalDateGet - GET /api/v1/kalender/{parlament}/{datum}
@@ -105,22 +109,17 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_get(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::KalDateGetHeaderParams,
-        path_params: models::KalDateGetPathParams,
-    ) -> Result<KalDateGetResponse, ()> {
-        let mut tx = self.sqlx_db.begin().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::KalDateGetHeaderParams,
+        path_params: &models::KalDateGetPathParams,
+    ) -> Result<KalDateGetResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
         let res =
             kalender::kal_get_by_date(path_params.datum, path_params.parlament, &mut tx, self)
-                .await
-                .map_err(|e| tracing::error!("{e}"))?;
-        tx.commit().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+                .await?;
+        tx.commit().await?;
         Ok(res)
     }
 
@@ -129,13 +128,13 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_put(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        path_params: models::KalDatePutPathParams,
-        body: Vec<models::Sitzung>,
-    ) -> Result<KalDatePutResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::KalDatePutPathParams,
+        body: &Vec<models::Sitzung>,
+    ) -> Result<KalDatePutResponse> {
         let last_upd_day = chrono::Utc::now()
             .date_naive()
             .checked_sub_days(chrono::Days::new(1))
@@ -152,9 +151,7 @@ impl openapi::apis::default::Default for LTZFServer {
             .cloned()
             .collect();
 
-        let mut tx = self.sqlx_db.begin().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+        let mut tx = self.sqlx_db.begin().await?;
 
         let res = kalender::kal_put_by_date(
             path_params.datum,
@@ -163,11 +160,8 @@ impl openapi::apis::default::Default for LTZFServer {
             &mut tx,
             self,
         )
-        .await
-        .map_err(|e| tracing::error!("{e}"))?;
-        tx.commit().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+        .await?;
+        tx.commit().await?;
         Ok(res)
     }
 
@@ -176,21 +170,16 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_get(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::KalGetHeaderParams,
-        query_params: models::KalGetQueryParams,
-    ) -> Result<KalGetResponse, ()> {
-        let mut tx = self.sqlx_db.begin().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::KalGetHeaderParams,
+        query_params: &models::KalGetQueryParams,
+    ) -> Result<KalGetResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
         let res = kalender::kal_get_by_param(query_params, header_params, &mut tx, self)
-            .await
-            .map_err(|e| tracing::error!("{e}"))?;
-        tx.commit().await.map_err(|e| {
-            tracing::error!("{e}");
-        })?;
+            .await?;
+        tx.commit().await?;
         Ok(res)
     }
 
@@ -199,12 +188,12 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get_by_id(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::VorgangGetByIdHeaderParams,
-        path_params: models::VorgangGetByIdPathParams,
-    ) -> Result<VorgangGetByIdResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::VorgangGetByIdHeaderParams,
+        path_params: &models::VorgangGetByIdPathParams,
+    ) -> Result<VorgangGetByIdResponse> {
         let vorgang = objects::vg_id_get(self, &header_params, &path_params).await;
 
         match vorgang {
@@ -220,10 +209,9 @@ impl openapi::apis::default::Default for LTZFServer {
                                 source: sqlx::Error::RowNotFound,
                             },
                     } => {
-                        tracing::warn!("Not Found Error: {:?}", e.to_string());
                         Ok(VorgangGetByIdResponse::Status404_ContentNotFound)
                     }
-                    _ => Err(()),
+                    _ => Err(e),
                 }
             }
         }
@@ -233,41 +221,37 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_delete(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        path_params: models::VorgangDeletePathParams,
-    ) -> Result<VorgangDeleteResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::VorgangDeletePathParams,
+    ) -> Result<VorgangDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(VorgangDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         let api_id = path_params.vorgang_id;
         let result = db::delete::delete_vorgang_by_api_id(api_id, self)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Could not delete Vorgang with ID `{}`: {}", api_id, e);
-            });
-        return result;
+            .await?;
+        return Ok(result);
     }
     #[doc = " VorgangIdPut - GET /api/v1/vorgang"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_id_put(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        path_params: models::VorgangIdPutPathParams,
-        body: models::Vorgang,
-    ) -> Result<VorgangIdPutResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::VorgangIdPutPathParams,
+        body: &models::Vorgang,
+    ) -> Result<VorgangIdPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(VorgangIdPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         let out = objects::vorgang_id_put(self, &path_params, &body)
-            .await
-            .map_err(|e| tracing::warn!("{}", e))?;
+            .await?;
         Ok(out)
     }
 
@@ -276,39 +260,19 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::VorgangGetHeaderParams,
-        query_params: models::VorgangGetQueryParams,
-    ) -> Result<VorgangGetResponse, ()> {
-        let now = chrono::Utc::now();
-        let lower_bnd = header_params.if_modified_since.map(|el| {
-            if query_params.since.is_some() {
-                query_params.since.unwrap().min(el)
-            } else {
-                el
-            }
-        });
-
-        if lower_bnd
-            .map(|l| l > now || query_params.until.is_some() && query_params.until.unwrap() < l)
-            .unwrap_or(false)
-        {
-            return Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable);
-        }
-        match objects::vg_get(self, &header_params, &query_params).await {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::VorgangGetHeaderParams,
+        query_params: &models::VorgangGetQueryParams,
+    ) -> Result<VorgangGetResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
+        match objects::vg_get(&header_params, &query_params, &mut tx).await {
             Ok(x) => {
-                if x.is_empty() {
-                    Ok(VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
-                } else {
-                    Ok(VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(x))
-                }
+                tx.commit().await?;
+                Ok(x)
             }
-            Err(e) => {
-                tracing::warn!("{}", e.to_string());
-                Err(())
-            }
+            Err(e) => Err(e)
         }
     }
 
@@ -317,13 +281,13 @@ impl openapi::apis::default::Default for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_put(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        query_params: models::VorgangPutQueryParams,
-        body: models::Vorgang,
-    ) -> Result<VorgangPutResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        query_params: &models::VorgangPutQueryParams,
+        body: &models::Vorgang,
+    ) -> Result<VorgangPutResponse> {
         let rval = objects::vorgang_put(self, &body).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
@@ -333,7 +297,7 @@ impl openapi::apis::default::Default for LTZFServer {
                     LTZFError::Validation {
                         source: DataValidationError::AmbiguousMatch { .. },
                     } => Ok(VorgangPutResponse::Status409_Conflict),
-                    _ => Err(()),
+                    _ => Err(e),
                 }
             }
         }
@@ -341,72 +305,62 @@ impl openapi::apis::default::Default for LTZFServer {
     /// AsDelete - DELETE /api/v1/ausschusssitzung/{as_id}
     async fn sitzung_delete(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        path_params: models::SitzungDeletePathParams,
-    ) -> Result<SitzungDeleteResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::SitzungDeletePathParams,
+    ) -> Result<SitzungDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         Ok(delete_ass_by_api_id(path_params.sid, self)
-            .await
-            .map_err(|e| {
-                tracing::warn!("{}", e);
-            })?)
+            .await?)
     }
 
     /// AsGetById - GET /api/v1/ausschusssitzung/{as_id}
     async fn s_get_by_id(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::SGetByIdHeaderParams,
-        path_params: models::SGetByIdPathParams,
-    ) -> Result<SGetByIdResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::SGetByIdHeaderParams,
+        path_params: &models::SGetByIdPathParams,
+    ) -> Result<SGetByIdResponse> {
         let ass = objects::s_get_by_id(&self, &header_params, &path_params)
-            .await
-            .map_err(|e| {
-                tracing::warn!("{}", e);
-            })?;
+            .await?;
         return Ok(ass);
     }
 
     /// AsIdPut - PUT /api/v1/ausschusssitzung/{as_id}
     async fn sid_put(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        claims: Self::Claims,
-        path_params: models::SidPutPathParams,
-        body: models::Sitzung,
-    ) -> Result<SidPutResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::SidPutPathParams,
+        body: &models::Sitzung,
+    ) -> Result<SidPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         let out = objects::s_id_put(self, &path_params, &body)
-            .await
-            .map_err(|e| {
-                tracing::warn!("{}", e);
-            })?;
+            .await?;
         Ok(out)
     }
 
     /// AsGet - GET /api/v1/ausschusssitzung
     async fn s_get(
         &self,
-        method: Method,
-        host: Host,
-        cookies: CookieJar,
-        header_params: models::SGetHeaderParams,
-        query_params: models::SGetQueryParams,
-    ) -> Result<SGetResponse, ()> {
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::SGetHeaderParams,
+        query_params: &models::SGetQueryParams,
+    ) -> Result<SGetResponse> {
         let res = objects::s_get(self, &query_params, &header_params)
-            .await
-            .map_err(|e| tracing::error!("{e}"))?;
+            .await?;
         Ok(res)
     }
 }

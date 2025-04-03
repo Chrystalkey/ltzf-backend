@@ -1,4 +1,4 @@
-export OPENAPI_GENERATOR_VERSION="7.11.0"
+export OPENAPI_GENERATOR_VERSION="7.12.0"
 DIRECTORY="oapi-generator"
 
 echo "Checking for openapi-generator-cli"
@@ -15,4 +15,4 @@ else
     cd ..
 fi
 
-OPENAPI_GENERATOR_VERSION="7.11.0" ./$DIRECTORY/openapi-generator-cli generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode
+OPENAPI_GENERATOR_VERSION="7.12.0" ./$DIRECTORY/openapi-generator-cli generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode

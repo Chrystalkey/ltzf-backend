@@ -588,7 +588,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
 }
 mod scenariotest {
     #![cfg(test)]
-    use crate::LTZFServer;
+    use crate::{db::retrieve, LTZFServer};
     use futures::FutureExt;
     use similar::ChangeTag;
     use std::collections::HashSet;
@@ -678,24 +678,21 @@ mod scenariotest {
         }
         async fn check(&self) {
             info!("Checking for Correctness");
-            let paramock = VorgangGetQueryParams {
+            let paramock = retrieve::VGGetParameters {
                 vgtyp: None,
                 wp: None,
                 inipsn: None,
                 iniorg: None,
                 inifch: None,
-                p: None,
-                since: None,
-                until: None,
+                parlament: None,
+                lower_date: None,
+                upper_date: None,
                 limit: None,
                 offset: None,
             };
-            let hdmock = VorgangGetHeaderParams {
-                if_modified_since: None,
-            };
             let mut tx = self.server.sqlx_db.begin().await.unwrap();
             let db_vorgangs =
-                crate::db::retrieve::vorgang_by_parameter(&paramock, &hdmock, &mut tx)
+                crate::db::retrieve::vorgang_by_parameter(paramock, &mut tx)
                     .await
                     .unwrap();
 
