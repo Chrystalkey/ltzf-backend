@@ -201,7 +201,6 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
                 vorgang,
             )),
             Err(e) => {
-                tracing::warn!("{}", e.to_string());
                 match e {
                     LTZFError::Database {
                         source:
@@ -292,7 +291,6 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
             Err(e) => {
-                tracing::warn!("Error Occurred and Is Returned: {:?}", e.to_string());
                 match e {
                     LTZFError::Validation {
                         source: DataValidationError::AmbiguousMatch { .. },
