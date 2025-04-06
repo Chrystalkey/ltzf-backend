@@ -429,18 +429,22 @@ LIMIT COALESCE($6, 64)
     return Ok(vector);
 }
 
+pub struct VGGetParameters {
+    pub limit: Option<i32>,
+    pub offset: Option<i32>,
+    pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub parlament: Option<models::Parlament>,
+    pub wp: Option<i32>,
+    pub inipsn: Option<String>,
+    pub iniorg: Option<String>,
+    pub inifch: Option<String>,
+    pub vgtyp: Option<models::Vorgangstyp>,
+}
 pub async fn vorgang_by_parameter(
-    params: &models::VorgangGetQueryParams,
-    header_params: &models::VorgangGetHeaderParams,
+    params: VGGetParameters,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<Vec<models::Vorgang>> {
-    let lower_bnd = header_params.if_modified_since.map(|el| {
-        if params.since.is_some() {
-            params.since.unwrap().min(el)
-        } else {
-            el
-        }
-    });
     let vg_list = sqlx::query!(
         "WITH pre_table AS (
         SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang
@@ -463,8 +467,8 @@ AND lastmod < COALESCE($8, NOW())
 ORDER BY pre_table.lastmod ASC
 OFFSET COALESCE($9, 0) LIMIT COALESCE($10, 64)
 ",params.wp, params.vgtyp.map(|x|x.to_string()),
-params.p.map(|p|p.to_string()),
-params.inipsn, params.iniorg, params.inifch, lower_bnd, params.until, params.offset,
+params.parlament.map(|p|p.to_string()),
+params.inipsn, params.iniorg, params.inifch, params.lower_date, params.upper_date, params.offset,
     params.limit)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;

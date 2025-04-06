@@ -1,5 +1,5 @@
 use crate::{error::LTZFError, LTZFServer, Result};
-use axum::async_trait;
+use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -152,13 +152,8 @@ pub async fn auth_get(
 
 pub async fn auth_delete(
     server: &LTZFServer,
-    scope: APIScope,
     key: &str,
 ) -> Result<openapi::apis::default::AuthDeleteResponse> {
-    if scope != APIScope::KeyAdder {
-        tracing::warn!("Unauthorized: API Key does not have the required permission scope");
-        return Ok(openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
-    }
     let hash = digest(key);
     let ret = sqlx::query!(
         "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
