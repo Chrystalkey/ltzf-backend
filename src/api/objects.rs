@@ -37,16 +37,18 @@ pub async fn vg_id_get(
 pub async fn vg_get(
     header_params: &models::VorgangGetHeaderParams,
     query_params: &models::VorgangGetQueryParams,
-    tx: &mut sqlx::PgTransaction<'_>
+    tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<openapi::apis::default::VorgangGetResponse> {
     use openapi::apis::default::VorgangGetResponse;
     if let Some((lower, upper)) = find_applicable_date_range(
-        None, None, None,
+        None,
+        None,
+        None,
         query_params.since,
         query_params.until,
         header_params.if_modified_since,
     ) {
-        let parameters = retrieve::VGGetParameters{
+        let parameters = retrieve::VGGetParameters {
             limit: query_params.limit,
             offset: query_params.offset,
             lower_date: lower,
@@ -58,16 +60,17 @@ pub async fn vg_get(
             iniorg: query_params.iniorg.clone(),
             inipsn: query_params.inipsn.clone(),
         };
-        let result = 
-        retrieve::vorgang_by_parameter(parameters, tx).await?;
+        let result = retrieve::vorgang_by_parameter(parameters, tx).await?;
         if result.is_empty() && header_params.if_modified_since.is_none() {
             return Ok(VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
-        } else if result.is_empty() && header_params.if_modified_since.is_some(){
+        } else if result.is_empty() && header_params.if_modified_since.is_some() {
             return Ok(VorgangGetResponse::Status304_NoNewChanges);
-        }else {
-            return Ok(VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(result));
+        } else {
+            return Ok(
+                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(result),
+            );
         }
-    }else{
+    } else {
         return Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable);
     }
 }

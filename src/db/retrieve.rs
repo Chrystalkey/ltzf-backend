@@ -429,20 +429,20 @@ LIMIT COALESCE($6, 64)
     return Ok(vector);
 }
 
-pub struct VGGetParameters{
+pub struct VGGetParameters {
     pub limit: Option<i32>,
     pub offset: Option<i32>,
     pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
     pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<i32>,
-    pub inipsn : Option<String>,
-    pub iniorg : Option<String>,
-    pub inifch : Option<String>,
-    pub vgtyp : Option<models::Vorgangstyp>,
+    pub inipsn: Option<String>,
+    pub iniorg: Option<String>,
+    pub inifch: Option<String>,
+    pub vgtyp: Option<models::Vorgangstyp>,
 }
 pub async fn vorgang_by_parameter(
-    params : VGGetParameters,
+    params: VGGetParameters,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<Vec<models::Vorgang>> {
     let vg_list = sqlx::query!(

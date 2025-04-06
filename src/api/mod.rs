@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use auth::APIScope;
 use async_trait::async_trait;
+use auth::APIScope;
 use axum::http::Method;
-use axum_extra::extract::{Host, cookie::CookieJar};
+use axum_extra::extract::{cookie::CookieJar, Host};
 
 use crate::db::delete::delete_ass_by_api_id;
-use crate::Result;
 use crate::error::{DataValidationError, DatabaseError, LTZFError};
 use crate::utils::notify;
+use crate::Result;
 use crate::{db, Configuration};
 
 use openapi::apis::default::*;
@@ -40,16 +40,17 @@ impl LTZFServer {
 }
 
 #[async_trait]
-impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer{
+impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
     async fn handle_error(
         &self,
         _method: &axum::http::Method,
-        _host: &Host, 
-        _cookies: &axum_extra::extract::CookieJar, 
-        error: LTZFError) ->  std::result::Result<axum::response::Response, axum::http::StatusCode> {
-            tracing::error!("An error occurred that was not expected: {error}\n");
-            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-        }
+        _host: &Host,
+        _cookies: &axum_extra::extract::CookieJar,
+        error: LTZFError,
+    ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
+        tracing::error!("An error occurred that was not expected: {error}\n");
+        return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
 
 #[allow(unused_variables)]
@@ -71,10 +72,14 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::KeyAdder {
             return Ok(AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        match auth::auth_get(           self,
+        match auth::auth_get(
+            self,
             body.scope.clone().try_into().unwrap(),
             body.expires_at.map(|x| x),
-            claims.1).await {
+            claims.1,
+        )
+        .await
+        {
             Ok(key) => {
                 return Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
                     key,
@@ -98,7 +103,9 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::AuthDeleteHeaderParams,
     ) -> Result<AuthDeleteResponse> {
         if claims.0 != APIScope::KeyAdder {
-            return Ok(openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
+            return Ok(
+                openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid,
+            );
         }
         let key_to_delete = &header_params.api_key_delete;
         return auth::auth_delete(self, key_to_delete).await;
@@ -177,8 +184,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         query_params: &models::KalGetQueryParams,
     ) -> Result<KalGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let res = kalender::kal_get_by_param(query_params, header_params, &mut tx, self)
-            .await?;
+        let res = kalender::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
         tx.commit().await?;
         Ok(res)
     }
@@ -200,19 +206,15 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             Ok(vorgang) => Ok(VorgangGetByIdResponse::Status200_SuccessfulOperation(
                 vorgang,
             )),
-            Err(e) => {
-                match e {
-                    LTZFError::Database {
-                        source:
-                            DatabaseError::Sqlx {
-                                source: sqlx::Error::RowNotFound,
-                            },
-                    } => {
-                        Ok(VorgangGetByIdResponse::Status404_ContentNotFound)
-                    }
-                    _ => Err(e),
-                }
-            }
+            Err(e) => match e {
+                LTZFError::Database {
+                    source:
+                        DatabaseError::Sqlx {
+                            source: sqlx::Error::RowNotFound,
+                        },
+                } => Ok(VorgangGetByIdResponse::Status404_ContentNotFound),
+                _ => Err(e),
+            },
         }
     }
     #[doc = " VorgangDelete - GET /api/v1/vorgang"]
@@ -230,8 +232,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             return Ok(VorgangDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         let api_id = path_params.vorgang_id;
-        let result = db::delete::delete_vorgang_by_api_id(api_id, self)
-            .await?;
+        let result = db::delete::delete_vorgang_by_api_id(api_id, self).await?;
         return Ok(result);
     }
     #[doc = " VorgangIdPut - GET /api/v1/vorgang"]
@@ -249,8 +250,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(VorgangIdPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let out = objects::vorgang_id_put(self, &path_params, &body)
-            .await?;
+        let out = objects::vorgang_id_put(self, &path_params, &body).await?;
         Ok(out)
     }
 
@@ -271,7 +271,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
                 tx.commit().await?;
                 Ok(x)
             }
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 
@@ -290,14 +290,12 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         let rval = objects::vorgang_put(self, &body).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
-            Err(e) => {
-                match e {
-                    LTZFError::Validation {
-                        source: DataValidationError::AmbiguousMatch { .. },
-                    } => Ok(VorgangPutResponse::Status409_Conflict),
-                    _ => Err(e),
-                }
-            }
+            Err(e) => match e {
+                LTZFError::Validation {
+                    source: DataValidationError::AmbiguousMatch { .. },
+                } => Ok(VorgangPutResponse::Status409_Conflict),
+                _ => Err(e),
+            },
         }
     }
     /// AsDelete - DELETE /api/v1/ausschusssitzung/{as_id}
@@ -312,8 +310,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        Ok(delete_ass_by_api_id(path_params.sid, self)
-            .await?)
+        Ok(delete_ass_by_api_id(path_params.sid, self).await?)
     }
 
     /// AsGetById - GET /api/v1/ausschusssitzung/{as_id}
@@ -325,8 +322,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::SGetByIdHeaderParams,
         path_params: &models::SGetByIdPathParams,
     ) -> Result<SGetByIdResponse> {
-        let ass = objects::s_get_by_id(&self, &header_params, &path_params)
-            .await?;
+        let ass = objects::s_get_by_id(&self, &header_params, &path_params).await?;
         return Ok(ass);
     }
 
@@ -343,8 +339,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let out = objects::s_id_put(self, &path_params, &body)
-            .await?;
+        let out = objects::s_id_put(self, &path_params, &body).await?;
         Ok(out)
     }
 
@@ -357,8 +352,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::SGetHeaderParams,
         query_params: &models::SGetQueryParams,
     ) -> Result<SGetResponse> {
-        let res = objects::s_get(self, &query_params, &header_params)
-            .await?;
+        let res = objects::s_get(self, &query_params, &header_params).await?;
         Ok(res)
     }
 }

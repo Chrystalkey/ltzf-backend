@@ -691,10 +691,9 @@ mod scenariotest {
                 offset: None,
             };
             let mut tx = self.server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs =
-                crate::db::retrieve::vorgang_by_parameter(paramock, &mut tx)
-                    .await
-                    .unwrap();
+            let db_vorgangs = crate::db::retrieve::vorgang_by_parameter(paramock, &mut tx)
+                .await
+                .unwrap();
 
             tx.rollback().await.unwrap();
             for expected in self.result.iter() {
