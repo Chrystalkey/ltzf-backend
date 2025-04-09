@@ -9,7 +9,7 @@ RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN
         SELECT 1 FROM rel_station_stln WHERE dok_id = OLD.dok_id
     ) THEN
         -- Delete the dokument if no references exist
-        DELETE FROM dokument WHERE dok_id = OLD.dok_id;
+        DELETE FROM dokument WHERE id = OLD.dok_id;
     END IF;
     
     RETURN NULL; -- AFTER trigger should return NULL
