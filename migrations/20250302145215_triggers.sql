@@ -2,14 +2,14 @@ CREATE OR REPLACE FUNCTION dokref_stat_tops_stln()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN
     -- Check if the dokument is still referenced in either table
     IF NOT EXISTS (
-        SELECT 1 FROM rel_station_dokument WHERE dok_id = OLD.id
+        SELECT 1 FROM rel_station_dokument WHERE dok_id = OLD.dok_id
     ) AND NOT EXISTS (
-        SELECT 1 FROM tops_doks WHERE dok_id = OLD.id
+        SELECT 1 FROM tops_doks WHERE dok_id = OLD.dok_id
     ) AND NOT EXISTS (
-        SELECT 1 FROM rel_station_stln WHERE dok_id = OLD.id
+        SELECT 1 FROM rel_station_stln WHERE dok_id = OLD.dok_id
     ) THEN
         -- Delete the dokument if no references exist
-        DELETE FROM dokument WHERE id = OLD.id;
+        DELETE FROM dokument WHERE dok_id = OLD.dok_id;
     END IF;
     
     RETURN NULL; -- AFTER trigger should return NULL
