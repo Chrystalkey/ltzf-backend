@@ -1,6 +1,10 @@
 FROM oapi-preimage AS oapifile
 
-FROM rust:1.86 AS builder
+FROM rust:1.86-slim-bookworm AS builder
+
+RUN apt update \
+&&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 \
+&&  rm -rf /var/lib/apt/lists/*
 
 RUN adduser \
     --disabled-password \
@@ -28,12 +32,15 @@ RUN touch src/main.rs && cargo build --release
 
 FROM rust:1.86-slim-bookworm AS runner
 
+LABEL maintainer="Benedikt Schäfer"
+LABEL description="Backend for the LTZF"
+LABEL version="0.2.1"
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1
 
-
 RUN apt update \
-&&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 \
+&&  apt install -y --no-install-recommends libssl-dev libpq5 \
 &&  rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /etc/passwd /etc/passwd

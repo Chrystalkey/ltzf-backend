@@ -10,14 +10,16 @@ RUN apt update && apt install -y --no-install-recommends maven jq curl \
 WORKDIR /app
 
 RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  /none:\n    get:\n      responses:\n        "200":\n          description: "success"' > openapi.yml \
-    && ./openapi-generator-cli generate -g python -i ./openapi.yml -o /app/pytest \
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o /app/rs-test \
-    && rm -rf pytest rs-test
+    && rm -rf rs-test
 RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml" > openapi.yml
-RUN ./openapi-generator-cli generate -g python -i ./openapi.yml -o /app/oapicode-python && \
-    ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o /app/oapicode-rust 
+RUN ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o /app/oapicode-rust 
 
-FROM rust:1.86 AS builder
+FROM rust:1.86-slim-bookworm AS builder
+
+RUN apt update \
+&&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 \
+&&  rm -rf /var/lib/apt/lists/*
 
 RUN adduser \
     --disabled-password \
@@ -40,17 +42,22 @@ RUN mkdir src && \
 COPY ./.sqlx ./.sqlx
 COPY ./src ./src
 COPY ./migrations ./migrations
+
 ENV SQLX_OFFLINE=true
+
 RUN touch src/main.rs && cargo build --release
 
 FROM rust:1.86-slim-bookworm AS runner
 
+LABEL maintainer="Benedikt Schäfer"
+LABEL description="Backend for the LTZF"
+LABEL version="0.2.1"
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1
 
-
 RUN apt update \
-&&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 \
+&&  apt install -y --no-install-recommends libssl-dev libpq5 \
 &&  rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /etc/passwd /etc/passwd
