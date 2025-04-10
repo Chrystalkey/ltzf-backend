@@ -1,6 +1,6 @@
 FROM oapi-preimage AS oapifile
 
-FROM rust:1.85 AS builder
+FROM rust:1.86 AS builder
 
 # RUN apt update && apt install -y --no-install-recommends pkg-config && rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +28,7 @@ COPY ./migrations ./migrations
 ENV SQLX_OFFLINE=true
 RUN touch src/main.rs && cargo build --release
 
-FROM rust:1.85-slim-bookworm AS runner
+FROM rust:1.86-slim-bookworm AS runner
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1
