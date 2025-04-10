@@ -15,6 +15,12 @@ jobs:
           override: true
       - name: Cargo fmt check
         run: cargo fmt --check
+  dockerbuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker buildx build . -f Dockerfile.deploy
 
   tests:
     runs-on: ubuntu-latest
