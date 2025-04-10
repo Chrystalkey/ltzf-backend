@@ -1,4 +1,4 @@
-name: Testing the LTZF Project
+name: Testing the LTZF Backend
 
 on: [push]
 
