@@ -290,6 +290,11 @@ pub async fn insert_sitzung(
     )
     .execute(&mut **tx)
     .await?;
+    tracing::info!(
+        "Neue Sitzung angelegt am {} im Parlament {}",
+        ass.termin,
+        ass.gremium.parlament
+    );
     Ok(id)
 }
 

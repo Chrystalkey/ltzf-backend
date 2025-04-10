@@ -147,14 +147,19 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             .checked_sub_days(chrono::Days::new(1))
             .unwrap();
         if !(claims.0 == APIScope::Admin
-            || claims.0 == APIScope::Collector
+            || claims.0 == APIScope::KeyAdder
             || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
         {
+            tracing::warn!(
+                "Unauthorized kal_date_put with path date {} and last upd day {}",
+                path_params.datum,
+                last_upd_day
+            );
             return Ok(KalDatePutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
         let body = body
             .iter()
-            .filter(|f| f.termin.date_naive() > last_upd_day)
+            .filter(|f| f.termin.date_naive() >= last_upd_day)
             .cloned()
             .collect();
 
