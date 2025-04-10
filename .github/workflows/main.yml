@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: docker build
-        run: docker buildx build .
+        run: docker buildx build . -f Dockerfile.deploy
 
   tests:
     runs-on: ubuntu-latest

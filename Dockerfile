@@ -2,8 +2,6 @@ FROM oapi-preimage AS oapifile
 
 FROM rust:1.86 AS builder
 
-# RUN apt update && apt install -y --no-install-recommends pkg-config && rm -rf /var/lib/apt/lists/*
-
 RUN adduser \
     --disabled-password \
     --gecos "" \
