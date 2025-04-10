@@ -111,7 +111,7 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
         1 => MergeState::OneMatch(result[0].id),
         _ => {
             tracing::warn!(
-                "Warning: Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
+                "Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
                 model.api_id,
                 result.iter().map(|r| r.api_id).collect::<Vec<_>>()
             );
@@ -191,7 +191,7 @@ pub async fn station_merge_candidates(
         1 => MergeState::OneMatch(result[0].id),
         _ => {
             tracing::warn!(
-                "Warning: Mehrere Stationen gefunden, die als Kandidaten für Merge infrage kommen für Station `{}`:\n{:?}",
+                "Mehrere Stationen gefunden, die als Kandidaten für Merge infrage kommen für Station `{}`:\n{:?}",
                 api_id,
                 result.iter().map(|r| r.api_id).collect::<Vec<_>>()
             );
