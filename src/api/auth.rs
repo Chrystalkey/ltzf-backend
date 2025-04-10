@@ -1,8 +1,8 @@
-use crate::{error::LTZFError, LTZFServer, Result};
+use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
 use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use sha256::digest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

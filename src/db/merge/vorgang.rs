@@ -110,8 +110,11 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
         0 => MergeState::NoMatch,
         1 => MergeState::OneMatch(result[0].id),
         _ => {
-            tracing::warn!("Warning: Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
-            model.api_id, result.iter().map(|r|r.api_id).collect::<Vec<_>>());
+            tracing::warn!(
+                "Warning: Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
+                model.api_id,
+                result.iter().map(|r| r.api_id).collect::<Vec<_>>()
+            );
             MergeState::AmbiguousMatch(result.iter().map(|x| x.id).collect())
         }
     })
@@ -187,8 +190,11 @@ pub async fn station_merge_candidates(
         0 => MergeState::NoMatch,
         1 => MergeState::OneMatch(result[0].id),
         _ => {
-            tracing::warn!("Warning: Mehrere Stationen gefunden, die als Kandidaten für Merge infrage kommen für Station `{}`:\n{:?}",
-            api_id, result.iter().map(|r|r.api_id).collect::<Vec<_>>());
+            tracing::warn!(
+                "Warning: Mehrere Stationen gefunden, die als Kandidaten für Merge infrage kommen für Station `{}`:\n{:?}",
+                api_id,
+                result.iter().map(|r| r.api_id).collect::<Vec<_>>()
+            );
             MergeState::AmbiguousMatch(result.iter().map(|x| x.id).collect())
         }
     })
@@ -588,7 +594,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
 }
 mod scenariotest {
     #![cfg(test)]
-    use crate::{db::retrieve, LTZFServer};
+    use crate::{LTZFServer, db::retrieve};
     use futures::FutureExt;
     use similar::ChangeTag;
     use std::collections::HashSet;
@@ -726,20 +732,33 @@ mod scenariotest {
                     )
                     .unwrap();
                 }
-                assert!(found,
+                assert!(
+                    found,
                     "({}): Expected to find Vorgang with api_id `{}`, but was not present in the output set, which contained: {:?}.\n\nDetails(Output Set):\n{:#?}",
                     self.name,
                     expected.api_id,
-                    self.result.iter().map(|e|e.api_id).collect::<Vec<uuid::Uuid>>(),
-                    db_vorgangs.iter().map(|v|
-                    {println!("{}", serde_json::to_string_pretty(v).unwrap());""})
-                    .collect::<Vec<_>>()
+                    self.result
+                        .iter()
+                        .map(|e| e.api_id)
+                        .collect::<Vec<uuid::Uuid>>(),
+                    db_vorgangs
+                        .iter()
+                        .map(|v| {
+                            println!("{}", serde_json::to_string_pretty(v).unwrap());
+                            ""
+                        })
+                        .collect::<Vec<_>>()
                 );
             }
 
-            assert!(self.result.len()==db_vorgangs.len(),
-            "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
-            self.name, self.result.len(), db_vorgangs.len(), db_vorgangs);
+            assert!(
+                self.result.len() == db_vorgangs.len(),
+                "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
+                self.name,
+                self.result.len(),
+                db_vorgangs.len(),
+                db_vorgangs
+            );
         }
         async fn run(self) {
             self.push().await;

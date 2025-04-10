@@ -27,11 +27,7 @@ pub async fn shutdown_signal() {
     }
 }
 pub fn as_option<T>(v: Vec<T>) -> Option<Vec<T>> {
-    if v.is_empty() {
-        None
-    } else {
-        Some(v)
-    }
+    if v.is_empty() { None } else { Some(v) }
 }
 // Function to initialize tracing for logging
 pub fn init_tracing() {

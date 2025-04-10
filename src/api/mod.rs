@@ -3,13 +3,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use auth::APIScope;
 use axum::http::Method;
-use axum_extra::extract::{cookie::CookieJar, Host};
+use axum_extra::extract::{Host, cookie::CookieJar};
 
+use crate::Result;
 use crate::db::delete::delete_ass_by_api_id;
 use crate::error::{DataValidationError, DatabaseError, LTZFError};
 use crate::utils::notify;
-use crate::Result;
-use crate::{db, Configuration};
+use crate::{Configuration, db};
 
 use openapi::apis::default::*;
 use openapi::models;
@@ -43,12 +43,12 @@ impl LTZFServer {
 impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
     async fn handle_error(
         &self,
-        _method: &axum::http::Method,
+        method: &axum::http::Method,
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
         error: LTZFError,
     ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
-        tracing::error!("An error occurred that was not expected: {error}\n");
+        tracing::error!("An error occurred during {method} that was not expected: {error}\n");
         return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
@@ -83,7 +83,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             Ok(key) => {
                 return Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
                     key,
-                ))
+                ));
             }
             Err(e) => {
                 return Err(e);
@@ -111,7 +111,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         return auth::auth_delete(self, key_to_delete).await;
     }
 
-    /// KalDateGet - GET /api/v1/kalender/{parlament}/{datum}
+    #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_get(
@@ -130,7 +130,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         Ok(res)
     }
 
-    /// KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}
+    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_put(
@@ -157,11 +157,19 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             );
             return Ok(KalDatePutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let body = body
+        let len = body.len();
+        let body: Vec<_> = body
             .iter()
-            .filter(|f| f.termin.date_naive() >= last_upd_day)
+            .filter(|&f| f.termin.date_naive() >= last_upd_day)
             .cloned()
             .collect();
+
+        if len != body.len() {
+            tracing::info!(
+                "Filtered {} Sitzung entries due to date constraints",
+                len - body.len()
+            );
+        }
 
         let mut tx = self.sqlx_db.begin().await?;
 
@@ -177,7 +185,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         Ok(res)
     }
 
-    /// KalGet - GET /api/v1/kalender
+    #[doc = "KalGet - GET /api/v1/kalender"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_get(
@@ -292,6 +300,13 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         query_params: &models::VorgangPutQueryParams,
         body: &models::Vorgang,
     ) -> Result<VorgangPutResponse> {
+        // technically not necessary since all authenticated scopes are allowed, still, better be explicit about that
+        if claims.0 != APIScope::KeyAdder
+            && claims.0 != APIScope::Admin
+            && claims.0 != APIScope::Collector
+        {
+            return Ok(VorgangPutResponse::Status401_APIKeyIsMissingOrInvalid);
+        }
         let rval = objects::vorgang_put(self, &body).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
@@ -303,7 +318,10 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             },
         }
     }
-    /// AsDelete - DELETE /api/v1/ausschusssitzung/{as_id}
+
+    #[doc = " sitzung_delete - PUT /api/v1/vorgang"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sitzung_delete(
         &self,
         method: &Method,
@@ -318,7 +336,9 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         Ok(delete_ass_by_api_id(path_params.sid, self).await?)
     }
 
-    /// AsGetById - GET /api/v1/ausschusssitzung/{as_id}
+    #[doc = " SGetById - PUT /api/v1/sitzung/{sid}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get_by_id(
         &self,
         method: &Method,
@@ -331,7 +351,9 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         return Ok(ass);
     }
 
-    /// AsIdPut - PUT /api/v1/ausschusssitzung/{as_id}
+    #[doc = " sid_put - PUT /api/v1/sitzung/{sid}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sid_put(
         &self,
         method: &Method,
@@ -348,7 +370,9 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         Ok(out)
     }
 
-    /// AsGet - GET /api/v1/ausschusssitzung
+    #[doc = " SGet - GET /api/v1/sitzung"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get(
         &self,
         method: &Method,
