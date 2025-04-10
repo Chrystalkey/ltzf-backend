@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    SELECT DISTINCT(v.api_id) FROM station s    -- alle vorgänge von stationen,\nINNER JOIN vorgang v ON v.id = s.vg_id\nWHERE\nEXISTS ( \t\t\t\t\t\t\t\t\t-- mit denen mindestens ein dokument assoziiert ist, dass hier auftaucht\n\tSELECT 1 FROM rel_station_dokument rsd \n\tINNER JOIN tops_doks td ON td.dok_id = rsd.dok_id\n\tWHERE td.top_id = $1 AND rsd.stat_id = s.id\n) OR EXISTS(\t\t\t             \t\t-- mit denen mindestens ein dokument assoziiert ist, dass hier auftaucht\n\tSELECT 1 FROM rel_station_stln rss\n\tINNER JOIN tops_doks td ON td.dok_id = rss.dok_id\n\tWHERE td.top_id = $1 AND rss.stat_id = s.id\n)\n    ORDER BY api_id ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "57f860511c019ddc44309548dbf4099c959c836fa5ad14f0acbbd59020d1e798"
+}

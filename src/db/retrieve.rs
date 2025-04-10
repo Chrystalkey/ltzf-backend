@@ -275,11 +275,11 @@ WHERE
 EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier auftaucht
 	SELECT 1 FROM rel_station_dokument rsd 
 	INNER JOIN tops_doks td ON td.dok_id = rsd.dok_id
-	WHERE td.top_id = $1
+	WHERE td.top_id = $1 AND rsd.stat_id = s.id
 ) OR EXISTS(			             		-- mit denen mindestens ein dokument assoziiert ist, dass hier auftaucht
 	SELECT 1 FROM rel_station_stln rss
 	INNER JOIN tops_doks td ON td.dok_id = rss.dok_id
-	WHERE td.top_id = $1
+	WHERE td.top_id = $1 AND rss.stat_id = s.id
 )
     ORDER BY api_id ASC",
         id
