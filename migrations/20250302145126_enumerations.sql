@@ -35,12 +35,6 @@ CREATE TABLE
         value VARCHAR NOT NULL
     );
 
-CREATE TABLE experte(
-    id SERIAL PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    fachgebiet VARCHAR NOT NULL
-);
-
 INSERT INTO
     vorgangstyp (value)
 VALUES
@@ -48,7 +42,7 @@ VALUES
     ('gg-zustimmung'),
     ('gg-land-parl'),
     ('gg-land-volk'),
-    ('bundeswehreinsatz'),
+    ('bw-einsatz'),
     ('sonstig');
 
 INSERT INTO

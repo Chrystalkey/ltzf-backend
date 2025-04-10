@@ -1,4 +1,4 @@
--- Add migration script here
+-- Notification-Guarded Enumerations 
 CREATE TABLE gremium(
     id SERIAL PRIMARY KEY,
     parl INTEGER NOT NULL REFERENCES parlament(id),
@@ -18,6 +18,7 @@ CREATE TABLE autor(
     CONSTRAINT unq_data UNIQUE(person, organisation)
 );
 
+-- Other objects
 CREATE TABLE dokument (
     id SERIAL PRIMARY KEY,
     api_id UUID NOT NULL UNIQUE,

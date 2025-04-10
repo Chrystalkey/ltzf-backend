@@ -10,7 +10,7 @@ use clap::Parser;
 use sqlx;
 
 use error::LTZFError;
-use lettre::{transport::smtp::authentication::Credentials, SmtpTransport};
+use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use sha256::digest;
 use tokio::net::TcpListener;
 

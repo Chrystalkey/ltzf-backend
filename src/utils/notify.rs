@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
-use crate::{error::DataValidationError, LTZFServer, Result};
-use lettre::{message::header::ContentType, Message, Transport};
+use crate::{LTZFServer, Result, error::DataValidationError};
+use lettre::{Message, Transport, message::header::ContentType};
 use uuid::Uuid;
 
 #[allow(unused)]

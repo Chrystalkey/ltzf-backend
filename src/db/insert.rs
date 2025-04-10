@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use crate::{
-    utils::{self, notify::notify_new_enum_entry},
     LTZFServer, Result,
+    utils::{self, notify::notify_new_enum_entry},
 };
 use openapi::models;
 use sqlx::PgTransaction;
