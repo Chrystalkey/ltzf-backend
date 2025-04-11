@@ -6,7 +6,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  formatting:
+  surface-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,8 +16,10 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
-      - name: Cargo fmt check
+      - name: formatting
         run: cargo fmt --check
+      - name: Generate OAPI Code
+        run: sh oapigen.sh
       - name: clippy
         run: cargo clippy --workspace -- -D warnings
   dockerbuild:
