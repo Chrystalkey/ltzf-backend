@@ -36,7 +36,7 @@ pub async fn vg_id_get(
         Ok(result)
     } else {
         Err(crate::error::LTZFError::Validation {
-            source: crate::error::DataValidationError::QueryParametersNotSatisfied,
+            source: Box::new(crate::error::DataValidationError::QueryParametersNotSatisfied),
         })
     }
 }
@@ -103,7 +103,7 @@ pub async fn s_get_by_id(
         Ok(SGetByIdResponse::Status200_SuccessfulOperation(result))
     } else {
         Err(crate::error::LTZFError::Validation {
-            source: crate::error::DataValidationError::QueryParametersNotSatisfied,
+            source: Box::new(crate::error::DataValidationError::QueryParametersNotSatisfied),
         })
     }
 }

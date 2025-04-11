@@ -21,9 +21,9 @@ impl TryFrom<&str> for APIScope {
             "admin" => Ok(APIScope::Admin),
             "collector" => Ok(APIScope::Collector),
             _ => Err(LTZFError::Validation {
-                source: crate::error::DataValidationError::InvalidEnumValue {
+                source: Box::new(crate::error::DataValidationError::InvalidEnumValue {
                     msg: format!("Tried to Convert {} to APIScope", value),
-                },
+                }),
             }),
         }
     }
@@ -52,9 +52,9 @@ async fn internal_extract_claims(
     let key = headers.get(key);
     if key.is_none() {
         return Err(LTZFError::Validation {
-            source: crate::error::DataValidationError::MissingField {
+            source: Box::new(crate::error::DataValidationError::MissingField {
                 field: "X-API-Key".to_string(),
-            },
+            }),
         });
     }
     let key = key.unwrap().to_str()?;
@@ -74,16 +74,16 @@ async fn internal_extract_claims(
     tracing::trace!("DB Result: {:?}", table_rec);
     match table_rec {
         Some((_, true, _, _)) => Err(LTZFError::Validation {
-            source: crate::error::DataValidationError::Unauthorized {
+            source: Box::new(crate::error::DataValidationError::Unauthorized {
                 reason: format!("API Key was valid but is deleted. Hash: {}", hash),
-            },
+            }),
         }),
         Some((id, _, expires_at, scope)) => {
             if expires_at < chrono::Utc::now() {
                 return Err(LTZFError::Validation {
-                    source: crate::error::DataValidationError::Unauthorized {
+                    source: Box::new(crate::error::DataValidationError::Unauthorized {
                         reason: format!("API Key was valid but is expired. Hash: {}", hash),
-                    },
+                    }),
                 });
             }
             let scope = (APIScope::try_from(scope.as_str()).unwrap(), id);
@@ -98,9 +98,9 @@ async fn internal_extract_claims(
             Ok(scope)
         }
         None => Err(LTZFError::Validation {
-            source: crate::error::DataValidationError::Unauthorized {
+            source: Box::new(crate::error::DataValidationError::Unauthorized {
                 reason: "API Key was not found in the Database".to_string(),
-            },
+            }),
         }),
     }
 }

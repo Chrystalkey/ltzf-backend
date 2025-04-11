@@ -63,10 +63,10 @@ impl Configuration {
             || self.mail_recipient.is_none()
         {
             return Err(LTZFError::Infrastructure {
-                source: error::InfrastructureError::Configuration {
+                source: Box::new(error::InfrastructureError::Configuration {
                     message: "Mail Configuration is incomplete".into(),
-                    config: self.clone(),
-                },
+                    config: Box::new(self.clone()),
+                }),
             });
         }
         let mailer = SmtpTransport::relay(self.mail_server.as_ref().unwrap().as_str())?
@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
     }
     if !available {
         return Err(LTZFError::Other {
-            message: "Server Connection failed after 10 retries".into(),
+            message: Box::new("Server Connection failed after 10 retries".into()),
         });
     }
     tracing::debug!("Started Database Pool");

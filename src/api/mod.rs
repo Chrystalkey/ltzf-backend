@@ -223,16 +223,19 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             Ok(vorgang) => Ok(VorgangGetByIdResponse::Status200_SuccessfulOperation(
                 vorgang,
             )),
-            Err(e) => match e {
-                LTZFError::Validation {
-                    source: crate::error::DataValidationError::QueryParametersNotSatisfied,
-                } => Ok(VorgangGetByIdResponse::Status304_NoNewChanges),
-                LTZFError::Database {
-                    source:
-                        crate::error::DatabaseError::Sqlx {
-                            source: sqlx::Error::RowNotFound,
-                        },
-                } => Ok(VorgangGetByIdResponse::Status404_ContentNotFound),
+            Err(e) => match &e {
+                LTZFError::Validation { source } => match **source {
+                    crate::error::DataValidationError::QueryParametersNotSatisfied => {
+                        Ok(VorgangGetByIdResponse::Status304_NoNewChanges)
+                    }
+                    _ => Err(e),
+                },
+                LTZFError::Database { source } => match **source {
+                    crate::error::DatabaseError::Sqlx {
+                        source: sqlx::Error::RowNotFound,
+                    } => Ok(VorgangGetByIdResponse::Status404_ContentNotFound),
+                    _ => Err(e),
+                },
                 _ => Err(e),
             },
         }
@@ -317,10 +320,13 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         let rval = objects::vorgang_put(self, body).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
-            Err(e) => match e {
-                LTZFError::Validation {
-                    source: DataValidationError::AmbiguousMatch { .. },
-                } => Ok(VorgangPutResponse::Status409_Conflict),
+            Err(e) => match &e {
+                LTZFError::Validation { source } => match **source {
+                    DataValidationError::AmbiguousMatch { .. } => {
+                        Ok(VorgangPutResponse::Status409_Conflict)
+                    }
+                    _ => Err(e),
+                },
                 _ => Err(e),
             },
         }
