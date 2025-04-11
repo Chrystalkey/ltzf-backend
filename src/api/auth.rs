@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
@@ -32,12 +34,12 @@ impl TryFrom<String> for APIScope {
         APIScope::try_from(value.as_str())
     }
 }
-impl ToString for APIScope {
-    fn to_string(&self) -> String {
+impl Display for APIScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            APIScope::KeyAdder => "keyadder".to_string(),
-            APIScope::Admin => "admin".to_string(),
-            APIScope::Collector => "collector".to_string(),
+            APIScope::KeyAdder => write!(f, "keyadder"),
+            APIScope::Admin => write!(f, "admin"),
+            APIScope::Collector => write!(f, "collector"),
         }
     }
 }
@@ -48,7 +50,7 @@ async fn internal_extract_claims(
     key: &str,
 ) -> Result<ClaimType> {
     let key = headers.get(key);
-    if key == None {
+    if key.is_none() {
         return Err(LTZFError::Validation {
             source: crate::error::DataValidationError::MissingField {
                 field: "X-API-Key".to_string(),
@@ -71,13 +73,11 @@ async fn internal_extract_claims(
 
     tracing::trace!("DB Result: {:?}", table_rec);
     match table_rec {
-        Some((_, true, _, _)) => {
-            return Err(LTZFError::Validation {
-                source: crate::error::DataValidationError::Unauthorized {
-                    reason: format!("API Key was valid but is deleted. Hash: {}", hash),
-                },
-            });
-        }
+        Some((_, true, _, _)) => Err(LTZFError::Validation {
+            source: crate::error::DataValidationError::Unauthorized {
+                reason: format!("API Key was valid but is deleted. Hash: {}", hash),
+            },
+        }),
         Some((id, _, expires_at, scope)) => {
             if expires_at < chrono::Utc::now() {
                 return Err(LTZFError::Validation {
@@ -95,15 +95,13 @@ async fn internal_extract_claims(
             .execute(&server.sqlx_db)
             .await?;
             tracing::trace!("Scope of key with hash`{}`: {:?}", hash, scope.0);
-            return Ok(scope);
+            Ok(scope)
         }
-        None => {
-            return Err(LTZFError::Validation {
-                source: crate::error::DataValidationError::Unauthorized {
-                    reason: "API Key was not found in the Database".to_string(),
-                },
-            });
-        }
+        None => Err(LTZFError::Validation {
+            source: crate::error::DataValidationError::Unauthorized {
+                reason: "API Key was not found in the Database".to_string(),
+            },
+        }),
     }
 }
 
@@ -162,10 +160,11 @@ pub async fn auth_delete(
     .fetch_optional(&server.sqlx_db)
     .await?;
 
-    if let Some(_) = ret {
-        return Ok(openapi::apis::default::AuthDeleteResponse::Status204_Success);
+    if ret.is_some() {
+        Ok(openapi::apis::default::AuthDeleteResponse::Status204_Success)
+    } else {
+        Ok(openapi::apis::default::AuthDeleteResponse::Status404_APIKeyNotFound)
     }
-    return Ok(openapi::apis::default::AuthDeleteResponse::Status404_APIKeyNotFound);
 }
 
 pub async fn generate_api_key() -> String {

@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    fmt::Display,
+    sync::{Arc, RwLock},
+};
 
 use crate::{LTZFServer, Result, error::DataValidationError};
 use lettre::{Message, Transport, message::header::ContentType};
@@ -179,11 +182,11 @@ impl LTZFServer {
         if temp == "sonstig" {
             notify_unknown_variant::<T>(api_id, object, self)?
         }
-        return Ok(temp);
+        Ok(temp)
     }
 }
 
-pub fn notify_new_enum_entry<T: std::fmt::Debug + ToString>(
+pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
     new_entry: &T,
     similarity: Vec<(f32, T)>,
     server: &LTZFServer,
@@ -199,7 +202,7 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + ToString>(
 
     let simstr = similarity
         .iter()
-        .map(|(p, t)| format!("{}: {}", p.to_string(), t.to_string()))
+        .map(|(p, t)| format!("{}: {}", p, t))
         .fold("".to_string(), |a, n| format!("{a}\n{n}"));
 
     let body = format!("Es gibt {} ähnliche Einträge: {simstr}", similarity.len());

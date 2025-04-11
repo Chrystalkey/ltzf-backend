@@ -1,5 +1,5 @@
 #![allow(unused)]
-use super::MergeState;
+use super::MatchState;
 use crate::db::insert::{self, insert_or_retrieve_autor};
 use crate::error::DataValidationError;
 use crate::utils::notify::notify_ambiguous_match;
@@ -23,7 +23,7 @@ pub async fn vorgang_merge_candidates(
     model: &models::Vorgang,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
-) -> Result<MergeState<i32>> {
+) -> Result<MatchState<i32>> {
     let obj = "merged Vorgang";
     let ident_t: Vec<_> = model
         .ids
@@ -43,7 +43,7 @@ pub async fn vorgang_merge_candidates(
         .stationen
         .iter()
         .filter(|&s| s.typ == models::Stationstyp::ParlInitiativ)
-        .map(|s| {
+        .flat_map(|s| {
             s.dokumente
                 .iter()
                 .filter(|&d| {
@@ -62,7 +62,6 @@ pub async fn vorgang_merge_candidates(
                 })
                 .map(|s| s.to_string())
         })
-        .flatten()
         .collect();
     let result = sqlx::query!(
         "WITH db_id_table AS (
@@ -107,15 +106,15 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
     );
 
     Ok(match result.len() {
-        0 => MergeState::NoMatch,
-        1 => MergeState::OneMatch(result[0].id),
+        0 => MatchState::NoMatch,
+        1 => MatchState::ExactlyOne(result[0].id),
         _ => {
             tracing::warn!(
                 "Mehrere Vorgänge gefunden, die als Kandidaten für Merge infrage kommen für den Vorgang `{}`:\n{:?}",
                 model.api_id,
                 result.iter().map(|r| r.api_id).collect::<Vec<_>>()
             );
-            MergeState::AmbiguousMatch(result.iter().map(|x| x.id).collect())
+            MatchState::Ambiguous(result.iter().map(|x| x.id).collect())
         }
     })
 }
@@ -128,16 +127,13 @@ pub async fn station_merge_candidates(
     vorgang: i32,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
-) -> Result<MergeState<i32>> {
+) -> Result<MatchState<i32>> {
     let obj = "merged station";
     let api_id = model.api_id.unwrap_or(uuid::Uuid::now_v7());
     let dok_hash: Vec<_> = model
         .dokumente
         .iter()
-        .filter(|x| match x {
-            models::DokRef::Dokument(_) => true,
-            _ => false,
-        })
+        .filter(|x| matches!(x, models::DokRef::Dokument(_)))
         .map(|x| {
             if let models::DokRef::Dokument(d) = x {
                 d.hash.clone()
@@ -187,15 +183,15 @@ pub async fn station_merge_candidates(
     );
 
     Ok(match result.len() {
-        0 => MergeState::NoMatch,
-        1 => MergeState::OneMatch(result[0].id),
+        0 => MatchState::NoMatch,
+        1 => MatchState::ExactlyOne(result[0].id),
         _ => {
             tracing::warn!(
                 "Mehrere Stationen gefunden, die als Kandidaten für Merge infrage kommen für Station `{}`:\n{:?}",
                 api_id,
                 result.iter().map(|r| r.api_id).collect::<Vec<_>>()
             );
-            MergeState::AmbiguousMatch(result.iter().map(|x| x.id).collect())
+            MatchState::Ambiguous(result.iter().map(|x| x.id).collect())
         }
     })
 }
@@ -205,7 +201,7 @@ pub async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
     srv: &LTZFServer,
-) -> Result<MergeState<i32>> {
+) -> Result<MatchState<i32>> {
     let dids = sqlx::query!(
         "SELECT d.id FROM dokument d WHERE 
         d.hash = $1 OR
@@ -219,11 +215,11 @@ pub async fn dokument_merge_candidates(
     .fetch_all(executor)
     .await?;
     if dids.is_empty() {
-        return Ok(MergeState::NoMatch);
+        Ok(MatchState::NoMatch)
     } else if dids.len() == 1 {
-        return Ok(MergeState::OneMatch(dids[0]));
+        Ok(MatchState::ExactlyOne(dids[0]))
     } else {
-        return Ok(MergeState::AmbiguousMatch(dids));
+        Ok(MatchState::Ambiguous(dids))
     }
 }
 
@@ -261,7 +257,7 @@ pub async fn execute_merge_dokument(
     .execute(&mut **tx)
     .await?;
     // schlagworte::UNION
-    insert::insert_dok_sw(db_id, model.schlagworte.clone().unwrap_or(vec![]), tx).await?;
+    insert::insert_dok_sw(db_id, model.schlagworte.clone().unwrap_or_default(), tx).await?;
     // autoren::UNION
     let mut aids = vec![];
     for a in &model.autoren {
@@ -278,7 +274,7 @@ pub async fn execute_merge_dokument(
     .await?;
 
     tracing::info!("Merging Dokument into Database successful");
-    return Ok(());
+    Ok(())
 }
 
 pub async fn execute_merge_station(
@@ -338,7 +334,7 @@ pub async fn execute_merge_station(
     .await?;
 
     // schlagworte::UNION
-    insert::insert_station_sw(db_id, model.schlagworte.clone().unwrap_or(vec![]), tx).await?;
+    insert::insert_station_sw(db_id, model.schlagworte.clone().unwrap_or_default(), tx).await?;
 
     // dokumente::UNION
     let mut insert_ids = vec![];
@@ -361,21 +357,21 @@ pub async fn execute_merge_station(
                 insert_ids.push(id.unwrap());
             }
             models::DokRef::Dokument(dok) => {
-                let matches = dokument_merge_candidates(&*dok, &mut **tx, srv).await?;
+                let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
                 match matches {
-                    MergeState::NoMatch => {
+                    MatchState::NoMatch => {
                         let did =
                             crate::db::insert::insert_dokument((**dok).clone(), tx, srv).await?;
                         insert_ids.push(did);
                     }
-                    MergeState::OneMatch(matchmod) => {
+                    MatchState::ExactlyOne(matchmod) => {
                         tracing::debug!(
                             "Found exactly one match with db id: {}. Merging...",
                             matchmod
                         );
-                        execute_merge_dokument(&**dok, matchmod, tx, srv).await?;
+                        execute_merge_dokument(dok, matchmod, tx, srv).await?;
                     }
-                    MergeState::AmbiguousMatch(matches) => {
+                    MatchState::Ambiguous(matches) => {
                         let api_ids = sqlx::query!(
                             "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
                             &matches[..]
@@ -390,7 +386,8 @@ pub async fn execute_merge_station(
                             srv,
                         )?;
                         return Err(DataValidationError::AmbiguousMatch {
-                            message: format!("Ambiguous document match(station), see notification"),
+                            message: "Ambiguous document match(station), see notification"
+                                .to_string(),
                         }
                         .into());
                     }
@@ -410,7 +407,7 @@ pub async fn execute_merge_station(
     // stellungnahmen
     for stln in model.stellungnahmen.as_ref().unwrap_or(&vec![]) {
         match dokument_merge_candidates(stln, &mut **tx, srv).await? {
-            MergeState::NoMatch => {
+            MatchState::NoMatch => {
                 let did = insert::insert_dokument(stln.clone(), tx, srv).await?;
                 sqlx::query!(
                     "INSERT INTO rel_station_stln(stat_id, dok_id) VALUES($1, $2) ON CONFLICT DO NOTHING;",
@@ -420,10 +417,10 @@ pub async fn execute_merge_station(
                 .execute(&mut **tx)
                 .await?;
             }
-            MergeState::OneMatch(did) => {
-                execute_merge_dokument(&stln, did, tx, srv).await?;
+            MatchState::ExactlyOne(did) => {
+                execute_merge_dokument(stln, did, tx, srv).await?;
             }
-            MergeState::AmbiguousMatch(matches) => {
+            MatchState::Ambiguous(matches) => {
                 let api_ids = sqlx::query!(
                     "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
                     &matches[..]
@@ -433,7 +430,7 @@ pub async fn execute_merge_station(
                 .await?;
                 notify_ambiguous_match(api_ids, stln, "execute merge station.stellungnahmen", srv)?;
                 return Err(DataValidationError::AmbiguousMatch {
-                    message: format!("Ambiguous document match(Stln), see notification"),
+                    message: "Ambiguous document match(Stln), see notification".to_string(),
                 }
                 .into());
             }
@@ -483,7 +480,7 @@ pub async fn execute_merge_vorgang(
     .execute(&mut **tx)
     .await?;
     /// links
-    let links = model.links.clone().unwrap_or(vec![]);
+    let links = model.links.clone().unwrap_or_default();
     sqlx::query!(
         "INSERT INTO rel_vorgang_links (vg_id, link)
         SELECT $1, blub FROM UNNEST($2::text[]) as blub
@@ -521,13 +518,13 @@ pub async fn execute_merge_vorgang(
 
     for stat in &model.stationen {
         match station_merge_candidates(stat, db_id, &mut **tx, srv).await? {
-            MergeState::NoMatch => {
+            MatchState::NoMatch => {
                 insert::insert_station(stat.clone(), db_id, tx, srv).await?;
             }
-            MergeState::OneMatch(merge_station) => {
+            MatchState::ExactlyOne(merge_station) => {
                 execute_merge_station(stat, db_id, tx, srv).await?
             }
-            MergeState::AmbiguousMatch(matches) => {
+            MatchState::Ambiguous(matches) => {
                 let mids = sqlx::query!(
                     "SELECT api_id FROM station WHERE id = ANY($1::int4[]);",
                     &matches[..]
@@ -559,7 +556,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
     );
     let candidates = vorgang_merge_candidates(model, &mut *tx, server).await?;
     match candidates {
-        MergeState::NoMatch => {
+        MatchState::NoMatch => {
             tracing::info!(
                 "No Merge Candidate found, Inserting Complete Vorgang with api_id: {:?}",
                 model.api_id
@@ -567,7 +564,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
             let model = model.clone();
             insert::insert_vorgang(&model, &mut tx, server).await?;
         }
-        MergeState::OneMatch(one) => {
+        MatchState::ExactlyOne(one) => {
             let api_id = sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", one)
                 .map(|r| r.api_id)
                 .fetch_one(&mut *tx)
@@ -580,7 +577,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
             let model = model.clone();
             execute_merge_vorgang(&model, one, &mut tx, server).await?;
         }
-        MergeState::AmbiguousMatch(many) => {
+        MatchState::Ambiguous(many) => {
             tracing::warn!(
                 "Ambiguous matches for Vorgang with api_id: {:?}",
                 model.api_id

@@ -175,9 +175,9 @@ pub async fn insert_station(
         .await?;
     }
     // schlagworte
-    insert_station_sw(stat_id, stat.schlagworte.unwrap_or(vec![]), tx).await?;
+    insert_station_sw(stat_id, stat.schlagworte.unwrap_or_default(), tx).await?;
 
-    return Ok(stat_id);
+    Ok(stat_id)
 }
 
 pub async fn insert_dokument(
@@ -187,8 +187,8 @@ pub async fn insert_dokument(
 ) -> Result<i32> {
     let dapi = dok.api_id.unwrap_or(uuid::Uuid::now_v7());
     match crate::db::merge::vorgang::dokument_merge_candidates(&dok, &mut **tx, srv).await? {
-        super::merge::MergeState::OneMatch(id) => return Ok(id),
-        super::merge::MergeState::AmbiguousMatch(matches) => {
+        super::merge::MatchState::ExactlyOne(id) => return Ok(id),
+        super::merge::MatchState::Ambiguous(matches) => {
             let api_ids = sqlx::query!(
                 "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
                 &matches[..]
@@ -198,7 +198,7 @@ pub async fn insert_dokument(
             .await?;
             utils::notify::notify_ambiguous_match(api_ids, &dok, "insert_dokument", srv)?;
         }
-        super::merge::MergeState::NoMatch => {}
+        super::merge::MatchState::NoMatch => {}
     }
     let obj = "Dokument";
     let did = sqlx::query!(
@@ -228,7 +228,7 @@ pub async fn insert_dokument(
     .await?;
 
     // Schlagworte
-    insert_dok_sw(did, dok.schlagworte.unwrap_or(vec![]), tx).await?;
+    insert_dok_sw(did, dok.schlagworte.unwrap_or_default(), tx).await?;
 
     // authoren
     let mut aids = vec![];
@@ -243,7 +243,7 @@ pub async fn insert_dokument(
     )
     .execute(&mut **tx)
     .await?;
-    return Ok(did);
+    Ok(did)
 }
 
 pub async fn insert_sitzung(
@@ -273,7 +273,7 @@ pub async fn insert_sitzung(
     .await?;
     // insert tops
     for top in &ass.tops {
-        insert_top(id, &top, tx, srv).await?;
+        insert_top(id, top, tx, srv).await?;
     }
 
     // insert experten
@@ -318,7 +318,7 @@ pub async fn insert_top(
     // drucksachen
     let mut dids = vec![];
     for d in top.dokumente.as_ref().unwrap_or(&vec![]) {
-        dids.push(insert_or_retrieve_dok(&d, tx, srv).await?);
+        dids.push(insert_or_retrieve_dok(d, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO tops_doks(top_id, dok_id)
@@ -329,7 +329,7 @@ pub async fn insert_top(
     .execute(&mut **tx)
     .await?;
 
-    return Ok(tid);
+    Ok(tid)
 }
 
 pub async fn insert_or_retrieve_gremium(
@@ -349,8 +349,8 @@ pub async fn insert_or_retrieve_gremium(
     .map(|r| r.id)
     .fetch_optional(&mut **tx)
     .await?;
-    if gid.is_some() {
-        return Ok(gid.unwrap());
+    if let Some(ogid) = gid {
+        return Ok(ogid);
     }
 
     let similarity = sqlx::query!(
@@ -407,8 +407,8 @@ pub async fn insert_or_retrieve_autor(
     .map(|r| r.id)
     .fetch_optional(&mut **tx)
     .await?;
-    if eid.is_some() {
-        return Ok(eid.unwrap());
+    if let Some(eid) = eid {
+        return Ok(eid);
     }
 
     let similarity = sqlx::query!(

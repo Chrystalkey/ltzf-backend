@@ -73,9 +73,30 @@ pub async fn kal_put_by_date(
     for s in &sessions {
         insert::insert_sitzung(s, tx, srv).await?;
     }
-    return Ok(KalDatePutResponse::Status201_Created);
+    Ok(KalDatePutResponse::Status201_Created)
 }
-
+pub struct DateRange {
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+impl
+    From<(
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    )> for DateRange
+{
+    fn from(
+        value: (
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+    ) -> Self {
+        Self {
+            since: value.0,
+            until: value.1,
+        }
+    }
+}
 pub fn find_applicable_date_range(
     y: Option<u32>,
     m: Option<u32>,
@@ -83,10 +104,7 @@ pub fn find_applicable_date_range(
     since: Option<chrono::DateTime<chrono::Utc>>,
     until: Option<chrono::DateTime<chrono::Utc>>,
     ifmodsince: Option<chrono::DateTime<chrono::Utc>>,
-) -> Option<(
-    Option<chrono::DateTime<chrono::Utc>>,
-    Option<chrono::DateTime<chrono::Utc>>,
-)> {
+) -> Option<DateRange> {
     let ymd_date_range = if let Some(y) = y {
         if let Some(m) = m {
             if let Some(d) = d {
@@ -154,14 +172,16 @@ pub fn find_applicable_date_range(
     }
 
     if let Some((ys, yu)) = ymd_date_range {
-        if since_min.is_some() && since_min.unwrap() > yu {
-            return None;
+        if since_min.is_some() && since_min.unwrap() > yu
+            || until_min.is_some() && until_min.unwrap() < ys
+        {
+            None
+        } else {
+            Some((since_min, until_min).into())
         }
-        if until_min.is_some() && until_min.unwrap() < ys {
-            return None;
-        }
+    } else {
+        Some((since_min, until_min).into())
     }
-    return Some((since_min, until_min));
 }
 
 pub async fn kal_get_by_param(
@@ -179,7 +199,7 @@ pub async fn kal_get_by_param(
         qparams.until,
         hparams.if_modified_since,
     );
-    if result == None {
+    if result.is_none() {
         return Ok(KalGetResponse::Status416_RequestRangeNotSatisfiable);
     }
 
@@ -190,16 +210,17 @@ pub async fn kal_get_by_param(
         parlament: qparams.p,
         vgid: None,
         wp: qparams.wp.map(|x| x as u32),
-        since: result.unwrap().0,
-        until: result.unwrap().1,
+        since: result.as_ref().unwrap().since,
+        until: result.unwrap().until,
     };
 
     // retrieval
     let result = retrieve::sitzung_by_param(&params, tx).await?;
     if result.is_empty() {
-        return Ok(KalGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+        Ok(KalGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
+    } else {
+        Ok(KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(result))
     }
-    return Ok(KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(result));
 }
 
 #[cfg(test)]
@@ -211,7 +232,9 @@ mod test {
     fn test_date_range_none() {
         let result = find_applicable_date_range(None, None, None, None, None, None);
         assert!(
-            result.is_some() && result.unwrap().0.is_none() && result.unwrap().1.is_none(),
+            result.is_some()
+                && result.as_ref().unwrap().since.is_none()
+                && result.unwrap().until.is_none(),
             "None dates should not fail but produce (None, None)"
         );
     }
@@ -226,8 +249,8 @@ mod test {
         let result = find_applicable_date_range(None, None, None, Some(since), Some(until), None);
         assert!(
             result.is_some()
-                && result.unwrap().0 == Some(since)
-                && result.unwrap().1 == Some(until),
+                && result.as_ref().unwrap().since == Some(since)
+                && result.unwrap().until == Some(until),
             "Since and until should yield (since, until)"
         )
     }
@@ -259,7 +282,7 @@ mod test {
         assert!(result.is_some());
         let result = result.unwrap();
         assert!(
-            result.0 == Some(expected_since) && result.1 == Some(expected_until),
+            result.since == Some(expected_since) && result.until == Some(expected_until),
             "ymd should start and end at the date range"
         );
         // ym
@@ -278,7 +301,7 @@ mod test {
         assert!(result.is_some());
         let result = result.unwrap();
         assert!(
-            result.0 == Some(expected_since) && result.1 == Some(expected_until),
+            result.since == Some(expected_since) && result.until == Some(expected_until),
             "ymd should start and end at the date range"
         );
         // y
@@ -296,7 +319,7 @@ mod test {
         assert!(result.is_some());
         let result = result.unwrap();
         assert!(
-            result.0 == Some(expected_since) && result.1 == Some(expected_until),
+            result.since == Some(expected_since) && result.until == Some(expected_until),
             "ymd should start and end at the date range"
         );
     }
@@ -331,7 +354,7 @@ mod test {
             find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None);
         assert!(result.is_some());
         let result = result.unwrap();
-        assert!(result.0.is_some() && result.0.unwrap() == expected_since);
-        assert!(result.1.is_some() && result.1.unwrap() == expected_until);
+        assert!(result.since.is_some() && result.since.unwrap() == expected_since);
+        assert!(result.until.is_some() && result.until.unwrap() == expected_until);
     }
 }

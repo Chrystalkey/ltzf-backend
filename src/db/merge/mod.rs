@@ -1,8 +1,8 @@
 pub mod vorgang;
 
-pub enum MergeState<T> {
-    AmbiguousMatch(Vec<T>),
-    OneMatch(T),
+pub enum MatchState<T> {
+    Ambiguous(Vec<T>),
+    ExactlyOne(T),
     NoMatch,
 }
 

@@ -34,7 +34,7 @@ impl LTZFServer {
         Self {
             config,
             sqlx_db,
-            mailbundle: mailbundle.map(|mb| Arc::new(mb)),
+            mailbundle: mailbundle.map(Arc::new),
         }
     }
 }
@@ -75,7 +75,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         match auth::auth_get(
             self,
             body.scope.clone().try_into().unwrap(),
-            body.expires_at.map(|x| x),
+            body.expires_at,
             claims.1,
         )
         .await
@@ -217,7 +217,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
             "vorgang_get_by_id called with id {}",
             path_params.vorgang_id
         );
-        let vorgang = objects::vg_id_get(self, &header_params, &path_params).await;
+        let vorgang = objects::vg_id_get(self, header_params, path_params).await;
 
         match vorgang {
             Ok(vorgang) => Ok(VorgangGetByIdResponse::Status200_SuccessfulOperation(
@@ -270,7 +270,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(VorgangIdPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let out = objects::vorgang_id_put(self, &path_params, &body).await?;
+        let out = objects::vorgang_id_put(self, path_params, body).await?;
         Ok(out)
     }
 
@@ -286,7 +286,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         query_params: &models::VorgangGetQueryParams,
     ) -> Result<VorgangGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        match objects::vg_get(&header_params, &query_params, &mut tx).await {
+        match objects::vg_get(header_params, query_params, &mut tx).await {
             Ok(x) => {
                 tx.commit().await?;
                 Ok(x)
@@ -314,7 +314,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         {
             return Ok(VorgangPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let rval = objects::vorgang_put(self, &body).await;
+        let rval = objects::vorgang_put(self, body).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Success),
             Err(e) => match e {
@@ -354,7 +354,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::SGetByIdHeaderParams,
         path_params: &models::SGetByIdPathParams,
     ) -> Result<SGetByIdResponse> {
-        let ass = objects::s_get_by_id(&self, &header_params, &path_params).await?;
+        let ass = objects::s_get_by_id(self, header_params, path_params).await?;
         return Ok(ass);
     }
 
@@ -373,7 +373,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        let out = objects::s_id_put(self, &path_params, &body).await?;
+        let out = objects::s_id_put(self, path_params, body).await?;
         Ok(out)
     }
 
@@ -388,7 +388,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::SGetHeaderParams,
         query_params: &models::SGetQueryParams,
     ) -> Result<SGetResponse> {
-        let res = objects::s_get(self, &query_params, &header_params).await?;
+        let res = objects::s_get(self, query_params, header_params).await?;
         Ok(res)
     }
 }

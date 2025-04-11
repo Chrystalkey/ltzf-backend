@@ -46,7 +46,7 @@ pub async fn vg_get(
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<openapi::apis::default::VorgangGetResponse> {
     use openapi::apis::default::VorgangGetResponse;
-    if let Some((lower, upper)) = find_applicable_date_range(
+    if let Some(range) = find_applicable_date_range(
         None,
         None,
         None,
@@ -57,9 +57,9 @@ pub async fn vg_get(
         let parameters = retrieve::VGGetParameters {
             limit: query_params.limit,
             offset: query_params.offset,
-            lower_date: lower,
+            lower_date: range.since,
             parlament: query_params.p,
-            upper_date: upper,
+            upper_date: range.until,
             vgtyp: query_params.vgtyp,
             wp: query_params.wp,
             inifch: query_params.inifch.clone(),
@@ -68,16 +68,14 @@ pub async fn vg_get(
         };
         let result = retrieve::vorgang_by_parameter(parameters, tx).await?;
         if result.is_empty() && header_params.if_modified_since.is_none() {
-            return Ok(VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+            Ok(VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
         } else if result.is_empty() && header_params.if_modified_since.is_some() {
-            return Ok(VorgangGetResponse::Status304_NoNewChanges);
+            Ok(VorgangGetResponse::Status304_NoNewChanges)
         } else {
-            return Ok(
-                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(result),
-            );
+            Ok(VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(result))
         }
     } else {
-        return Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable);
+        Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable)
     }
 }
 
@@ -132,8 +130,8 @@ pub async fn s_get(
         offset: qparams.offset.map(|x| x as u32),
         parlament: qparams.p,
         wp: qparams.wp.map(|x| x as u32),
-        since: range.unwrap().0,
-        until: range.unwrap().1,
+        since: range.as_ref().unwrap().since,
+        until: range.unwrap().until,
         vgid: qparams.vgid,
     };
 
@@ -141,17 +139,16 @@ pub async fn s_get(
     let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
     tx.commit().await?;
     if result.is_empty() && header_params.if_modified_since.is_none() {
-        return Ok(
-            openapi::apis::default::SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters,
-        );
+        Ok(openapi::apis::default::SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
     } else if result.is_empty() && header_params.if_modified_since.is_some() {
-        return Ok(openapi::apis::default::SGetResponse::Status304_NoNewChanges);
-    }
-    return Ok(
+        Ok(openapi::apis::default::SGetResponse::Status304_NoNewChanges)
+    } else {
+        Ok(
         openapi::apis::default::SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(
             result,
         ),
-    );
+    )
+    }
 }
 
 pub async fn vorgang_id_put(
@@ -171,7 +168,7 @@ pub async fn vorgang_id_put(
     }
     match delete::delete_vorgang_by_api_id(api_id, server).await? {
         openapi::apis::default::VorgangDeleteResponse::Status204_DeletedSuccessfully => {
-            insert::insert_vorgang(&body, &mut tx, server).await?;
+            insert::insert_vorgang(body, &mut tx, server).await?;
         }
         _ => {
             unreachable!("If this is reached, some assumptions did not hold")
@@ -184,7 +181,7 @@ pub async fn vorgang_id_put(
 
 pub async fn vorgang_put(server: &LTZFServer, model: &models::Vorgang) -> Result<()> {
     tracing::trace!("api_v1_vorgang_put called");
-    merge::vorgang::run_integration(&model, server).await?;
+    merge::vorgang::run_integration(model, server).await?;
     Ok(())
 }
 
@@ -206,7 +203,7 @@ pub async fn s_id_put(
     }
     match delete::delete_ass_by_api_id(api_id, server).await? {
         SitzungDeleteResponse::Status204_DeletedSuccessfully => {
-            insert::insert_sitzung(&body, &mut tx, server).await?;
+            insert::insert_sitzung(body, &mut tx, server).await?;
         }
         _ => {
             unreachable!("If this is reached, some assumptions did not hold")

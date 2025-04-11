@@ -7,7 +7,6 @@ pub(crate) mod utils;
 use std::{num::NonZeroU64, sync::Arc};
 
 use clap::Parser;
-use sqlx;
 
 use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
@@ -79,8 +78,7 @@ impl Configuration {
         Ok(mailer)
     }
     pub fn init() -> Self {
-        let config = Configuration::parse();
-        config
+        Configuration::parse()
     }
 }
 
