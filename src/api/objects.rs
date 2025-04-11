@@ -14,9 +14,15 @@ pub async fn vg_id_get(
     path_params: &models::VorgangGetByIdPathParams,
 ) -> Result<models::Vorgang> {
     let mut tx = server.sqlx_db.begin().await?;
+    let _exists = sqlx::query!(
+        "SELECT 1 as out FROM vorgang WHERE api_id = $1",
+        path_params.vorgang_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let dbid = sqlx::query!(
         "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
-            SELECT 1 FROM station s WHERE s.zp_modifiziert > COALESCE($2, CAST('1940-01-01T00:00:00Z' AS TIMESTAMPTZ))
+            SELECT 1 FROM station s WHERE s.zp_modifiziert > COALESCE($2, CAST('1940-01-01T00:00:00Z' AS TIMESTAMPTZ)) AND s.vg_id = vorgang.id
         )",
         path_params.vorgang_id,
         header_params.if_modified_since

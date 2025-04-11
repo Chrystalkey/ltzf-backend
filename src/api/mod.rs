@@ -7,7 +7,7 @@ use axum_extra::extract::{Host, cookie::CookieJar};
 
 use crate::Result;
 use crate::db::delete::delete_ass_by_api_id;
-use crate::error::{DataValidationError, DatabaseError, LTZFError};
+use crate::error::{DataValidationError, LTZFError};
 use crate::utils::notify;
 use crate::{Configuration, db};
 
@@ -213,6 +213,10 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         header_params: &models::VorgangGetByIdHeaderParams,
         path_params: &models::VorgangGetByIdPathParams,
     ) -> Result<VorgangGetByIdResponse> {
+        tracing::trace!(
+            "vorgang_get_by_id called with id {}",
+            path_params.vorgang_id
+        );
         let vorgang = objects::vg_id_get(self, &header_params, &path_params).await;
 
         match vorgang {
@@ -220,9 +224,12 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
                 vorgang,
             )),
             Err(e) => match e {
+                LTZFError::Validation {
+                    source: crate::error::DataValidationError::QueryParametersNotSatisfied,
+                } => Ok(VorgangGetByIdResponse::Status304_NoNewChanges),
                 LTZFError::Database {
                     source:
-                        DatabaseError::Sqlx {
+                        crate::error::DatabaseError::Sqlx {
                             source: sqlx::Error::RowNotFound,
                         },
                 } => Ok(VorgangGetByIdResponse::Status404_ContentNotFound),

@@ -13,7 +13,7 @@ RUN adduser \
     --shell "/sbin/nologin" \
     --no-create-home \
     --uid 10001 \
-    "ltzf-database"
+    "ltzf-backend"
 
 WORKDIR /app
 
@@ -47,10 +47,10 @@ COPY --from=builder /usr/lib/x86_64-linux-gnu/libcrypto.so.* /usr/lib/
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libpq.so.* /usr/lib/
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libgcc_s.so.* /usr/lib
 
-COPY --from=builder --chmod=0100 --chown=ltzf-database:ltzf-database /app/target/release/ltzf-db /app/ltzf-db
+COPY --from=builder --chmod=0100 --chown=ltzf-backend:ltzf-backend /app/target/release/ltzf-backend /app/ltzf-backend
 
 WORKDIR /app
 
-USER ltzf-database
+USER ltzf-backend
 
-ENTRYPOINT ["./ltzf-db"]
+ENTRYPOINT ["./ltzf-backend"]
