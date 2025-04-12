@@ -58,7 +58,7 @@ jobs:
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: install sqlx cli
-        run: cargo install sqlx_cli
+        run: cargo install sqlx-cli  --no-default-features --features postgres,native-tls
 
       - name: Run cargo tests
         run: sqlx database setup && cargo test
