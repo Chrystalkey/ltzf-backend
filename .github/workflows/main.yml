@@ -57,6 +57,8 @@ jobs:
           override: true
       - name: Generate OAPI Code
         run: sh oapigen.sh
+      - name: install sqlx cli
+        run: cargo install sqlx_cli
 
       - name: Run cargo tests
         run: sqlx database setup && cargo test
