@@ -62,4 +62,4 @@ jobs:
         run: cargo test
         env:
           DATABASE_URL: postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf
-          SQLX_OFFLINE: true
+          SQLX_OFFLINE: false
