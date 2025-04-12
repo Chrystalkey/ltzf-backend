@@ -160,21 +160,28 @@ pub async fn vorgang_id_put(
     let api_id = path_params.vorgang_id;
     let db_id = sqlx::query!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
         .map(|x| x.id)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
-    let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
-    if db_cmpvg == *body {
-        return Ok(VorgangIdPutResponse::Status204_ContentUnchanged);
-    }
-    match delete::delete_vorgang_by_api_id(api_id, server).await? {
-        openapi::apis::default::VorgangDeleteResponse::Status204_DeletedSuccessfully => {
+    match db_id {
+        Some(db_id) => {
+            let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
+            if db_cmpvg == *body {
+                return Ok(VorgangIdPutResponse::Status204_ContentUnchanged);
+            }
+            match delete::delete_vorgang_by_api_id(api_id, server).await? {
+                openapi::apis::default::VorgangDeleteResponse::Status204_DeletedSuccessfully => {
+                    insert::insert_vorgang(body, &mut tx, server).await?;
+                }
+                _ => {
+                    unreachable!("If this is reached, some assumptions did not hold")
+                }
+            }
+        }
+        None => {
             insert::insert_vorgang(body, &mut tx, server).await?;
-        }
-        _ => {
-            unreachable!("If this is reached, some assumptions did not hold")
+            return Ok(VorgangIdPutResponse::Status201_Created);
         }
     }
-
     tx.commit().await?;
     Ok(VorgangIdPutResponse::Status201_Created)
 }
