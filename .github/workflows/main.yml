@@ -59,7 +59,7 @@ jobs:
         run: sh oapigen.sh
 
       - name: Run cargo tests
-        run: cargo test
+        run: sqlx database setup && cargo test
         env:
           DATABASE_URL: postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf
           SQLX_OFFLINE: false
