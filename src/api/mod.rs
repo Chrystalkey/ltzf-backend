@@ -403,6 +403,7 @@ mod endpoint_test {
     use super::*;
     use crate::{LTZFServer, Result};
     use axum_extra::extract::Host;
+    use chrono::Utc;
     use openapi::models;
     use sha256::digest;
     use uuid::Uuid;
@@ -575,15 +576,232 @@ mod endpoint_test {
     // Procedure (Vorgang) tests
     #[tokio::test]
     async fn test_vorgang_get_endpoints() {
+        // Setup test server and database
+        let server = setup_server("test_vorgang_get").await.unwrap();
+
         // Test cases for vorgang_get_by_id:
-        // - Get existing procedure
-        // - Get non-existent procedure
-        // - Get procedure with invalid ID
+        // 1. Get existing procedure
+        {
+            let test_vorgang = create_test_vorgang();
+            // First create the procedure
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutQueryParams {
+                        collector: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+
+            // Then get it by ID
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                VorgangGetByIdResponse::Status200_SuccessfulOperation(vorgang) => {
+                    assert_eq!(vorgang.api_id, test_vorgang.api_id);
+                    assert_eq!(vorgang.titel, test_vorgang.titel);
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // 2. Get non-existent procedure
+        {
+            let non_existent_id = Uuid::now_v7();
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: non_existent_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
+        }
+
+        // 3. Get procedure with invalid ID
+        {
+            let invalid_id = Uuid::nil();
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: invalid_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
+        }
 
         // Test cases for vorgang_get:
-        // - Get procedures with valid parameters
-        // - Get procedures with invalid parameters
-        // - Get procedures with filters
+        // 1. Get procedures with valid parameters
+        {
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: None,
+                        since: None,
+                        until: None,
+                        vgtyp: None,
+                        wp: None,
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(vorgange) => {
+                    assert!(!vorgange.is_empty());
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // 2. Get procedures with invalid parameters
+        {
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: None, // Invalid limit
+                        offset: None, // Invalid offset
+                        p: None,
+                        since: Some(Utc::now()),
+                        until: Some(Utc::now() - chrono::Duration::days(365)),
+                        vgtyp: None,
+                        wp: None,
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetResponse::Status416_RequestRangeNotSatisfiable);
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: None, // Invalid limit
+                        offset: None, // Invalid offset
+                        p: None,
+                        since: Some(Utc::now() + chrono::Duration::days(365)),
+                        until: Some(Utc::now() + chrono::Duration::days(366)),
+                        vgtyp: None,
+                        wp: None,
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+        }
+
+        // 3. Get procedures with filters
+        {
+            let test_vorgang = create_test_vorgang();
+            // First create a procedure with specific parameters
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutQueryParams {
+                        collector: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+
+            // Then get it with matching filters
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        vgtyp: Some(test_vorgang.typ),
+                        wp: Some(test_vorgang.wahlperiode as i32),
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(vorgange) => {
+                    assert!(!vorgange.is_empty());
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // Cleanup
+        cleanup_server("test_vorgang_get").await.unwrap();
     }
 
     #[tokio::test]
