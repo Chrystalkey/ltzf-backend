@@ -387,7 +387,7 @@ pub async fn sitzung_by_param(
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp = 		COALESCE($2, g.wp)
-        AND SIMILARITY(g.name, $7) > 0.66
+        AND (SIMILARITY(g.name, $7) > 0.66 OR $7 IS NULL)
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -404,11 +404,10 @@ pub async fn sitzung_by_param(
 SELECT * FROM pre_table WHERE
 lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
 lastmod < COALESCE($4, NOW()) AND
-EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id))
+(CAST ($8 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC
 OFFSET COALESCE($5, 0) 
-LIMIT COALESCE($6, 64)
-    ",
+LIMIT COALESCE($6, 64)",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
         params.since,
@@ -428,6 +427,7 @@ LIMIT COALESCE($6, 64)
     Ok(vector)
 }
 
+#[derive(Debug)]
 pub struct VGGetParameters {
     pub limit: Option<i32>,
     pub offset: Option<i32>,

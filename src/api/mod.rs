@@ -575,9 +575,9 @@ mod endpoint_test {
 
     // Procedure (Vorgang) tests
     #[tokio::test]
-    async fn test_vorgang_get_endpoints() {
+    async fn test_vorgang_get_by_id_endpoints() {
         // Setup test server and database
-        let server = setup_server("test_vorgang_get").await.unwrap();
+        let server = setup_server("test_vorgang_by_id_get").await.unwrap();
 
         // Test cases for vorgang_get_by_id:
         // 1. Get existing procedure
@@ -598,6 +598,7 @@ mod endpoint_test {
                 .await
                 .unwrap();
             assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
             // Then get it by ID
             let response = server
@@ -662,39 +663,34 @@ mod endpoint_test {
                 .unwrap();
             assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
         }
+        cleanup_server("test_vorgang_by_id_get").await.unwrap();
+    }
 
-        // Test cases for vorgang_get:
-        // 1. Get procedures with valid parameters
+    #[tokio::test]
+    async fn test_vorgang_get_filtered_endpoints() {
+        let server = setup_server("test_vorgang_get_filtered").await.unwrap();
+        let test_vorgang = create_test_vorgang();
+        // First create the procedure
         {
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
-                        if_modified_since: None,
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutQueryParams {
+                        collector: test_vorgang.api_id,
                     },
-                    &models::VorgangGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: None,
-                        since: None,
-                        until: None,
-                        vgtyp: None,
-                        wp: None,
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
-                    },
+                    &test_vorgang,
                 )
                 .await
                 .unwrap();
-            match response {
-                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(vorgange) => {
-                    assert!(!vorgange.is_empty());
-                }
-                _ => panic!("Expected successful operation response"),
-            }
+            assert_eq!(
+                create_response,
+                VorgangPutResponse::Status201_Success,
+                "Failed to create test procedure"
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         }
 
         // 2. Get procedures with invalid parameters
@@ -708,11 +704,11 @@ mod endpoint_test {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        limit: None, // Invalid limit
-                        offset: None, // Invalid offset
+                        limit: None,
+                        offset: None,
                         p: None,
                         since: Some(Utc::now()),
-                        until: Some(Utc::now() - chrono::Duration::days(365)),
+                        until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
                         vgtyp: None,
                         wp: None,
                         inifch: None,
@@ -722,7 +718,10 @@ mod endpoint_test {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, VorgangGetResponse::Status416_RequestRangeNotSatisfiable);
+            assert_eq!(
+                response,
+                VorgangGetResponse::Status416_RequestRangeNotSatisfiable
+            );
             let response = server
                 .vorgang_get(
                     &Method::GET,
@@ -732,7 +731,7 @@ mod endpoint_test {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        limit: None, // Invalid limit
+                        limit: None,  // Invalid limit
                         offset: None, // Invalid offset
                         p: None,
                         since: Some(Utc::now() + chrono::Duration::days(365)),
@@ -746,7 +745,10 @@ mod endpoint_test {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+            assert_eq!(
+                response,
+                VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
+            );
         }
 
         // 3. Get procedures with filters
@@ -767,6 +769,7 @@ mod endpoint_test {
                 .await
                 .unwrap();
             assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
             // Then get it with matching filters
             let response = server
@@ -793,15 +796,17 @@ mod endpoint_test {
                 .await
                 .unwrap();
             match response {
-                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(vorgange) => {
+                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(
+                    vorgange,
+                ) => {
                     assert!(!vorgange.is_empty());
                 }
-                _ => panic!("Expected successful operation response"),
+                response => panic!("Expected successful operation response, got {:?}", response),
             }
         }
 
         // Cleanup
-        cleanup_server("test_vorgang_get").await.unwrap();
+        cleanup_server("test_vorgang_get_filtered").await.unwrap();
     }
 
     #[tokio::test]
@@ -972,17 +977,272 @@ mod endpoint_test {
     }
 
     // Session (Sitzung) tests
+    fn create_test_session() -> models::Sitzung {
+        use chrono::{DateTime, Utc};
+        use openapi::models::{Autor, DokRef, Dokument, Gremium, Parlament, Sitzung, Top};
+        use uuid::Uuid;
+
+        // Create a test document
+        let test_doc = Dokument {
+            api_id: Some(Uuid::now_v7()),
+            titel: "Test Document".to_string(),
+            kurztitel: None,
+            vorwort: Some("Test Vorwort".to_string()),
+            volltext: "Test Volltext".to_string(),
+            zusammenfassung: None,
+            typ: openapi::models::Doktyp::Entwurf,
+            link: "http://example.com/doc".to_string(),
+            hash: "testhash".to_string(),
+            zp_modifiziert: DateTime::from(Utc::now()),
+            drucksnr: None,
+            zp_referenz: DateTime::from(Utc::now()),
+            zp_erstellt: Some(DateTime::from(Utc::now())),
+            meinung: None,
+            schlagworte: None,
+            autoren: vec![Autor {
+                person: Some("Test Person".to_string()),
+                organisation: "Test Organization".to_string(),
+                fachgebiet: Some("Test Fachgebiet".to_string()),
+                lobbyregister: None,
+            }],
+        };
+
+        // Create a test top
+        let test_top = Top {
+            titel: "Test Top".to_string(),
+            dokumente: Some(vec![DokRef::Dokument(Box::new(test_doc))]),
+            nummer: 1,
+            vorgang_id: None,
+        };
+
+        // Create a test expert
+        let test_expert = Autor {
+            person: Some("Test Expert".to_string()),
+            organisation: "Test Expert Organization".to_string(),
+            fachgebiet: Some("Test Expert Fachgebiet".to_string()),
+            lobbyregister: None,
+        };
+
+        // Create and return the test Sitzung
+        Sitzung {
+            api_id: Some(Uuid::now_v7()),
+            nummer: 1,
+            titel: Some("Test Sitzung".to_string()),
+            public: true,
+            termin: DateTime::from(Utc::now()),
+            gremium: Gremium {
+                name: "Test Gremium".to_string(),
+                link: Some("http://example.com/gremium".to_string()),
+                wahlperiode: 20,
+                parlament: Parlament::Bt,
+            },
+            tops: vec![test_top],
+            link: Some("http://example.com/sitzung".to_string()),
+            experten: Some(vec![test_expert]),
+            dokumente: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_session_get_endpoints() {
+        // Setup test server and database
+        let server = setup_server("test_session_get").await.unwrap();
+
         // Test cases for s_get_by_id:
-        // - Get existing session
-        // - Get non-existent session
-        // - Get session with invalid ID
+        // 1. Get existing session
+        {
+            let test_session = create_test_session();
+            // First create the session
+            let create_response = server
+                .sid_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::SidPutPathParams {
+                        sid: test_session.api_id.unwrap(),
+                    },
+                    &test_session,
+                )
+                .await
+                .unwrap();
+            assert_eq!(create_response, SidPutResponse::Status201_Created);
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+            // Then get it by ID
+            let response = server
+                .s_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetByIdPathParams {
+                        sid: test_session.api_id.unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                SGetByIdResponse::Status200_SuccessfulOperation(session) => {
+                    assert_eq!(session.api_id, test_session.api_id);
+                    assert_eq!(session.titel, test_session.titel);
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // 2. Get non-existent session
+        {
+            let non_existent_id = Uuid::now_v7();
+            let response = server
+                .s_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetByIdPathParams {
+                        sid: non_existent_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetByIdResponse::Status404_ContentNotFound);
+        }
+
+        // 3. Get session with invalid ID
+        {
+            let invalid_id = Uuid::nil();
+            let response = server
+                .s_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetByIdPathParams {
+                        sid: invalid_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetByIdResponse::Status404_ContentNotFound);
+        }
 
         // Test cases for s_get:
-        // - Get sessions with valid parameters
-        // - Get sessions with invalid parameters
-        // - Get sessions with filters
+        // 1. Get sessions with valid parameters
+        {
+            let response = server
+                .s_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetQueryParams {
+                        limit: None,
+                        offset: None,
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        wp: Some(20),
+                        vgid: None,
+                        vgtyp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
+                    assert!(!sessions.is_empty());
+                }
+                rsp => panic!("Expected successful operation response, got {:?}", rsp),
+            }
+        }
+
+        // 2. Get sessions with invalid parameters
+        {
+            let response = server
+                .s_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetQueryParams {
+                        limit: None,
+                        offset: None,
+                        p: None,
+                        since: Some(Utc::now()),
+                        until: Some(Utc::now() - chrono::Duration::days(365)),
+                        wp: None,
+                        vgid: None,
+                        vgtyp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetResponse::Status416_RequestRangeNotSatisfiable);
+        }
+
+        // 3. Get sessions with filters
+        {
+            let test_session = create_test_session();
+            // First create a session with specific parameters
+            let create_response = server
+                .sid_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::SidPutPathParams {
+                        sid: test_session.api_id.unwrap(),
+                    },
+                    &test_session,
+                )
+                .await
+                .unwrap();
+            assert_eq!(create_response, SidPutResponse::Status201_Created);
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+            // Then get it with matching filters
+            let response = server
+                .s_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        wp: Some(20),
+                        vgid: None,
+                        vgtyp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
+                    assert!(!sessions.is_empty());
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // Cleanup
+        cleanup_server("test_session_get").await.unwrap();
     }
 
     #[tokio::test]
