@@ -402,7 +402,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
 #[cfg(test)]
 mod endpoint_test {
     use super::*;
-    use crate::{LTZFServer, Result, db::retrieve::SitzungFilterParameters};
+    use crate::{LTZFServer, Result};
     use axum_extra::extract::Host;
     use chrono::Utc;
     use openapi::models;
