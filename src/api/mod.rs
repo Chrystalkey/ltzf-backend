@@ -6,7 +6,7 @@ use axum::http::Method;
 use axum_extra::extract::{Host, cookie::CookieJar};
 
 use crate::Result;
-use crate::db::delete::delete_ass_by_api_id;
+use crate::db::delete::delete_sitzung_by_api_id;
 use crate::error::{DataValidationError, LTZFError};
 use crate::utils::notify;
 use crate::{Configuration, db};
@@ -15,6 +15,7 @@ use openapi::apis::default::*;
 use openapi::models;
 
 mod auth;
+mod compare;
 mod kalender;
 mod objects;
 
@@ -345,7 +346,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
         }
-        Ok(delete_ass_by_api_id(path_params.sid, self).await?)
+        Ok(delete_sitzung_by_api_id(path_params.sid, self).await?)
     }
 
     #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
@@ -401,7 +402,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
 #[cfg(test)]
 mod endpoint_test {
     use super::*;
-    use crate::{LTZFServer, Result};
+    use crate::{LTZFServer, Result, db::retrieve::SitzungFilterParameters};
     use axum_extra::extract::Host;
     use chrono::Utc;
     use openapi::models;
@@ -1124,9 +1125,7 @@ mod endpoint_test {
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
-                    &models::SGetByIdPathParams {
-                        sid: invalid_id,
-                    },
+                    &models::SGetByIdPathParams { sid: invalid_id },
                 )
                 .await
                 .unwrap();
@@ -1247,14 +1246,157 @@ mod endpoint_test {
 
     #[tokio::test]
     async fn test_session_modify_endpoints() {
-        // Test cases for sid_put:
-        // - Update existing session with valid data
+        let server = setup_server("session_modify_ep").await.unwrap();
+        let sitzung = create_test_session();
+        // - Input non-existing session
+        {
+            let response = server
+                .sid_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::SidPutPathParams {
+                        sid: sitzung.api_id.unwrap(),
+                    },
+                    &sitzung,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SidPutResponse::Status201_Created);
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        }
+
+        // - Update existing session with the same data
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: sitzung.api_id.unwrap(),
+                },
+                &sitzung,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            SidPutResponse::Status204_NotModified,
+            "Failed to update existing session with the same data.\nInput:  {:?}\n\n Output: {:?}",
+            sitzung,
+            server
+                .s_get_by_id(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetByIdHeaderParams {
+                        if_modified_since: None
+                    },
+                    &models::SGetByIdPathParams {
+                        sid: sitzung.api_id.unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        // - Update existing session with valid new data
+        let rsp_new = models::Sitzung {
+            link: Some("https://example.com/a/b/c".to_string()),
+            ..sitzung.clone()
+        };
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: sitzung.api_id.unwrap(),
+                },
+                &rsp_new,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, SidPutResponse::Status201_Created);
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
         // - Update session with insufficient permissions
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Collector, 1),
+                &models::SidPutPathParams {
+                    sid: sitzung.api_id.unwrap(),
+                },
+                &sitzung,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
 
         // Test cases for sitzung_delete:
-        // - Delete existing session with proper permissions
-        // - Delete non-existent session
-        // - Delete session with insufficient permissions
+        {
+            // - Delete existing session with proper permissions
+            let response = server
+                .sitzung_delete(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::KeyAdder, 1),
+                    &models::SitzungDeletePathParams {
+                        sid: sitzung.api_id.unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                SitzungDeleteResponse::Status204_DeletedSuccessfully
+            );
+
+            // - Delete non-existent session
+            let response = server
+                .sitzung_delete(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::KeyAdder, 1),
+                    &models::SitzungDeletePathParams {
+                        sid: sitzung.api_id.unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                SitzungDeleteResponse::Status404_NoElementWithThisID
+            );
+
+            // - Delete session with insufficient permissions
+            let response = server
+                .sitzung_delete(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::SitzungDeletePathParams {
+                        sid: sitzung.api_id.unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid
+            );
+        }
+        cleanup_server("session_modify_ep").await.unwrap();
     }
 
     fn create_test_vorgang() -> models::Vorgang {

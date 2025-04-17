@@ -321,7 +321,8 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     // experten
     let experten = sqlx::query!(
         "SELECT a.* FROM rel_sitzung_experten rae 
-        INNER JOIN autor a ON rae.sid = $1 
+        INNER JOIN autor a ON rae.eid = a.id
+		WHERE rae.sid = $1
         ORDER BY a.organisation ASC, a.person ASC",
         id
     )

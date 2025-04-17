@@ -6,6 +6,7 @@ use openapi::{
     models,
 };
 
+use super::compare::*;
 use super::kalender::find_applicable_date_range;
 
 pub async fn vg_id_get(
@@ -172,7 +173,7 @@ pub async fn vorgang_id_put(
     match db_id {
         Some(db_id) => {
             let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
-            if db_cmpvg == *body {
+            if compare_vorgang(&db_cmpvg, body) {
                 return Ok(VorgangIdPutResponse::Status204_ContentUnchanged);
             }
             match delete::delete_vorgang_by_api_id(api_id, server).await? {
@@ -186,7 +187,6 @@ pub async fn vorgang_id_put(
         }
         None => {
             insert::insert_vorgang(body, &mut tx, server).await?;
-            return Ok(VorgangIdPutResponse::Status201_Created);
         }
     }
     tx.commit().await?;
@@ -194,7 +194,6 @@ pub async fn vorgang_id_put(
 }
 
 pub async fn vorgang_put(server: &LTZFServer, model: &models::Vorgang) -> Result<()> {
-    tracing::trace!("api_v1_vorgang_put called");
     merge::vorgang::run_integration(model, server).await?;
     Ok(())
 }
@@ -213,10 +212,10 @@ pub async fn s_id_put(
         .await?;
     if let Some(db_id) = db_id {
         let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
-        if db_cmpvg == *body {
+        if compare_sitzung(&db_cmpvg, body) {
             return Ok(SidPutResponse::Status204_NotModified);
         }
-        match delete::delete_ass_by_api_id(api_id, server).await? {
+        match delete::delete_sitzung_by_api_id(api_id, server).await? {
             SitzungDeleteResponse::Status204_DeletedSuccessfully => {
                 insert::insert_sitzung(body, &mut tx, server).await?;
             }
