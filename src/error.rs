@@ -7,7 +7,7 @@ macro_rules! error_from {
         impl From<$from> for LTZFError {
             fn from(source: $from) -> Self {
                 Self::$to {
-                    source: $suberr::$variant { source },
+                    source: Box::new($suberr::$variant { source }),
                 }
             }
         }
@@ -98,7 +98,7 @@ pub enum InfrastructureError {
     #[snafu(display("Configuration error: {message}"))]
     Configuration {
         message: String,
-        config: crate::Configuration,
+        config: Box<crate::Configuration>,
     },
 }
 
@@ -126,40 +126,48 @@ error_from!(
 #[snafu(visibility(pub))]
 pub enum LTZFError {
     #[snafu(display("Validation error: {source}"))]
-    Validation { source: DataValidationError },
+    Validation { source: Box<DataValidationError> },
 
     #[snafu(display("Database error: {source}"))]
-    Database { source: DatabaseError },
+    Database { source: Box<DatabaseError> },
 
     #[snafu(display("Infrastructure error: {source}"))]
-    Infrastructure { source: InfrastructureError },
+    Infrastructure { source: Box<InfrastructureError> },
 
     #[snafu(display("HTTP header conversion error: {source}"))]
     HeaderConversion {
-        source: axum::http::header::ToStrError,
+        source: Box<axum::http::header::ToStrError>,
     },
-
+    #[allow(clippy::box_collection)]
     #[snafu(display("{message}"))]
-    Other { message: String },
+    Other { message: Box<String> },
 }
 impl From<DataValidationError> for LTZFError {
     fn from(source: DataValidationError) -> Self {
-        Self::Validation { source }
+        Self::Validation {
+            source: Box::new(source),
+        }
     }
 }
 impl From<DatabaseError> for LTZFError {
     fn from(source: DatabaseError) -> Self {
-        Self::Database { source }
+        Self::Database {
+            source: Box::new(source),
+        }
     }
 }
 impl From<InfrastructureError> for LTZFError {
     fn from(source: InfrastructureError) -> Self {
-        Self::Infrastructure { source }
+        Self::Infrastructure {
+            source: Box::new(source),
+        }
     }
 }
 impl From<axum::http::header::ToStrError> for LTZFError {
     fn from(source: axum::http::header::ToStrError) -> Self {
-        Self::HeaderConversion { source }
+        Self::HeaderConversion {
+            source: Box::new(source),
+        }
     }
 }
 
@@ -167,7 +175,7 @@ impl From<axum::http::header::ToStrError> for LTZFError {
 impl LTZFError {
     pub fn other<T: Into<String>>(message: T) -> Self {
         LTZFError::Other {
-            message: message.into(),
+            message: Box::new(message.into()),
         }
     }
 }

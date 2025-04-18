@@ -58,7 +58,7 @@ BEGIN
     -- Check if the autor is still referenced in either table
     IF NOT EXISTS (
         SELECT 1 FROM rel_sitzung_experten WHERE eid = OLD.eid
-    ) THEN DELETE FROM autor WHERE id = OLD.id;
+    ) THEN DELETE FROM autor WHERE id = OLD.eid;
     END IF;
     
     RETURN NULL; -- AFTER trigger should return NULL

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT a.* FROM rel_sitzung_experten rae \n        INNER JOIN autor a ON rae.sid = $1 \n        ORDER BY a.organisation ASC, a.person ASC",
+  "query": "SELECT a.* FROM rel_sitzung_experten rae \n        INNER JOIN autor a ON rae.eid = a.id\n\t\tWHERE rae.sid = $1\n        ORDER BY a.organisation ASC, a.person ASC",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       true
     ]
   },
-  "hash": "f38d27a68445849044990224dcd493872e87b4bc7500443512834f4055af46fc"
+  "hash": "e203bbf5e3e5f3d09b94345e60c7d720f84ff921a13f640221db2345a7a88242"
 }

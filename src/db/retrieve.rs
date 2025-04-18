@@ -51,13 +51,12 @@ pub async fn vorgang_by_id(
         id
     )
     .map(|row| models::VgIdent {
-        typ: models::VgIdentTyp::from_str(row.typ.as_str()).expect(
-            format!(
+        typ: models::VgIdentTyp::from_str(row.typ.as_str()).unwrap_or_else(|_| {
+            panic!(
                 "Could not convert database value `{}`into VgIdentTyp Variant",
                 row.typ
             )
-            .as_str(),
-        ),
+        }),
         id: row.ident,
     })
     .fetch_all(&mut **executor)
@@ -85,7 +84,7 @@ pub async fn vorgang_by_id(
         initiatoren: init_inst,
         ids: Some(ids),
         links: Some(links),
-        stationen: stationen,
+        stationen,
     })
 }
 
@@ -161,7 +160,7 @@ pub async fn station_by_id(
     .fetch_optional(&mut **executor)
     .await?;
 
-    return Ok(models::Station {
+    Ok(models::Station {
         parlament: models::Parlament::from_str(temp_stat.parlv.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
@@ -179,7 +178,7 @@ pub async fn station_by_id(
         link: temp_stat.link,
         additional_links: as_option(add_links),
         gremium_federf: temp_stat.gremium_isff,
-    });
+    })
 }
 
 pub async fn dokument_by_id(
@@ -222,7 +221,7 @@ pub async fn dokument_by_id(
     .fetch_all(&mut **executor)
     .await?;
 
-    return Ok(models::Dokument {
+    Ok(models::Dokument {
         api_id: Some(rec.api_id),
         titel: rec.titel,
         kurztitel: rec.kurztitel,
@@ -242,7 +241,7 @@ pub async fn dokument_by_id(
         typ: models::Doktyp::from_str(rec.typ_value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         drucksnr: rec.drucksnr,
-    });
+    })
 }
 
 /// the crucial part is how to find out which vg are connected to a DRCKS
@@ -288,12 +287,12 @@ EXISTS ( 									-- mit denen mindestens ein dokument assoziiert ist, dass hier
     .fetch_all(&mut **tx)
     .await?;
 
-    return Ok(models::Top {
+    Ok(models::Top {
         nummer: scaffold.nummer as u32,
         titel: scaffold.titel,
         dokumente: as_option(doks),
         vorgang_id: as_option(vgs),
-    });
+    })
 }
 
 pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<models::Sitzung> {
@@ -322,7 +321,8 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     // experten
     let experten = sqlx::query!(
         "SELECT a.* FROM rel_sitzung_experten rae 
-        INNER JOIN autor a ON rae.sid = $1 
+        INNER JOIN autor a ON rae.eid = a.id
+		WHERE rae.sid = $1
         ORDER BY a.organisation ASC, a.person ASC",
         id
     )
@@ -347,7 +347,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         doks.push(dokument_by_id(d, tx).await?);
     }
 
-    return Ok(models::Sitzung {
+    Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
         nummer: scaffold.nummer as u32,
         titel: scaffold.titel,
@@ -363,7 +363,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         link: scaffold.as_link,
         experten: as_option(experten),
         dokumente: as_option(doks),
-    });
+    })
 }
 
 pub struct SitzungFilterParameters {
@@ -388,7 +388,7 @@ pub async fn sitzung_by_param(
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp = 		COALESCE($2, g.wp)
-        AND SIMILARITY(g.name, $7) > 0.66
+        AND (SIMILARITY(g.name, $7) > 0.66 OR $7 IS NULL)
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -405,11 +405,10 @@ pub async fn sitzung_by_param(
 SELECT * FROM pre_table WHERE
 lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
 lastmod < COALESCE($4, NOW()) AND
-EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id))
+(CAST ($8 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC
 OFFSET COALESCE($5, 0) 
-LIMIT COALESCE($6, 64)
-    ",
+LIMIT COALESCE($6, 64)",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
         params.since,
@@ -426,9 +425,10 @@ LIMIT COALESCE($6, 64)
     for id in as_list {
         vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
     }
-    return Ok(vector);
+    Ok(vector)
 }
 
+#[derive(Debug)]
 pub struct VGGetParameters {
     pub limit: Option<i32>,
     pub offset: Option<i32>,

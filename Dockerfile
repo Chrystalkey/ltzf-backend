@@ -13,7 +13,7 @@ RUN adduser \
     --shell "/sbin/nologin" \
     --no-create-home \
     --uid 10001 \
-    "ltzf-database"
+    "ltzf-backend"
 
 WORKDIR /app
 
@@ -30,25 +30,27 @@ COPY ./migrations ./migrations
 ENV SQLX_OFFLINE=true
 RUN touch src/main.rs && cargo build --release
 
-FROM rust:1.86-slim-bookworm AS runner
+FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the LTZF"
-LABEL version="0.2.1"
+LABEL version="0.2.2"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1
 
-RUN apt update \
-&&  apt install -y --no-install-recommends libssl-dev libpq5 \
-&&  rm -rf /var/lib/apt/lists/*
-
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
-COPY --from=builder --chmod=0100 --chown=ltzf-database:ltzf-database /app/target/release/ltzf-db /app/ltzf-db
+
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libssl.so.* /usr/lib/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libcrypto.so.* /usr/lib/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libpq.so.* /usr/lib/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libgcc_s.so.* /usr/lib
+
+COPY --from=builder --chmod=0100 --chown=ltzf-backend:ltzf-backend /app/target/release/ltzf-backend /app/ltzf-backend
 
 WORKDIR /app
 
-USER ltzf-database
+USER ltzf-backend
 
-ENTRYPOINT ["./ltzf-db"]
+ENTRYPOINT ["./ltzf-backend"]

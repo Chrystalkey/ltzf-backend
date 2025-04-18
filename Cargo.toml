@@ -1,6 +1,6 @@
 [package]
-name = "ltzf-db"
-version = "0.2.1"
+name = "ltzf-backend"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.86"
 authors = ["Benedikt Schäfer"]
