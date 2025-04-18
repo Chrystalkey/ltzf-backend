@@ -813,7 +813,7 @@ mod endpoint_test {
                 _ => panic!("Expected to find sessions in date range"),
             }
         }
-        
+
         // TODO: Test for Status304_NotModified with set If-Modified-Since Header
         // TODO: Test for Status204_NoContent
 
@@ -910,20 +910,20 @@ mod endpoint_test {
             assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
         }
         let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: Some(chrono::Utc::now()),
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
+            .vorgang_get_by_id(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::VorgangGetByIdHeaderParams {
+                    if_modified_since: Some(chrono::Utc::now()),
+                },
+                &models::VorgangGetByIdPathParams {
+                    vorgang_id: test_vorgang.api_id,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
         cleanup_server("test_vorgang_by_id_get").await.unwrap();
     }
 
@@ -1609,7 +1609,10 @@ mod endpoint_test {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+            assert_eq!(
+                response,
+                SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
+            );
         }
         // Cleanup
         cleanup_server("test_session_get").await.unwrap();
