@@ -693,6 +693,7 @@ mod endpoint_test {
                 .unwrap();
             assert_eq!(response, KalDateGetResponse::Status404_NotFound);
         }
+        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
 
         // Test cases for kal_get:
         // 1. Get calendar entries with valid parameters
@@ -812,6 +813,9 @@ mod endpoint_test {
                 _ => panic!("Expected to find sessions in date range"),
             }
         }
+        
+        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
+        // TODO: Test for Status204_NoContent
 
         // Cleanup
         cleanup_server("test_calendar").await.unwrap();
@@ -823,28 +827,26 @@ mod endpoint_test {
         // Setup test server and database
         let server = setup_server("test_vorgang_by_id_get").await.unwrap();
 
+        let test_vorgang = create_test_vorgang();
+        // First create the procedure
+        let create_response = server
+            .vorgang_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Collector, 1),
+                &models::VorgangPutQueryParams {
+                    collector: test_vorgang.api_id,
+                },
+                &test_vorgang,
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         // Test cases for vorgang_get_by_id:
         // 1. Get existing procedure
         {
-            let test_vorgang = create_test_vorgang();
-            // First create the procedure
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutQueryParams {
-                        collector: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
-            // Then get it by ID
             let response = server
                 .vorgang_get_by_id(
                     &Method::GET,
@@ -907,6 +909,21 @@ mod endpoint_test {
                 .unwrap();
             assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
         }
+        let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: Some(chrono::Utc::now()),
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
         cleanup_server("test_vorgang_by_id_get").await.unwrap();
     }
 
@@ -1343,28 +1360,26 @@ mod endpoint_test {
         // Setup test server and database
         let server = setup_server("test_session_get").await.unwrap();
 
+        let test_session = create_test_session();
+        // First create the session
+        let create_response = server
+            .sid_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: test_session.api_id.unwrap(),
+                },
+                &test_session,
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response, SidPutResponse::Status201_Created);
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         // Test cases for s_get_by_id:
         // 1. Get existing session
         {
-            let test_session = create_test_session();
-            // First create the session
-            let create_response = server
-                .sid_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::SidPutPathParams {
-                        sid: test_session.api_id.unwrap(),
-                    },
-                    &test_session,
-                )
-                .await
-                .unwrap();
-            assert_eq!(create_response, SidPutResponse::Status201_Created);
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
-            // Then get it by ID
             let response = server
                 .s_get_by_id(
                     &Method::GET,
@@ -1425,6 +1440,23 @@ mod endpoint_test {
                 .unwrap();
             assert_eq!(response, SGetByIdResponse::Status404_ContentNotFound);
         }
+        {
+            let response = server
+                .s_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetByIdHeaderParams {
+                        if_modified_since: Some(chrono::Utc::now()),
+                    },
+                    &models::SGetByIdPathParams {
+                        sid: test_session.api_id.unwrap(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetByIdResponse::Status304_NotModified);
+        }
 
         // Test cases for s_get:
         // 1. Get sessions with valid parameters
@@ -1484,27 +1516,25 @@ mod endpoint_test {
             assert_eq!(response, SGetResponse::Status416_RequestRangeNotSatisfiable);
         }
 
+        let test_session = create_test_session();
+        // First create a session with specific parameters
+        let create_response = server
+            .sid_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::SidPutPathParams {
+                    sid: test_session.api_id.unwrap(),
+                },
+                &test_session,
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response, SidPutResponse::Status201_Created);
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         // 3. Get sessions with filters
         {
-            let test_session = create_test_session();
-            // First create a session with specific parameters
-            let create_response = server
-                .sid_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::SidPutPathParams {
-                        sid: test_session.api_id.unwrap(),
-                    },
-                    &test_session,
-                )
-                .await
-                .unwrap();
-            assert_eq!(create_response, SidPutResponse::Status201_Created);
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
-            // Then get it with matching filters
             let response = server
                 .s_get(
                     &Method::GET,
@@ -1533,7 +1563,54 @@ mod endpoint_test {
                 _ => panic!("Expected successful operation response"),
             }
         }
-
+        {
+            let response = server
+                .s_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetHeaderParams {
+                        if_modified_since: Some(chrono::Utc::now()),
+                    },
+                    &models::SGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        wp: Some(20),
+                        vgid: None,
+                        vgtyp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetResponse::Status304_NoNewChanges);
+        }
+        {
+            let response = server
+                .s_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::SGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::SGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        wp: Some(22),
+                        vgid: None,
+                        vgtyp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters);
+        }
         // Cleanup
         cleanup_server("test_session_get").await.unwrap();
     }

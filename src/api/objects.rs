@@ -109,6 +109,8 @@ pub async fn s_get_by_id(
         let result = retrieve::sitzung_by_id(id, &mut tx).await?;
         tx.commit().await?;
         Ok(SGetByIdResponse::Status200_SuccessfulOperation(result))
+    } else if header_params.if_modified_since.is_some() {
+        Ok(SGetByIdResponse::Status304_NotModified)
     } else {
         Err(crate::error::LTZFError::Validation {
             source: Box::new(crate::error::DataValidationError::QueryParametersNotSatisfied),
