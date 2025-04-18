@@ -405,7 +405,7 @@ mod endpoint_test {
     use crate::{LTZFServer, Result};
     use axum_extra::extract::Host;
     use chrono::Utc;
-    use openapi::models;
+    use openapi::models::{self, VorgangIdPutPathParams, VorgangPutQueryParams};
     use sha256::digest;
     use uuid::Uuid;
     const MASTER_URL: &str = "postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf";
@@ -814,6 +814,8 @@ mod endpoint_test {
     async fn test_vorgang_put_endpoint() {
         // Setup test server and database
         let server = setup_server("test_vorgang_put").await.unwrap();
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
 
         // Test cases for vorgang_id_put:
         // 1. Update existing procedure with valid data and admin permissions
@@ -822,8 +824,8 @@ mod endpoint_test {
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
+                    &host,
+                    &cookies,
                     &(auth::APIScope::Admin, 1),
                     &models::VorgangIdPutPathParams {
                         vorgang_id: test_vorgang.api_id,
@@ -841,8 +843,8 @@ mod endpoint_test {
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
+                    &host,
+                    &cookies,
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangIdPutPathParams {
                         vorgang_id: test_vorgang.api_id,
@@ -864,8 +866,8 @@ mod endpoint_test {
             let response = server
                 .vorgang_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
+                    &host,
+                    &cookies,
                     &(auth::APIScope::Collector, 1),
                     &models::VorgangPutQueryParams {
                         collector: test_vorgang.api_id,
@@ -879,7 +881,56 @@ mod endpoint_test {
 
         // 2. Handle ambiguous matches (conflict)
         {
-            // TODO
+            let vg1 = create_test_vorgang();
+            let mut vg2 = vg1.clone();
+            let mut vg3 = vg1.clone();
+            vg2.api_id = Uuid::now_v7();
+            vg3.api_id = Uuid::now_v7();
+
+            let rsp1 = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangIdPutPathParams {
+                        vorgang_id: vg1.api_id,
+                    },
+                    &vg1,
+                )
+                .await
+                .unwrap();
+            assert_eq!(rsp1, VorgangIdPutResponse::Status201_Created);
+
+            let rsp2 = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangIdPutPathParams {
+                        vorgang_id: vg2.api_id,
+                    },
+                    &vg2,
+                )
+                .await
+                .unwrap();
+            assert_eq!(rsp2, VorgangIdPutResponse::Status201_Created);
+
+            let conflict_resp = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangPutQueryParams {
+                        collector: Uuid::nil(),
+                    },
+                    &vg3,
+                )
+                .await
+                .unwrap();
+            assert_eq!(conflict_resp, VorgangPutResponse::Status409_Conflict);
         }
 
         // Cleanup

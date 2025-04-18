@@ -582,8 +582,25 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
                 "Ambiguous matches for Vorgang with api_id: {:?}",
                 model.api_id
             );
+            tracing::warn!("Transaction not committed, administrators notified");
             tracing::debug!("Details:  {:?} \n\n {:?}", model, many);
-            unimplemented!("Notify Admins via $WAY");
+            let api_ids = sqlx::query!(
+                "SELECT api_id FROM vorgang WHERE id=ANY($1::int4[])",
+                &many[..]
+            )
+            .map(|r| r.api_id)
+            .fetch_all(&mut *tx)
+            .await?;
+            notify_ambiguous_match(api_ids, model, "merging vorgang", server)?;
+            tx.rollback().await?;
+            return Err(DataValidationError::AmbiguousMatch {
+                message: format!(
+                    "Tried to merge object with id `{}`, found {} matching VGs.",
+                    model.api_id,
+                    many.len()
+                ),
+            }
+            .into());
         }
     }
     tx.commit().await?;
