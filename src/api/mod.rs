@@ -559,19 +559,262 @@ mod endpoint_test {
     // Calendar tests
     #[tokio::test]
     async fn test_calendar_endpoints() {
+        // Setup test server and database
+        let server = setup_server("test_calendar").await.unwrap();
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
+
+        // Create test calendar entry
+        let test_date = chrono::Utc::now().date_naive();
+        let recent_date = test_date; // Define recent_date at the same scope level
+        let test_session = create_test_session();
+        let test_sessions = vec![test_session.clone()];
+
         // Test cases for kal_date_put:
-        // - Update calendar entry with valid data
-        // - Update calendar entry with insufficient permissions
-        // - Update calendar entry with date constraints
+        // 1. Update calendar entry with valid data and proper permissions
+        {
+            let response = server
+                .kal_date_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Admin, 1),
+                    &models::KalDatePutPathParams {
+                        datum: test_date,
+                        parlament: models::Parlament::Bt,
+                    },
+                    &test_sessions,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, KalDatePutResponse::Status201_Created);
+            // Allow time for database operations to complete
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+
+        // 2. Update calendar entry with insufficient permissions
+        {
+            let response = server
+                .kal_date_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Collector, 1), // Using Collector scope with old date should fail
+                    &models::KalDatePutPathParams {
+                        datum: test_date.checked_sub_days(chrono::Days::new(5)).unwrap(), // Date more than 1 day old
+                        parlament: models::Parlament::Bt,
+                    },
+                    &test_sessions,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                KalDatePutResponse::Status401_APIKeyIsMissingOrInvalid
+            );
+        }
+
+        // 3. Update calendar entry with date constraints (collector is allowed to update recent dates)
+        {
+            // Use the already defined recent_date variable instead of redefining it
+            let response = server
+                .kal_date_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Collector, 1),
+                    &models::KalDatePutPathParams {
+                        datum: recent_date,
+                        parlament: models::Parlament::Bt,
+                    },
+                    &test_sessions,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, KalDatePutResponse::Status201_Created);
+            // Allow time for database operations to complete
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
 
         // Test cases for kal_date_get:
-        // - Get calendar entry for valid date and parliament
-        // - Get calendar entry for non-existent date
+        // 1. Get calendar entry for valid date and parliament
+        {
+            let response = server
+                .kal_date_get(
+                    &Method::GET,
+                    &host,
+                    &cookies,
+                    &models::KalDateGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::KalDateGetPathParams {
+                        datum: recent_date,
+                        parlament: models::Parlament::Bt,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                KalDateGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(
+                    sessions,
+                ) => {
+                    assert!(
+                        !sessions.is_empty(),
+                        "Expected to find at least one session"
+                    );
+                    assert_eq!(sessions[0].gremium.parlament, models::Parlament::Bt);
+                    assert_eq!(
+                        sessions[0].termin.date_naive(),
+                        recent_date,
+                        "Expected to find a session with the requested date"
+                    );
+                }
+                _ => panic!("Expected to find sessions for the valid date"),
+            }
+        }
+
+        // 2. Get calendar entry for non-existent date
+        {
+            let non_existent_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+            let response = server
+                .kal_date_get(
+                    &Method::GET,
+                    &host,
+                    &cookies,
+                    &models::KalDateGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::KalDateGetPathParams {
+                        datum: non_existent_date,
+                        parlament: models::Parlament::Bt,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, KalDateGetResponse::Status404_NotFound);
+        }
 
         // Test cases for kal_get:
-        // - Get calendar entries with valid parameters
-        // - Get calendar entries with invalid parameters
-        // - Get calendar entries with date range
+        // 1. Get calendar entries with valid parameters
+        {
+            let response = server
+                .kal_get(
+                    &Method::GET,
+                    &host,
+                    &cookies,
+                    &models::KalGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::KalGetQueryParams {
+                        y: Some(recent_date.format("%Y").to_string().parse::<i32>().unwrap()),
+                        m: Some(recent_date.format("%m").to_string().parse::<i32>().unwrap()),
+                        dom: None,
+                        gr: None,
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        wp: Some(20),
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
+                    assert!(
+                        !sessions.is_empty(),
+                        "Expected to find sessions with valid filters"
+                    );
+                }
+                _ => panic!("Expected to find sessions with valid filters"),
+            }
+        }
+
+        // 2. Get calendar entries with invalid parameters (since > until)
+        {
+            let response = server
+                .kal_get(
+                    &Method::GET,
+                    &host,
+                    &cookies,
+                    &models::KalGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::KalGetQueryParams {
+                        y: None,
+                        m: None,
+                        dom: None,
+                        gr: None,
+                        limit: None,
+                        offset: None,
+                        p: None,
+                        since: Some(chrono::Utc::now()),
+                        until: Some(chrono::Utc::now() - chrono::Duration::days(1)), // until is before since
+                        wp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                KalGetResponse::Status416_RequestRangeNotSatisfiable
+            );
+        }
+
+        // 3. Get calendar entries with date range
+        {
+            let start_date = recent_date
+                .and_time(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+                .and_utc();
+            let end_date = recent_date
+                .checked_add_days(chrono::Days::new(5))
+                .unwrap()
+                .and_time(chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+                .and_utc();
+
+            let response = server
+                .kal_get(
+                    &Method::GET,
+                    &host,
+                    &cookies,
+                    &models::KalGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::KalGetQueryParams {
+                        y: None,
+                        m: None,
+                        dom: None,
+                        gr: None,
+                        limit: None,
+                        offset: None,
+                        p: Some(models::Parlament::Bt),
+                        since: Some(start_date),
+                        until: Some(end_date),
+                        wp: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
+                    assert!(
+                        !sessions.is_empty(),
+                        "Expected to find sessions in date range"
+                    );
+                    for session in sessions {
+                        assert!(
+                            session.termin >= start_date && session.termin <= end_date,
+                            "Found session outside requested date range"
+                        );
+                    }
+                }
+                _ => panic!("Expected to find sessions in date range"),
+            }
+        }
+
+        // Cleanup
+        cleanup_server("test_calendar").await.unwrap();
     }
 
     // Procedure (Vorgang) tests
