@@ -6,6 +6,7 @@ pub(crate) mod utils;
 
 use std::{num::NonZeroU64, sync::Arc};
 
+use axum::extract::DefaultBodyLimit;
 use clap::Parser;
 
 use error::LTZFError;
@@ -150,8 +151,10 @@ async fn main() -> Result<()> {
         .with_global_fallback(true)
         .with_extension(true)
         .default_handle_error();
-    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024 * 1024 * 64); // 64GB
+    let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
+    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(body_size_limit);
     let app = openapi::server::new(state.clone())
+        .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
         .layer(rate_limiter);
     tracing::debug!("Constructed Router");
