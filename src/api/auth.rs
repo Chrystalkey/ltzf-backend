@@ -3,8 +3,8 @@ use std::fmt::Display;
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
-use rand::distributions::Alphanumeric;
-use rand::{Rng, thread_rng};
+use rand::distr::Alphanumeric;
+use rand::{Rng, rng};
 use sha256::digest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,12 +170,7 @@ pub async fn auth_delete(
 pub async fn generate_api_key() -> String {
     let key: String = "ltzf_"
         .chars()
-        .chain(
-            thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(59)
-                .map(char::from),
-        )
+        .chain(rng().sample_iter(&Alphanumeric).take(59).map(char::from))
         .collect();
     key
 }
