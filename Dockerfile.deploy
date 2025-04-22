@@ -15,7 +15,7 @@ RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./rs-test \
     && rm -rf rs-test openapi.yml
 
-RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/tags/v0.1.0/docs/specs/openapi.yml" > ./openapi.yml \
+RUN curl "raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml" > ./openapi.yml \
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./oapicode
 
 RUN adduser \
