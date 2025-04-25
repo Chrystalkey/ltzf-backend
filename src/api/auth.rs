@@ -3,6 +3,7 @@ use std::fmt::Display;
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
+use openapi::apis::authentication_keyadder_schnittstellen::*;
 use rand::distr::Alphanumeric;
 use rand::{Rng, rng};
 use sha256::digest;
@@ -122,7 +123,6 @@ impl ApiKeyAuthHeader for LTZFServer {
         }
     }
 }
-
 pub async fn auth_get(
     server: &LTZFServer,
     scope: APIScope,

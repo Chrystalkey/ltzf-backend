@@ -11,13 +11,13 @@ use crate::error::{DataValidationError, LTZFError};
 use crate::utils::notify;
 use crate::{Configuration, db};
 
-use openapi::apis::default::*;
 use openapi::models;
 
+mod admin;
 mod auth;
 mod compare;
-mod kalender;
-mod objects;
+mod sitzung;
+mod vorgang;
 
 #[derive(Clone)]
 pub struct LTZFServer {
@@ -58,7 +58,6 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
 #[async_trait]
 impl openapi::apis::default::Default<LTZFError> for LTZFServer {
     type Claims = (auth::APIScope, i32);
-
     #[doc = "AuthPost - POST /api/v1/auth"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -111,7 +110,6 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         let key_to_delete = &header_params.api_key_delete;
         return auth::auth_delete(self, key_to_delete).await;
     }
-
     #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -124,9 +122,8 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         path_params: &models::KalDateGetPathParams,
     ) -> Result<KalDateGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let res =
-            kalender::kal_get_by_date(path_params.datum, path_params.parlament, &mut tx, self)
-                .await?;
+        let res = sitzung::kal_get_by_date(path_params.datum, path_params.parlament, &mut tx, self)
+            .await?;
         tx.commit().await?;
         Ok(res)
     }
@@ -174,7 +171,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
 
         let mut tx = self.sqlx_db.begin().await?;
 
-        let res = kalender::kal_put_by_date(
+        let res = sitzung::kal_put_by_date(
             path_params.datum,
             path_params.parlament,
             body,
@@ -198,7 +195,7 @@ impl openapi::apis::default::Default<LTZFError> for LTZFServer {
         query_params: &models::KalGetQueryParams,
     ) -> Result<KalGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let res = kalender::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
+        let res = sitzung::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
         tx.commit().await?;
         Ok(res)
     }

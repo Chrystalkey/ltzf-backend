@@ -1,9 +1,128 @@
 use crate::db::*;
+use crate::db::{delete, insert, retrieve};
 use crate::{LTZFServer, Result};
-use openapi::apis::default::*;
+use openapi::apis::adminschnittstellen_sitzungen::*;
+use openapi::apis::kalender_sitzungen_unauthorisiert::*;
+use openapi::apis::sitzungen_unauthorisiert::*;
+use openapi::models;
+use openapi::models::SGetQueryParams;
 use openapi::models::*;
 use sqlx::PgTransaction;
 
+use super::compare::*;
+
+pub async fn s_id_put(
+    server: &LTZFServer,
+    path_params: &models::SidPutPathParams,
+    body: &models::Sitzung,
+) -> Result<SidPutResponse> {
+    use openapi::apis::default::*;
+    let mut tx = server.sqlx_db.begin().await?;
+    let api_id = path_params.sid;
+    let db_id = sqlx::query!("SELECT id FROM sitzung WHERE api_id = $1", api_id)
+        .map(|x| x.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if let Some(db_id) = db_id {
+        let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
+        if compare_sitzung(&db_cmpvg, body) {
+            return Ok(SidPutResponse::Status204_NotModified);
+        }
+        match delete::delete_sitzung_by_api_id(api_id, server).await? {
+            SitzungDeleteResponse::Status204_DeletedSuccessfully => {
+                insert::insert_sitzung(body, &mut tx, server).await?;
+            }
+            _ => {
+                unreachable!("If this is reached, some assumptions did not hold")
+            }
+        }
+    } else {
+        insert::insert_sitzung(body, &mut tx, server).await?;
+    }
+    tx.commit().await?;
+    Ok(SidPutResponse::Status201_Created)
+}
+
+pub async fn s_get_by_id(
+    server: &LTZFServer,
+    header_params: &models::SGetByIdHeaderParams,
+    path_params: &models::SGetByIdPathParams,
+) -> Result<openapi::apis::default::SGetByIdResponse> {
+    use openapi::apis::default::SGetByIdResponse;
+    let mut tx = server.sqlx_db.begin().await?;
+    let api_id = path_params.sid;
+    let id_exists = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if id_exists.is_none() {
+        return Ok(SGetByIdResponse::Status404_ContentNotFound);
+    }
+
+    let id = sqlx::query!(
+        "
+    SELECT id FROM sitzung WHERE api_id = $1
+    AND last_update > COALESCE($2, CAST('1940-01-01T00:00:00' AS TIMESTAMPTZ));",
+        api_id,
+        header_params.if_modified_since
+    )
+    .map(|r| r.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(id) = id {
+        let result = retrieve::sitzung_by_id(id, &mut tx).await?;
+        tx.commit().await?;
+        Ok(SGetByIdResponse::Status200_SuccessfulOperation(result))
+    } else if header_params.if_modified_since.is_some() {
+        Ok(SGetByIdResponse::Status304_NotModified)
+    } else {
+        Err(crate::error::LTZFError::Validation {
+            source: Box::new(crate::error::DataValidationError::QueryParametersNotSatisfied),
+        })
+    }
+}
+
+pub async fn s_get(
+    server: &LTZFServer,
+    qparams: &SGetQueryParams,
+    header_params: &models::SGetHeaderParams,
+) -> Result<openapi::apis::default::SGetResponse> {
+    let range = find_applicable_date_range(
+        None,
+        None,
+        None,
+        qparams.since,
+        qparams.until,
+        header_params.if_modified_since,
+    );
+    if range.is_none() {
+        return Ok(openapi::apis::default::SGetResponse::Status416_RequestRangeNotSatisfiable);
+    }
+    let params = retrieve::SitzungFilterParameters {
+        gremium_like: None,
+        limit: qparams.limit.map(|x| x as u32),
+        offset: qparams.offset.map(|x| x as u32),
+        parlament: qparams.p,
+        wp: qparams.wp.map(|x| x as u32),
+        since: range.as_ref().unwrap().since,
+        until: range.unwrap().until,
+        vgid: qparams.vgid,
+    };
+
+    let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = server.sqlx_db.begin().await?;
+    let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
+    tx.commit().await?;
+    if result.is_empty() && header_params.if_modified_since.is_none() {
+        Ok(openapi::apis::default::SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
+    } else if result.is_empty() && header_params.if_modified_since.is_some() {
+        Ok(openapi::apis::default::SGetResponse::Status304_NoNewChanges)
+    } else {
+        Ok(
+        openapi::apis::default::SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(
+            result,
+        ),
+    )
+    }
+}
 pub async fn kal_get_by_date(
     date: chrono::NaiveDate,
     parlament: Parlament,
