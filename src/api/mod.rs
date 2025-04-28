@@ -3,16 +3,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum_extra::extract::Host;
 
+use crate::Configuration;
 use crate::Result;
 use crate::error::LTZFError;
 use crate::utils::notify;
-use crate::{Configuration, db};
+use openapi::apis::unauthorisiert::*;
 
-mod auth;
-mod compare;
-mod misc;
-mod sitzung;
-mod vorgang;
+pub(crate) mod auth;
+pub(crate) mod compare;
+pub(crate) mod misc;
+pub(crate) mod sitzung;
+pub(crate) mod vorgang;
 
 pub type Claims = (auth::APIScope, i32);
 
@@ -51,7 +52,6 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
     }
 }
 
-use openapi::apis::unauthorisiert::*;
 #[async_trait]
 impl Unauthorisiert<LTZFError> for LTZFServer {
     async fn ping(
@@ -76,7 +76,8 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
 mod endpoint_test {
     use super::*;
     use crate::{LTZFServer, Result};
-    use axum_extra::extract::Host;
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
     use chrono::Utc;
     use openapi::models::{self, VorgangIdPutPathParams};
     use sha256::digest;
@@ -1458,6 +1459,8 @@ mod endpoint_test {
         let test_doc = Dokument {
             api_id: Some(Uuid::now_v7()),
             titel: "Test Document".to_string(),
+            dc_type: std::default::Default::default(),
+            touched_by: None,
             kurztitel: None,
             vorwort: Some("Test Vorwort".to_string()),
             volltext: "Test Volltext".to_string(),
@@ -1485,6 +1488,7 @@ mod endpoint_test {
             dokumente: vec![DokRef::Dokument(Box::new(test_doc))],
             zp_start: DateTime::from(Utc::now()),
             api_id: Some(Uuid::now_v7()),
+            touched_by: None,
             titel: Some("Test Station".to_string()),
             gremium_federf: None,
             link: Some("http://example.com".to_string()),
@@ -1516,6 +1520,8 @@ mod endpoint_test {
             api_id: Uuid::now_v7(),
             titel: "Test Vorgang".to_string(),
             kurztitel: Some("Test".to_string()),
+            lobbyregister: None,
+            touched_by: None,
             wahlperiode: 20,
             verfassungsaendernd: false,
             typ: Vorgangstyp::GgEinspruch,

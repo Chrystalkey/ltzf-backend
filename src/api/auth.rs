@@ -2,9 +2,13 @@ use std::fmt::Display;
 
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
+use axum::http::Method;
+use axum_extra::extract::CookieJar;
+use axum_extra::extract::Host;
 use openapi::apis::ApiKeyAuthHeader;
 use openapi::apis::authentication::*;
 use openapi::apis::authentication_keyadder_schnittstellen::*;
+use openapi::models;
 use rand::distr::Alphanumeric;
 use rand::{Rng, rng};
 use sha256::digest;
@@ -116,7 +120,7 @@ async fn internal_extract_claims(
 
 #[async_trait]
 impl ApiKeyAuthHeader for LTZFServer {
-    type Claims = ClaimType;
+    type Claims = crate::api::Claims;
     async fn extract_claims_from_header(
         &self,
         headers: &axum::http::header::HeaderMap,
@@ -140,29 +144,39 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_delete(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         header_params: &models::AuthDeleteHeaderParams,
     ) -> Result<AuthDeleteResponse> {
         if claims.0 != APIScope::KeyAdder {
-            return Ok(
-                openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid,
-            );
+            return Ok(AuthDeleteResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         let hash = digest(&header_params.api_key_delete);
         let ret = sqlx::query!(
             "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
             hash
         )
-        .fetch_optional(&server.sqlx_db)
+        .fetch_optional(&self.sqlx_db)
         .await?;
 
         if ret.is_some() {
-            Ok(openapi::apis::default::AuthDeleteResponse::Status204_Success)
+            Ok(AuthDeleteResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
         } else {
-            Ok(openapi::apis::default::AuthDeleteResponse::Status404_APIKeyNotFound)
+            Ok(AuthDeleteResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
         }
     }
 
@@ -171,13 +185,13 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_post(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         body: &models::CreateApiKey,
     ) -> Result<AuthPostResponse> {
-        if claims.0 != auth::APIScope::KeyAdder {
+        if claims.0 != APIScope::KeyAdder {
             return Ok(AuthPostResponse::Status403_AuthenticationFailed {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -192,23 +206,24 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         VALUES
         ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4))",
             key_digest,
-            created_by,
-            expires_at.unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
-            scope.to_string()
+            claims.1,
+            body.expires_at
+                .unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
+            body.scope.to_string()
         )
-        .execute(&server.sqlx_db)
+        .execute(&self.sqlx_db)
         .await?;
 
-        tracing::info!("Generated Fresh API Key with Scope: {:?}", scope);
+        tracing::info!("Generated Fresh API Key with Scope: {:?}", body.scope);
         Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
             key,
         ))
     }
     async fn auth_rotate(
         &self,
-        method: &axum::http::Method,
-        host: &axum_extra::extract::Host,
-        cookies: &axum_extra::extract::CookieJar,
+        _method: &axum::http::Method,
+        _host: &axum_extra::extract::Host,
+        _cookies: &axum_extra::extract::CookieJar,
         claims: &Self::Claims,
         body: &openapi::models::AuthRotateRequest,
     ) -> Result<AuthRotateResponse> {

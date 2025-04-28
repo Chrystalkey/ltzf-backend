@@ -4,7 +4,7 @@ pub(crate) mod db;
 pub(crate) mod error;
 pub(crate) mod utils;
 
-use std::{num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use clap::Parser;
@@ -17,6 +17,16 @@ use tower_governor::{governor::GovernorConfigBuilder, *};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
+use openapi::apis::{
+    adminschnittstellen_autoren::*,
+    adminschnittstellen_collector_schnittstellen_kalender_sitzungen::*,
+    adminschnittstellen_dokumente::*, adminschnittstellen_enumerations::*,
+    adminschnittstellen_gremien::*, adminschnittstellen_sitzungen::*,
+    adminschnittstellen_vorgnge::*, authentication::*, authentication_keyadder_schnittstellen::*,
+    autoren_unauthorisiert::*, dokumente_unauthorisiert::*, enumerations_unauthorisiert::*,
+    gremien_unauthorisiert::*, kalender_sitzungen_unauthorisiert::*, sitzungen_unauthorisiert::*,
+    unauthorisiert::*, unauthorisiert_vorgnge::*,
+};
 use utils::{init_tracing, shutdown_signal};
 
 pub type DateTime = chrono::DateTime<chrono::Utc>;
@@ -146,25 +156,24 @@ async fn main() -> Result<()> {
     // Init Axum router
     let rl_config = Arc::new(
         GovernorConfigBuilder::default()
-        .per_second(2)
-        .burst_size(5)
-        .finish()
-        .unwrap()
+            .per_second(2)
+            .burst_size(5)
+            .finish()
+            .unwrap(),
     );
     let limiter = rl_config.limiter().clone();
     let interval = std::time::Duration::from_secs(60);
     std::thread::spawn(move || {
-        loop{
+        loop {
             std::thread::sleep(interval);
             tracing::info!("rate limiting storage size: {}", limiter.len());
             limiter.retain_recent();
         }
     });
-    let rate_limiter = GovernorLayer{
-        config: rl_config
-    };
+    let rate_limiter = GovernorLayer { config: rl_config };
     let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
     let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(body_size_limit);
+
     let app = openapi::server::new(state.clone())
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)

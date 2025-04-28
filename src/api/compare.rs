@@ -299,6 +299,8 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::default;
+
     use super::*;
     use chrono::{Duration, Timelike};
     use openapi::models;

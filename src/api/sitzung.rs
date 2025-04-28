@@ -141,24 +141,82 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             vector.push(retrieve::sitzung_by_id(sid, &mut tx).await?);
         }
         tx.commit().await?;
-        Ok(KalDateGetResponse::Status200_SuccessfulResponseContainingAListOfParliamentarySessionsMatchingTheQueryFilters 
-            { body: vector, x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None, x_total_count: (), x_total_pages: (), x_page: (), x_per_page: () })
+        Ok(KalDateGetResponse::Status200_SuccessfulResponse {
+            body: vector,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: (),
+            x_total_pages: (),
+            x_page: (),
+            x_per_page: (),
+            link: (),
+        })
     }
     #[doc = "KalGet - GET /api/v1/kalender"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_get(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         header_params: &models::KalGetHeaderParams,
         query_params: &models::KalGetQueryParams,
     ) -> Result<KalGetResponse> {
+        let qparams = query_params;
+        let hparams = header_params;
         let mut tx = self.sqlx_db.begin().await?;
-        let res = sitzung::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
-        tx.commit().await?;
-        Ok(res)
+        let result = find_applicable_date_range(
+            qparams.y.map(|x| x as u32),
+            qparams.m.map(|x| x as u32),
+            qparams.dom.map(|x| x as u32),
+            qparams.since,
+            qparams.until,
+            hparams.if_modified_since,
+        );
+        if result.is_none() {
+            return Ok(KalGetResponse::Status416_RequestRangeNotSatisfiable {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+
+        let params = retrieve::SitzungFilterParameters {
+            gremium_like: qparams.gr.clone(),
+            limit: qparams.limit.map(|x| x as u32),
+            offset: qparams.offset.map(|x| x as u32),
+            parlament: qparams.p,
+            vgid: None,
+            wp: qparams.wp.map(|x| x as u32),
+            since: result.as_ref().unwrap().since,
+            until: result.unwrap().until,
+        };
+
+        // retrieval
+        let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
+        if result.is_empty() {
+            tx.rollback().await?;
+            Ok(KalGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        } else {
+            tx.commit().await?;
+            Ok(KalGetResponse::Status200_SuccessfulResponse {
+                body: result,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+                x_total_count: (),
+                x_total_pages: (),
+                x_page: (),
+                x_per_page: (),
+                link: (),
+            })
+        }
     }
 }
 
@@ -169,14 +227,57 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get_by_id(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         header_params: &models::SGetByIdHeaderParams,
         path_params: &models::SGetByIdPathParams,
     ) -> Result<SGetByIdResponse> {
-        let ass = objects::s_get_by_id(self, header_params, path_params).await?;
-        return Ok(ass);
+        let mut tx = self.sqlx_db.begin().await?;
+        let api_id = path_params.sid;
+        let id_exists = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if id_exists.is_none() {
+            return Ok(SGetByIdResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+
+        let id = sqlx::query!(
+            "
+        SELECT id FROM sitzung WHERE api_id = $1
+        AND last_update > COALESCE($2, CAST('1940-01-01T00:00:00' AS TIMESTAMPTZ));",
+            api_id,
+            header_params.if_modified_since
+        )
+        .map(|r| r.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(id) = id {
+            let result = retrieve::sitzung_by_id(id, &mut tx).await?;
+            tx.commit().await?;
+            Ok(SGetByIdResponse::Status200_Success {
+                body: result,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        } else if header_params.if_modified_since.is_some() {
+            Ok(SGetByIdResponse::Status304_NotModified {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        } else {
+            Ok(SGetByIdResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        }
     }
 
     #[doc = "SGet - GET /api/v1/sitzung"]
@@ -190,8 +291,60 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
         header_params: &models::SGetHeaderParams,
         query_params: &models::SGetQueryParams,
     ) -> Result<SGetResponse> {
-        let res = objects::s_get(self, query_params, header_params).await?;
-        Ok(res)
+        let range = find_applicable_date_range(
+            None,
+            None,
+            None,
+            query_params.since,
+            query_params.until,
+            header_params.if_modified_since,
+        );
+        if range.is_none() {
+            return Ok(SGetResponse::Status416_RequestRangeNotSatisfiable {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let params = retrieve::SitzungFilterParameters {
+            gremium_like: None,
+            limit: query_params.limit.map(|x| x as u32),
+            offset: query_params.offset.map(|x| x as u32),
+            parlament: query_params.p,
+            wp: query_params.wp.map(|x| x as u32),
+            since: range.as_ref().unwrap().since,
+            until: range.unwrap().until,
+            vgid: query_params.vgid,
+        };
+
+        let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = self.sqlx_db.begin().await?;
+        let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
+        tx.commit().await?;
+        if result.is_empty() && header_params.if_modified_since.is_none() {
+            Ok(SGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        } else if result.is_empty() && header_params.if_modified_since.is_some() {
+            Ok(SGetResponse::Status304_NotModified {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            })
+        } else {
+            Ok(SGetResponse::Status200_SuccessfulResponse {
+                body: result,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+                x_total_count: (),
+                x_total_pages: (),
+                x_page: (),
+                x_per_page: (),
+                link: (),
+            })
+        }
     }
 }
 
@@ -204,9 +357,9 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         header_params: &models::KalDatePutHeaderParams,
         path_params: &models::KalDatePutPathParams,
@@ -247,135 +400,43 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
 
         let mut tx = self.sqlx_db.begin().await?;
 
-        let res = sitzung::kal_put_by_date(
-            path_params.datum,
-            path_params.parlament,
-            body,
-            &mut tx,
-            self,
+        let dt_begin = path_params
+            .datum
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
+        let dt_end = path_params
+            .datum
+            .checked_add_days(chrono::Days::new(1))
+            .unwrap()
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
+        // delete all entries that fit the description
+        sqlx::query!(
+            "DELETE FROM sitzung WHERE sitzung.id = ANY(SELECT s.id FROM sitzung s 
+        INNER JOIN gremium g ON g.id=s.gr_id 
+        INNER JOIN parlament p ON p.id=g.parl 
+        WHERE p.value = $1 AND s.termin BETWEEN $2 AND $3)",
+            path_params.parlament.to_string(),
+            dt_begin,
+            dt_end
         )
+        .execute(&mut *tx)
         .await?;
-        tx.commit().await?;
-        Ok(res)
-    }
-}
 
-pub async fn s_get_by_id(
-    server: &LTZFServer,
-    header_params: &models::SGetByIdHeaderParams,
-    path_params: &models::SGetByIdPathParams,
-) -> Result<openapi::apis::default::SGetByIdResponse> {
-    use openapi::apis::default::SGetByIdResponse;
-    let mut tx = server.sqlx_db.begin().await?;
-    let api_id = path_params.sid;
-    let id_exists = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    if id_exists.is_none() {
-        return Ok(SGetByIdResponse::Status404_ContentNotFound);
-    }
-
-    let id = sqlx::query!(
-        "
-    SELECT id FROM sitzung WHERE api_id = $1
-    AND last_update > COALESCE($2, CAST('1940-01-01T00:00:00' AS TIMESTAMPTZ));",
-        api_id,
-        header_params.if_modified_since
-    )
-    .map(|r| r.id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if let Some(id) = id {
-        let result = retrieve::sitzung_by_id(id, &mut tx).await?;
+        // insert all entries
+        for s in &body {
+            insert::insert_sitzung(s, &mut tx, self).await?;
+        }
+        todo!("Implement scraper id handling");
         tx.commit().await?;
-        Ok(SGetByIdResponse::Status200_SuccessfulOperation(result))
-    } else if header_params.if_modified_since.is_some() {
-        Ok(SGetByIdResponse::Status304_NotModified)
-    } else {
-        Err(crate::error::LTZFError::Validation {
-            source: Box::new(crate::error::DataValidationError::QueryParametersNotSatisfied),
+        Ok(KalDatePutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
         })
     }
 }
 
-pub async fn s_get(
-    server: &LTZFServer,
-    qparams: &SGetQueryParams,
-    header_params: &models::SGetHeaderParams,
-) -> Result<openapi::apis::default::SGetResponse> {
-    let range = find_applicable_date_range(
-        None,
-        None,
-        None,
-        qparams.since,
-        qparams.until,
-        header_params.if_modified_since,
-    );
-    if range.is_none() {
-        return Ok(openapi::apis::default::SGetResponse::Status416_RequestRangeNotSatisfiable);
-    }
-    let params = retrieve::SitzungFilterParameters {
-        gremium_like: None,
-        limit: qparams.limit.map(|x| x as u32),
-        offset: qparams.offset.map(|x| x as u32),
-        parlament: qparams.p,
-        wp: qparams.wp.map(|x| x as u32),
-        since: range.as_ref().unwrap().since,
-        until: range.unwrap().until,
-        vgid: qparams.vgid,
-    };
-
-    let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = server.sqlx_db.begin().await?;
-    let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
-    tx.commit().await?;
-    if result.is_empty() && header_params.if_modified_since.is_none() {
-        Ok(openapi::apis::default::SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters)
-    } else if result.is_empty() && header_params.if_modified_since.is_some() {
-        Ok(openapi::apis::default::SGetResponse::Status304_NoNewChanges)
-    } else {
-        Ok(
-        openapi::apis::default::SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(
-            result,
-        ),
-    )
-    }
-}
-
-/// expects valid input, does no further date-input validation
-pub async fn kal_put_by_date(
-    date: chrono::NaiveDate,
-    parlament: Parlament,
-    sessions: Vec<Sitzung>,
-    tx: &mut PgTransaction<'_>,
-    srv: &LTZFServer,
-) -> Result<KalDatePutResponse> {
-    let dt_begin = date
-        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-        .and_utc();
-    let dt_end = date
-        .checked_add_days(chrono::Days::new(1))
-        .unwrap()
-        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-        .and_utc();
-    // delete all entries that fit the description
-    sqlx::query!(
-        "DELETE FROM sitzung WHERE sitzung.id = ANY(SELECT s.id FROM sitzung s 
-    INNER JOIN gremium g ON g.id=s.gr_id 
-    INNER JOIN parlament p ON p.id=g.parl 
-    WHERE p.value = $1 AND s.termin BETWEEN $2 AND $3)",
-        parlament.to_string(),
-        dt_begin,
-        dt_end
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    // insert all entries
-    for s in &sessions {
-        insert::insert_sitzung(s, tx, srv).await?;
-    }
-    Ok(KalDatePutResponse::Status201_Created)
-}
 pub struct DateRange {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
@@ -525,7 +586,7 @@ pub async fn kal_get_by_param(
 }
 
 #[cfg(test)]
-mod test {
+mod test_applicable_date_range {
     use super::find_applicable_date_range;
     use chrono::DateTime;
 
