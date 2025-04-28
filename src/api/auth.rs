@@ -244,3 +244,174 @@ impl Authentication<LTZFError> for LTZFServer {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod auth_test {
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use openapi::apis::authentication::*;
+    use openapi::apis::authentication_keyadder_schnittstellen::*;
+    use openapi::models;
+
+    use super::super::endpoint_test::*;
+
+    // Authentication tests
+    #[tokio::test]
+    async fn test_auth_auth() {
+        let server = setup_server("test_auth").await.unwrap();
+        let resp = server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Collector, 1),
+                &models::CreateApiKey {
+                    scope: "admin".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp,
+            AuthPostResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+
+        let resp = server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Admin, 1),
+                &models::CreateApiKey {
+                    scope: "collector".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp,
+            AuthPostResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+
+        let resp = server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp,
+            AuthPostResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        let key = match resp {
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
+            _ => panic!("Expected authorized response"),
+        };
+        // delete
+        let del = server
+            .auth_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Collector, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: key.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            del,
+            AuthDeleteResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        let del = server
+            .auth_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Admin, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: key.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            del,
+            AuthDeleteResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+
+        let del = server
+            .auth_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: "unknown-keyhash".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            del,
+            AuthDeleteResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+
+        let del = server
+            .auth_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: key,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            del,
+            AuthDeleteResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+
+        cleanup_server("test_auth").await.unwrap();
+    }
+}

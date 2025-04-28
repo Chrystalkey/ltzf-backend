@@ -1,13 +1,18 @@
 use crate::db::{delete, insert, merge, retrieve};
+use crate::error::{DataValidationError, LTZFError};
 use crate::{LTZFServer, Result};
 use async_trait::async_trait;
+use axum::http::Method;
+use axum_extra::extract::{CookieJar, Host};
 use openapi::{
     apis::adminschnittstellen_vorgnge::*, apis::collector_schnittstellen_vorgnge::*,
     apis::unauthorisiert_vorgnge::*, models,
 };
 
+use super::auth::{self, APIScope};
 use super::compare::*;
 use super::sitzung::find_applicable_date_range;
+use crate::db;
 
 #[async_trait]
 impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
@@ -24,7 +29,11 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
         path_params: &models::VorgangDeletePathParams,
     ) -> Result<VorgangDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
+            return Ok(VorgangDeleteResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await
     }
@@ -43,12 +52,12 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
     ) -> Result<VorgangIdPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
             return Ok(VorgangIdPutResponse::Status403_AuthenticationFailed {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             });
         }
-        let mut tx = server.sqlx_db.begin().await?;
+        let mut tx = self.sqlx_db.begin().await?;
         let api_id = path_params.vorgang_id;
         let db_id = sqlx::query!("SELECT id FROM vorgang WHERE api_id = $1", api_id)
             .map(|x| x.id)
@@ -59,14 +68,14 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
                 let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
                 if compare_vorgang(&db_cmpvg, body) {
                     return Ok(VorgangIdPutResponse::Status304_NotModified {
-                        x_rate_limit_limit: (),
-                        x_rate_limit_remaining: (),
-                        x_rate_limit_reset: (),
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
                     });
                 }
-                match delete::delete_vorgang_by_api_id(api_id, server).await? {
-                    openapi::apis::default::VorgangDeleteResponse::Status204_DeletedSuccessfully => {
-                        insert::insert_vorgang(body, &mut tx, server).await?;
+                match delete::delete_vorgang_by_api_id(api_id, self).await? {
+                    VorgangDeleteResponse::Status204_NoContent { .. } => {
+                        insert::insert_vorgang(body, &mut tx, self).await?;
                     }
                     _ => {
                         unreachable!("If this is reached, some assumptions did not hold")
@@ -74,11 +83,15 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
                 }
             }
             None => {
-                insert::insert_vorgang(body, &mut tx, server).await?;
+                insert::insert_vorgang(body, &mut tx, self).await?;
             }
         }
         tx.commit().await?;
-        Ok(VorgangIdPutResponse::Status201_Created)
+        Ok(VorgangIdPutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 }
 
@@ -91,11 +104,11 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
-        query_params: &models::VorgangPutQueryParams,
+        header_params: &models::VorgangPutHeaderParams,
         body: &models::Vorgang,
     ) -> Result<VorgangPutResponse> {
         // technically not necessary since all authenticated scopes are allowed, still, better be explicit about that
@@ -104,25 +117,25 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
             && claims.0 != APIScope::Collector
         {
             return Ok(VorgangPutResponse::Status403_AuthenticationFailed {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             });
         }
-        let rval = merge::vorgang::run_integration(body, server).await;
+        let rval = merge::vorgang::run_integration(body, self).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Created {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             }),
             Err(e) => match &e {
                 LTZFError::Validation { source } => match **source {
                     DataValidationError::AmbiguousMatch { .. } => {
                         Ok(VorgangPutResponse::Status409_Conflict {
-                            x_rate_limit_limit: (),
-                            x_rate_limit_remaining: (),
-                            x_rate_limit_reset: (),
+                            x_rate_limit_limit: None,
+                            x_rate_limit_remaining: None,
+                            x_rate_limit_reset: None,
                         })
                     }
                     _ => Err(e),
@@ -150,18 +163,19 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             "vorgang_get_by_id called with id {}",
             path_params.vorgang_id
         );
-        let mut tx = server.sqlx_db.begin().await?;
+        let mut tx = self.sqlx_db.begin().await?;
         let exists = sqlx::query!(
             "SELECT 1 as out FROM vorgang WHERE api_id = $1",
             path_params.vorgang_id
         )
-        .fetch_one(&mut *tx)
-        .await?;
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
         if !exists {
             return Ok(VorgangGetByIdResponse::Status404_NotFound {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             });
         }
         let dbid = sqlx::query!(
@@ -178,16 +192,16 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             let result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
             tx.commit().await?;
             Ok(VorgangGetByIdResponse::Status200_Success {
-                body: vorgang,
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                body: result,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             })
         } else {
             return Ok(VorgangGetByIdResponse::Status304_NotModified {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             });
         }
     }
@@ -228,16 +242,16 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             if result.is_empty() && header_params.if_modified_since.is_none() {
                 tx.rollback().await?;
                 Ok(VorgangGetResponse::Status204_NoContent {
-                    x_rate_limit_limit: (),
-                    x_rate_limit_remaining: (),
-                    x_rate_limit_reset: (),
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
                 })
             } else if result.is_empty() && header_params.if_modified_since.is_some() {
                 tx.rollback().await?;
                 Ok(VorgangGetResponse::Status304_NotModified {
-                    x_rate_limit_limit: (),
-                    x_rate_limit_remaining: (),
-                    x_rate_limit_reset: (),
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
                 })
             } else {
                 tx.commit().await?;
@@ -246,10 +260,535 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
         } else {
             tx.rollback().await?;
             Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
-                x_rate_limit_limit: (),
-                x_rate_limit_remaining: (),
-                x_rate_limit_reset: (),
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod test_endpoints {
+
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use chrono::Utc;
+    use openapi::apis::adminschnittstellen_vorgnge::*;
+    use openapi::apis::collector_schnittstellen_vorgnge::*;
+    use openapi::apis::unauthorisiert_vorgnge::*;
+
+    use openapi::models;
+    use uuid::Uuid;
+
+    use crate::api::auth;
+
+    use super::super::endpoint_test::*;
+    // Procedure (Vorgang) tests
+    #[tokio::test]
+    async fn test_vorgang_get_by_id_endpoints() {
+        // Setup test server and database
+        let server = setup_server("test_vorgang_by_id_get").await.unwrap();
+
+        let test_vorgang = create_test_vorgang();
+        // First create the procedure
+        let create_response = server
+            .vorgang_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Collector, 1),
+                &models::VorgangPutHeaderParams {
+                    x_scraper_id: test_vorgang.api_id,
+                },
+                &test_vorgang,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            create_response,
+            VorgangPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            }
+        );
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        // Test cases for vorgang_get_by_id:
+        // 1. Get existing procedure
+        {
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                VorgangGetByIdResponse::Status200_Success(body, ..) => {
+                    assert_eq!(body.api_id, test_vorgang.api_id);
+                    assert_eq!(body.titel, test_vorgang.titel);
+                }
+                _ => panic!("Expected successful operation response"),
+            }
+        }
+
+        // 2. Get non-existent procedure
+        {
+            let non_existent_id = Uuid::now_v7();
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: non_existent_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangGetByIdResponse::Status404_NotFound {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                }
+            );
+        }
+
+        // 3. Get procedure with invalid ID
+        {
+            let invalid_id = Uuid::nil();
+            let response = server
+                .vorgang_get_by_id(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetByIdHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetByIdPathParams {
+                        vorgang_id: invalid_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
+        }
+        let response = server
+            .vorgang_get_by_id(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::VorgangGetByIdHeaderParams {
+                    if_modified_since: Some(chrono::Utc::now()),
+                },
+                &models::VorgangGetByIdPathParams {
+                    vorgang_id: test_vorgang.api_id,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
+        cleanup_server("test_vorgang_by_id_get").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vorgang_get_filtered_endpoints() {
+        let server = setup_server("test_vorgang_get_filtered").await.unwrap();
+        let test_vorgang = create_test_vorgang();
+        // First create the procedure
+        {
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutHeaderParams {
+                        x_scraper_id: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                create_response,
+                VorgangPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                },
+                "Failed to create test procedure"
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        }
+
+        // 2. Get procedures with invalid parameters
+        {
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: None,
+                        offset: None,
+                        p: None,
+                        since: Some(Utc::now()),
+                        until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
+                        vgtyp: None,
+                        wp: None,
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: None,  // Invalid limit
+                        offset: None, // Invalid offset
+                        p: None,
+                        since: Some(Utc::now() + chrono::Duration::days(365)),
+                        until: Some(Utc::now() + chrono::Duration::days(366)),
+                        vgtyp: None,
+                        wp: None,
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
+            );
+        }
+
+        // 3. Get procedures with filters
+        {
+            let test_vorgang = create_test_vorgang();
+            // First create a procedure with specific parameters
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutHeaderParams {
+                        x_scraper_id: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                create_response,
+                VorgangPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                }
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+            // Then get it with matching filters
+            let response = server
+                .vorgang_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::VorgangGetHeaderParams {
+                        if_modified_since: None,
+                    },
+                    &models::VorgangGetQueryParams {
+                        limit: Some(10),
+                        offset: Some(0),
+                        p: Some(models::Parlament::Bt),
+                        since: None,
+                        until: None,
+                        vgtyp: Some(test_vorgang.typ),
+                        wp: Some(test_vorgang.wahlperiode as i32),
+                        inifch: None,
+                        iniorg: None,
+                        inipsn: None,
+                    },
+                )
+                .await
+                .unwrap();
+            match response {
+                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(
+                    vorgange,
+                ) => {
+                    assert!(!vorgange.is_empty());
+                }
+                response => panic!("Expected successful operation response, got {:?}", response),
+            }
+        }
+
+        // Cleanup
+        cleanup_server("test_vorgang_get_filtered").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vorgang_put_endpoint() {
+        // Setup test server and database
+        let server = setup_server("test_vorgang_put").await.unwrap();
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
+
+        // Test cases for vorgang_id_put:
+        // 1. Update existing procedure with valid data and admin permissions
+        {
+            let test_vorgang = create_test_vorgang();
+            let response = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Admin, 1),
+                    &models::VorgangIdPutPathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangIdPutResponse::Status201_Created);
+        }
+
+        // 2. Update procedure with insufficient permissions (Collector)
+        {
+            let test_vorgang = create_test_vorgang();
+            let response = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangIdPutPathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangIdPutResponse::Status403_AuthenticationFailed {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
+        }
+
+        // Test cases for vorgang_put:
+        // 1. Create new procedure with valid data and collector permissions
+        {
+            let test_vorgang = create_test_vorgang();
+            let response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutHeaderParams {
+                        x_scraper_id: test_vorgang.api_id,
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(response, VorgangPutResponse::Status201_Success);
+        }
+
+        // 2. Handle ambiguous matches (conflict)
+        {
+            let vg1 = create_test_vorgang();
+            let mut vg2 = vg1.clone();
+            let mut vg3 = vg1.clone();
+            vg2.api_id = Uuid::now_v7();
+            vg3.api_id = Uuid::now_v7();
+
+            let rsp1 = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangIdPutPathParams {
+                        vorgang_id: vg1.api_id,
+                    },
+                    &vg1,
+                )
+                .await
+                .unwrap();
+            assert_eq!(rsp1, VorgangIdPutResponse::Status201_Created);
+
+            let rsp2 = server
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangIdPutPathParams {
+                        vorgang_id: vg2.api_id,
+                    },
+                    &vg2,
+                )
+                .await
+                .unwrap();
+            assert_eq!(rsp2, VorgangIdPutResponse::Status201_Created);
+
+            let conflict_resp = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &host,
+                    &cookies,
+                    &(APIScope::Admin, 1),
+                    &VorgangPutQueryParams {
+                        collector: Uuid::nil(),
+                    },
+                    &vg3,
+                )
+                .await
+                .unwrap();
+            assert_eq!(conflict_resp, VorgangPutResponse::Status409_Conflict);
+        }
+
+        // Cleanup
+        cleanup_server("test_vorgang_put").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vorgang_delete_endpoints() {
+        // Setup test server and database
+        let server = setup_server("test_vorgang_delete").await.unwrap();
+        // Test cases for vorgang_delete:
+        // 1. Delete existing procedure with proper permissions
+        {
+            let test_vorgang = create_test_vorgang();
+            // First create the procedure
+            let create_response = server
+                .vorgang_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangPutHeaderParams {
+                        x_scraper_id: Uuid::now_v7(),
+                    },
+                    &test_vorgang,
+                )
+                .await
+                .unwrap();
+            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+
+            // Then delete it
+            let response = server
+                .vorgang_delete(
+                    &Method::DELETE,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::VorgangDeletePathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangDeleteResponse::Status204_DeletedSuccessfully,
+                "Failed to delete procedure with id {}",
+                test_vorgang.api_id
+            );
+        }
+
+        // 2. Delete non-existent procedure
+        {
+            let non_existent_id = Uuid::now_v7();
+            let response = server
+                .vorgang_delete(
+                    &Method::DELETE,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::VorgangDeletePathParams {
+                        vorgang_id: non_existent_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangDeleteResponse::Status404_NotFound {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
+        }
+
+        // 3. Delete procedure with insufficient permissions
+        {
+            let test_vorgang = create_test_vorgang();
+            let response = server
+                .vorgang_delete(
+                    &Method::DELETE,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Collector, 1),
+                    &models::VorgangDeletePathParams {
+                        vorgang_id: test_vorgang.api_id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response,
+                VorgangDeleteResponse::Status403_AuthenticationFailed {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
+        }
+
+        // Cleanup
+        cleanup_server("test_vorgang_delete").await.unwrap();
     }
 }
