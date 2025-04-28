@@ -4,6 +4,7 @@ use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
 use openapi::apis::authentication_keyadder_schnittstellen::*;
+use openapi::apis::authentication::*;
 use rand::distr::Alphanumeric;
 use rand::{Rng, rng};
 use sha256::digest;
@@ -44,12 +45,19 @@ impl Display for APIScope {
         }
     }
 }
-type ClaimType = (APIScope, i32);
+
+pub async fn generate_api_key() -> String {
+    let key: String = "ltzf_"
+        .chars()
+        .chain(rng().sample_iter(&Alphanumeric).take(59).map(char::from))
+        .collect();
+    key
+}
 async fn internal_extract_claims(
     server: &LTZFServer,
     headers: &axum::http::header::HeaderMap,
     key: &str,
-) -> Result<ClaimType> {
+) -> Result<crate::api::Claims> {
     let key = headers.get(key);
     if key.is_none() {
         return Err(LTZFError::Validation {
@@ -123,54 +131,96 @@ impl ApiKeyAuthHeader for LTZFServer {
         }
     }
 }
-pub async fn auth_get(
-    server: &LTZFServer,
-    scope: APIScope,
-    expires_at: Option<crate::DateTime>,
-    created_by: i32,
-) -> Result<String> {
-    let key = generate_api_key().await;
-    let key_digest = digest(key.clone());
 
-    sqlx::query!(
-        "INSERT INTO api_keys(key_hash, created_by, expires_at, scope)
-    VALUES
-    ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4))",
-        key_digest,
-        created_by,
-        expires_at.unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
-        scope.to_string()
-    )
-    .execute(&server.sqlx_db)
-    .await?;
+#[async_trait]
+impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
+    #[doc = "AuthDelete - DELETE /api/v1/auth"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn auth_delete(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        header_params: &models::AuthDeleteHeaderParams,
+    ) -> Result<AuthDeleteResponse> {
+        if claims.0 != APIScope::KeyAdder {
+            return Ok(
+                openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid,
+            );
+        }
+        let hash = digest(&header_params.api_key_delete);
+        let ret = sqlx::query!(
+            "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
+            hash
+        )
+        .fetch_optional(&server.sqlx_db)
+        .await?;
 
-    tracing::info!("Generated Fresh API Key with Scope: {:?}", scope);
-    Ok(key)
+        if ret.is_some() {
+            Ok(openapi::apis::default::AuthDeleteResponse::Status204_Success)
+        } else {
+            Ok(openapi::apis::default::AuthDeleteResponse::Status404_APIKeyNotFound)
+        }
+    }
+
+    #[doc = "AuthPost - POST /api/v1/auth"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn auth_post(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::CreateApiKey,
+    ) -> Result<AuthPostResponse> {
+        if claims.0 != auth::APIScope::KeyAdder {
+            return Ok(AuthPostResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let key = generate_api_key().await;
+        let key_digest = digest(key.clone());
+
+        sqlx::query!(
+            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope)
+        VALUES
+        ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4))",
+            key_digest,
+            created_by,
+            expires_at.unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
+            scope.to_string()
+        )
+        .execute(&server.sqlx_db)
+        .await?;
+
+        tracing::info!("Generated Fresh API Key with Scope: {:?}", scope);
+        Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key))
+    }
+    async fn auth_rotate(
+        &self,
+        method: &axum::http::Method,
+        host: &axum_extra::extract::Host,
+        cookies: &axum_extra::extract::CookieJar,
+        claims: &Self::Claims,
+        body: &openapi::models::AuthRotateRequest,
+    ) -> Result<AuthRotateResponse> {
+        todo!()
+    }
 }
-
-pub async fn auth_delete(
-    server: &LTZFServer,
-    key: &str,
-) -> Result<openapi::apis::default::AuthDeleteResponse> {
-    let hash = digest(key);
-    let ret = sqlx::query!(
-        "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
-        hash
-    )
-    .fetch_optional(&server.sqlx_db)
-    .await?;
-
-    if ret.is_some() {
-        Ok(openapi::apis::default::AuthDeleteResponse::Status204_Success)
-    } else {
-        Ok(openapi::apis::default::AuthDeleteResponse::Status404_APIKeyNotFound)
+#[async_trait]
+impl Authentication<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
+    /// AuthStatus - GET /api/v1/auth/status
+    async fn auth_status(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+    ) -> Result<AuthStatusResponse> {
+        todo!()
     }
 }
 
-pub async fn generate_api_key() -> String {
-    let key: String = "ltzf_"
-        .chars()
-        .chain(rng().sample_iter(&Alphanumeric).take(59).map(char::from))
-        .collect();
-    key
-}

@@ -1,6 +1,10 @@
-use crate::db::*;
 use crate::db::{delete, insert, retrieve};
+use crate::error::LTZFError;
 use crate::{LTZFServer, Result};
+use async_trait::async_trait;
+use axum::http::Method;
+use axum_extra::extract::{CookieJar, Host};
+use openapi::apis::adminschnittstellen_collector_schnittstellen_kalender_sitzungen::*;
 use openapi::apis::adminschnittstellen_sitzungen::*;
 use openapi::apis::kalender_sitzungen_unauthorisiert::*;
 use openapi::apis::sitzungen_unauthorisiert::*;
@@ -9,39 +13,229 @@ use openapi::models::SGetQueryParams;
 use openapi::models::*;
 use sqlx::PgTransaction;
 
+use super::auth::{self, APIScope};
 use super::compare::*;
-
-pub async fn s_id_put(
-    server: &LTZFServer,
-    path_params: &models::SidPutPathParams,
-    body: &models::Sitzung,
-) -> Result<SidPutResponse> {
-    use openapi::apis::default::*;
-    let mut tx = server.sqlx_db.begin().await?;
-    let api_id = path_params.sid;
-    let db_id = sqlx::query!("SELECT id FROM sitzung WHERE api_id = $1", api_id)
-        .map(|x| x.id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    if let Some(db_id) = db_id {
-        let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
-        if compare_sitzung(&db_cmpvg, body) {
-            return Ok(SidPutResponse::Status204_NotModified);
+#[async_trait]
+impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
+    #[doc = "SitzungDelete - DELETE /api/v1/sitzung/{sid}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn sitzung_delete(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::SitzungDeletePathParams,
+    ) -> Result<SitzungDeleteResponse> {
+        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            return Ok(SitzungDeleteResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
         }
-        match delete::delete_sitzung_by_api_id(api_id, server).await? {
-            SitzungDeleteResponse::Status204_DeletedSuccessfully => {
-                insert::insert_sitzung(body, &mut tx, server).await?;
-            }
-            _ => {
-                unreachable!("If this is reached, some assumptions did not hold")
-            }
-        }
-    } else {
-        insert::insert_sitzung(body, &mut tx, server).await?;
+        Ok(delete::delete_sitzung_by_api_id(path_params.sid, self).await?)
     }
-    tx.commit().await?;
-    Ok(SidPutResponse::Status201_Created)
+
+    #[doc = "SidPut - PUT /api/v1/sitzung/{sid}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn sid_put(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::SidPutPathParams,
+        body: &models::Sitzung,
+    ) -> Result<SidPutResponse> {
+        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            return Ok(SidPutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        let api_id = path_params.sid;
+        let db_id = sqlx::query!("SELECT id FROM sitzung WHERE api_id = $1", api_id)
+            .map(|x| x.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(db_id) = db_id {
+            let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
+            if compare_sitzung(&db_cmpvg, body) {
+                return Ok(SidPutResponse::Status304_NotModified { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            }
+            match delete::delete_sitzung_by_api_id(api_id, self).await? {
+                SitzungDeleteResponse::Status204_NoContent { .. } => {
+                    insert::insert_sitzung(body, &mut tx, self).await?;
+                }
+                _ => {
+                    unreachable!("If this is reached, some assumptions did not hold")
+                }
+            }
+        } else {
+            insert::insert_sitzung(body, &mut tx, self).await?;
+        }
+        tx.commit().await?;
+        Ok(SidPutResponse::Status201_Created { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None })
+    }
 }
+
+#[async_trait]
+impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
+    #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn kal_date_get(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::KalDateGetHeaderParams,
+        path_params: &models::KalDateGetPathParams,
+        query_params: &models::KalDateGetQueryParams,
+    ) -> Result<KalDateGetResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
+        let date = path_params.datum;
+        let dt_begin = date
+        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+        .and_utc();
+        let dt_end = date
+            .checked_add_days(chrono::Days::new(1))
+            .unwrap()
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
+        let sids = sqlx::query!(
+            "SELECT s.id FROM sitzung s 
+        INNER JOIN gremium g ON g.id = s.gr_id
+        INNER JOIN parlament p ON p.id = g.parl 
+        WHERE termin BETWEEN $1 AND $2 AND p.value = $3",
+            dt_begin,
+            dt_end,
+            path_params.parlament.to_string()
+        )
+        .map(|r| r.id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if sids.is_empty() {
+            return Ok(KalDateGetResponse::Status404_NotFound { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let mut vector = vec![];
+        for sid in sids {
+            vector.push(retrieve::sitzung_by_id(sid, &mut tx).await?);
+        }
+        tx.commit().await?;
+        Ok(KalDateGetResponse::Status200_SuccessfulResponseContainingAListOfParliamentarySessionsMatchingTheQueryFilters 
+            { body: vector, x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None, x_total_count: (), x_total_pages: (), x_page: (), x_per_page: () })
+    }
+    #[doc = "KalGet - GET /api/v1/kalender"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn kal_get(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::KalGetHeaderParams,
+        query_params: &models::KalGetQueryParams,
+    ) -> Result<KalGetResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
+        let res = sitzung::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
+        tx.commit().await?;
+        Ok(res)
+    }
+}
+
+#[async_trait]
+impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
+    #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn s_get_by_id(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::SGetByIdHeaderParams,
+        path_params: &models::SGetByIdPathParams,
+    ) -> Result<SGetByIdResponse> {
+        let ass = objects::s_get_by_id(self, header_params, path_params).await?;
+        return Ok(ass);
+    }
+
+    #[doc = "SGet - GET /api/v1/sitzung"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn s_get(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        header_params: &models::SGetHeaderParams,
+        query_params: &models::SGetQueryParams,
+    ) -> Result<SGetResponse> {
+        let res = objects::s_get(self, query_params, header_params).await?;
+        Ok(res)
+    }
+}
+
+#[async_trait]
+impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
+
+    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn kal_date_put(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        header_params: &models::KalDatePutHeaderParams,
+        path_params: &models::KalDatePutPathParams,
+        body: &Vec<models::Sitzung>,
+    ) -> Result<KalDatePutResponse> {
+        let last_upd_day = chrono::Utc::now()
+            .date_naive()
+            .checked_sub_days(chrono::Days::new(1))
+            .unwrap();
+        if !(claims.0 == APIScope::Admin
+            || claims.0 == APIScope::KeyAdder
+            || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
+        {
+            tracing::warn!(
+                "Unauthorized kal_date_put with path date {} and last upd day {}",
+                path_params.datum,
+                last_upd_day
+            );
+            return Ok(KalDatePutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let len = body.len();
+        let body: Vec<_> = body
+            .iter()
+            .filter(|&f| f.termin.date_naive() >= last_upd_day)
+            .cloned()
+            .collect();
+
+        if len != body.len() {
+            tracing::info!(
+                "Filtered {} Sitzung entries due to date constraints",
+                len - body.len()
+            );
+        }
+
+        let mut tx = self.sqlx_db.begin().await?;
+
+        let res = sitzung::kal_put_by_date(
+            path_params.datum,
+            path_params.parlament,
+            body,
+            &mut tx,
+            self,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(res)
+    }
+}
+
 
 pub async fn s_get_by_id(
     server: &LTZFServer,
@@ -122,41 +316,6 @@ pub async fn s_get(
         ),
     )
     }
-}
-pub async fn kal_get_by_date(
-    date: chrono::NaiveDate,
-    parlament: Parlament,
-    tx: &mut PgTransaction<'_>,
-    _srv: &LTZFServer,
-) -> Result<KalDateGetResponse> {
-    let dt_begin = date
-        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-        .and_utc();
-    let dt_end = date
-        .checked_add_days(chrono::Days::new(1))
-        .unwrap()
-        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-        .and_utc();
-    let sids = sqlx::query!(
-        "SELECT s.id FROM sitzung s 
-    INNER JOIN gremium g ON g.id = s.gr_id
-    INNER JOIN parlament p ON p.id = g.parl 
-    WHERE termin BETWEEN $1 AND $2 AND p.value = $3",
-        dt_begin,
-        dt_end,
-        parlament.to_string()
-    )
-    .map(|r| r.id)
-    .fetch_all(&mut **tx)
-    .await?;
-    if sids.is_empty() {
-        return Ok(KalDateGetResponse::Status404_NotFound);
-    }
-    let mut vector = vec![];
-    for sid in sids {
-        vector.push(retrieve::sitzung_by_id(sid, tx).await?);
-    }
-    Ok(KalDateGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(vector))
 }
 
 /// expects valid input, does no further date-input validation

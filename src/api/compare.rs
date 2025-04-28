@@ -77,12 +77,12 @@ fn compare_top(t1: &Top, t2: &Top) -> bool {
         let mut sorted_docs2 = docs2.clone();
         sorted_docs1.sort_by(|a, b| match (a, b) {
             (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
             _ => std::cmp::Ordering::Equal,
         });
         sorted_docs2.sort_by(|a, b| match (a, b) {
             (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
@@ -92,7 +92,7 @@ fn compare_top(t1: &Top, t2: &Top) -> bool {
                         return false;
                     }
                 }
-                (DokRef::String(s1), DokRef::String(s2)) => {
+                (DokRef::StringRef(s1), DokRef::StringRef(s2)) => {
                     if s1 != s2 {
                         return false;
                     }
@@ -250,12 +250,12 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
         let mut docs2 = s2.dokumente.clone();
         docs1.sort_by(|a, b| match (a, b) {
             (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
             _ => std::cmp::Ordering::Equal,
         });
         docs2.sort_by(|a, b| match (a, b) {
             (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in docs1.iter().zip(docs2.iter()) {
@@ -265,7 +265,7 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
                         return false;
                     }
                 }
-                (DokRef::String(s1), DokRef::String(s2)) => {
+                (DokRef::StringRef(s1), DokRef::StringRef(s2)) => {
                     if s1 != s2 {
                         return false;
                     }
@@ -963,6 +963,8 @@ mod tests {
             drucksnr: Some("Test Drucksnr".to_string()),
             typ: models::Doktyp::Entwurf,
             titel: "Test Titel".to_string(),
+            dc_type: default::Default::default(),
+            touched_by: None,
             kurztitel: Some("Test Kurztitel".to_string()),
             vorwort: Some("Test Vorwort".to_string()),
             volltext: "Test Volltext".to_string(),
@@ -983,7 +985,7 @@ mod tests {
     }
 
     fn create_test_dokref_string(s: &str) -> DokRef {
-        DokRef::String(Box::new(s.to_string()))
+        DokRef::StringRef(Box::new(StringRef { dc_type: default::Default::default(), value: s.to_string() }))
     }
 
     fn create_test_top(nummer: i32) -> Top {
@@ -1005,6 +1007,7 @@ mod tests {
             api_id: Some(uuid::Uuid::parse_str(api_id).unwrap_or_default()),
             titel: Some("Test Sitzung".to_string()),
             termin: create_test_datetime(),
+            touched_by: None,
             gremium: models::Gremium {
                 parlament: models::Parlament::Bt,
                 wahlperiode: 19,
@@ -1031,6 +1034,7 @@ mod tests {
             api_id: Some(uuid::Uuid::parse_str(api_id).unwrap_or_default()),
             titel: Some("Test Station".to_string()),
             zp_start: create_test_datetime(),
+            touched_by: None,
             zp_modifiziert: Some(create_test_datetime()),
             gremium: Some(models::Gremium {
                 parlament: models::Parlament::Bt,
@@ -1065,6 +1069,8 @@ mod tests {
             titel: "Test Vorgang".to_string(),
             kurztitel: Some("Test Kurztitel".to_string()),
             wahlperiode: 19,
+            lobbyregister: todo!("Implement comparison for Lobbyregister"),
+            touched_by: None,
             verfassungsaendernd: false,
             typ: models::Vorgangstyp::GgEinspruch,
             ids: Some(vec![
