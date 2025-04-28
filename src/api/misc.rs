@@ -5,10 +5,9 @@ use openapi::apis::adminschnittstellen_dokumente::*;
 use openapi::apis::adminschnittstellen_enumerations::*;
 use openapi::apis::adminschnittstellen_gremien::*;
 use openapi::apis::autoren_unauthorisiert::*;
-use openapi::apis::gremien_unauthorisiert::*;
-use openapi::apis::enumerations_unauthorisiert::*;
 use openapi::apis::dokumente_unauthorisiert::*;
-
+use openapi::apis::enumerations_unauthorisiert::*;
+use openapi::apis::gremien_unauthorisiert::*;
 
 #[async_trait]
 impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
@@ -19,7 +18,9 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
         host: &Host,
         cookies: &CookieJar,
         query_params: &models::AutorenGetQueryParams,
-    ) -> Result<AutorenGetResponse>{todo!()}
+    ) -> Result<AutorenGetResponse> {
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -30,7 +31,9 @@ impl GremienUnauthorisiert<LTZFError> for LTZFServer {
         host: &Host,
         cookies: &CookieJar,
         query_params: &models::GremienGetQueryParams,
-    ) -> Result<GremienGetResponse>{todo!()}
+    ) -> Result<GremienGetResponse> {
+        todo!()
+    }
 }
 #[async_trait]
 impl EnumerationsUnauthorisiert<LTZFError> for LTZFServer {
@@ -42,7 +45,9 @@ impl EnumerationsUnauthorisiert<LTZFError> for LTZFServer {
         cookies: &CookieJar,
         path_params: &models::EnumGetPathParams,
         query_params: &models::EnumGetQueryParams,
-    ) -> Result<EnumGetResponse>{todo!()}
+    ) -> Result<EnumGetResponse> {
+        todo!()
+    }
 }
 #[async_trait]
 impl DokumenteUnauthorisiert<LTZFError> for LTZFServer {
@@ -53,7 +58,9 @@ impl DokumenteUnauthorisiert<LTZFError> for LTZFServer {
         host: &Host,
         cookies: &CookieJar,
         path_params: &models::DokumentGetByIdPathParams,
-    ) -> Result<DokumentGetByIdResponse> {todo!()}
+    ) -> Result<DokumentGetByIdResponse> {
+        todo!()
+    }
 }
 #[async_trait]
 impl AdminschnittstellenAutoren<LTZFError> for LTZFServer {

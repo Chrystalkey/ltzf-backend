@@ -42,7 +42,11 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
         body: &models::Vorgang,
     ) -> Result<VorgangIdPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangIdPutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () });
+            return Ok(VorgangIdPutResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            });
         }
         let mut tx = server.sqlx_db.begin().await?;
         let api_id = path_params.vorgang_id;
@@ -54,7 +58,11 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
             Some(db_id) => {
                 let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
                 if compare_vorgang(&db_cmpvg, body) {
-                    return Ok(VorgangIdPutResponse::Status304_NotModified { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () });
+                    return Ok(VorgangIdPutResponse::Status304_NotModified {
+                        x_rate_limit_limit: (),
+                        x_rate_limit_remaining: (),
+                        x_rate_limit_reset: (),
+                    });
                 }
                 match delete::delete_vorgang_by_api_id(api_id, server).await? {
                     openapi::apis::default::VorgangDeleteResponse::Status204_DeletedSuccessfully => {
@@ -95,15 +103,27 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
             && claims.0 != APIScope::Admin
             && claims.0 != APIScope::Collector
         {
-            return Ok(VorgangPutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () });
+            return Ok(VorgangPutResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            });
         }
         let rval = merge::vorgang::run_integration(body, server).await;
         match rval {
-            Ok(_) => Ok(VorgangPutResponse::Status201_Created { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () }),
+            Ok(_) => Ok(VorgangPutResponse::Status201_Created {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            }),
             Err(e) => match &e {
                 LTZFError::Validation { source } => match **source {
                     DataValidationError::AmbiguousMatch { .. } => {
-                        Ok(VorgangPutResponse::Status409_Conflict { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+                        Ok(VorgangPutResponse::Status409_Conflict {
+                            x_rate_limit_limit: (),
+                            x_rate_limit_remaining: (),
+                            x_rate_limit_reset: (),
+                        })
                     }
                     _ => Err(e),
                 },
@@ -137,8 +157,12 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
         )
         .fetch_one(&mut *tx)
         .await?;
-        if !exists{
-            return Ok(VorgangGetByIdResponse::Status404_NotFound { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () });
+        if !exists {
+            return Ok(VorgangGetByIdResponse::Status404_NotFound {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            });
         }
         let dbid = sqlx::query!(
             "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
@@ -153,9 +177,18 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
         if let Some(dbid) = dbid {
             let result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
             tx.commit().await?;
-            Ok(VorgangGetByIdResponse::Status200_Success { body: vorgang, x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+            Ok(VorgangGetByIdResponse::Status200_Success {
+                body: vorgang,
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            })
         } else {
-            return Ok(VorgangGetByIdResponse::Status304_NotModified { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () });
+            return Ok(VorgangGetByIdResponse::Status304_NotModified {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            });
         }
     }
 
@@ -194,18 +227,29 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             let result = retrieve::vorgang_by_parameter(parameters, tx).await?;
             if result.is_empty() && header_params.if_modified_since.is_none() {
                 tx.rollback().await?;
-                Ok(VorgangGetResponse::Status204_NoContent { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+                Ok(VorgangGetResponse::Status204_NoContent {
+                    x_rate_limit_limit: (),
+                    x_rate_limit_remaining: (),
+                    x_rate_limit_reset: (),
+                })
             } else if result.is_empty() && header_params.if_modified_since.is_some() {
                 tx.rollback().await?;
-                Ok(VorgangGetResponse::Status304_NotModified { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+                Ok(VorgangGetResponse::Status304_NotModified {
+                    x_rate_limit_limit: (),
+                    x_rate_limit_remaining: (),
+                    x_rate_limit_reset: (),
+                })
             } else {
                 tx.commit().await?;
                 Ok(VorgangGetResponse::Status200_SuccessfulResponseContainingAListOfLegislativeProcessesMatchingTheQueryFilters { body: result, x_total_count: (), x_total_pages: (), x_page: (), x_per_page: (), x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
             }
         } else {
             tx.rollback().await?;
-            Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable { x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+            Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
+                x_rate_limit_limit: (),
+                x_rate_limit_remaining: (),
+                x_rate_limit_reset: (),
+            })
         }
     }
 }
-

@@ -13,6 +13,7 @@ use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use sha256::digest;
 use tokio::net::TcpListener;
+use tower_governor::{governor::GovernorConfigBuilder, *};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
@@ -143,14 +144,25 @@ async fn main() -> Result<()> {
     tracing::debug!("Constructed Server State");
 
     // Init Axum router
-    let rate_limiter = axum_gcra::RateLimitLayer::<()>::builder()
-        .with_default_quota(axum_gcra::gcra::Quota::new(
-            std::time::Duration::from_secs(1),
-            NonZeroU64::new(256).unwrap(),
-        ))
-        .with_global_fallback(true)
-        .with_extension(true)
-        .default_handle_error();
+    let rl_config = Arc::new(
+        GovernorConfigBuilder::default()
+        .per_second(2)
+        .burst_size(5)
+        .finish()
+        .unwrap()
+    );
+    let limiter = rl_config.limiter().clone();
+    let interval = std::time::Duration::from_secs(60);
+    std::thread::spawn(move || {
+        loop{
+            std::thread::sleep(interval);
+            tracing::info!("rate limiting storage size: {}", limiter.len());
+            limiter.retain_recent();
+        }
+    });
+    let rate_limiter = GovernorLayer{
+        config: rl_config
+    };
     let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
     let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(body_size_limit);
     let app = openapi::server::new(state.clone())

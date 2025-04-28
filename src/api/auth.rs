@@ -3,8 +3,8 @@ use std::fmt::Display;
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use openapi::apis::ApiKeyAuthHeader;
-use openapi::apis::authentication_keyadder_schnittstellen::*;
 use openapi::apis::authentication::*;
+use openapi::apis::authentication_keyadder_schnittstellen::*;
 use rand::distr::Alphanumeric;
 use rand::{Rng, rng};
 use sha256::digest;
@@ -178,7 +178,11 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         body: &models::CreateApiKey,
     ) -> Result<AuthPostResponse> {
         if claims.0 != auth::APIScope::KeyAdder {
-            return Ok(AuthPostResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            return Ok(AuthPostResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         let key = generate_api_key().await;
         let key_digest = digest(key.clone());
@@ -196,7 +200,9 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         .await?;
 
         tracing::info!("Generated Fresh API Key with Scope: {:?}", scope);
-        Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key))
+        Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
+            key,
+        ))
     }
     async fn auth_rotate(
         &self,
@@ -223,4 +229,3 @@ impl Authentication<LTZFError> for LTZFServer {
         todo!()
     }
 }
-

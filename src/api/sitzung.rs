@@ -30,7 +30,11 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
         path_params: &models::SitzungDeletePathParams,
     ) -> Result<SitzungDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SitzungDeleteResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            return Ok(SitzungDeleteResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         Ok(delete::delete_sitzung_by_api_id(path_params.sid, self).await?)
     }
@@ -48,7 +52,11 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
         body: &models::Sitzung,
     ) -> Result<SidPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SidPutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            return Ok(SidPutResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         let mut tx = self.sqlx_db.begin().await?;
         let api_id = path_params.sid;
@@ -59,7 +67,11 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
             if compare_sitzung(&db_cmpvg, body) {
-                return Ok(SidPutResponse::Status304_NotModified { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+                return Ok(SidPutResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
             }
             match delete::delete_sitzung_by_api_id(api_id, self).await? {
                 SitzungDeleteResponse::Status204_NoContent { .. } => {
@@ -73,7 +85,11 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
             insert::insert_sitzung(body, &mut tx, self).await?;
         }
         tx.commit().await?;
-        Ok(SidPutResponse::Status201_Created { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None })
+        Ok(SidPutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 }
 
@@ -94,8 +110,8 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         let mut tx = self.sqlx_db.begin().await?;
         let date = path_params.datum;
         let dt_begin = date
-        .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-        .and_utc();
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
         let dt_end = date
             .checked_add_days(chrono::Days::new(1))
             .unwrap()
@@ -114,7 +130,11 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         .fetch_all(&mut *tx)
         .await?;
         if sids.is_empty() {
-            return Ok(KalDateGetResponse::Status404_NotFound { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            return Ok(KalDateGetResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         let mut vector = vec![];
         for sid in sids {
@@ -205,7 +225,11 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
                 path_params.datum,
                 last_upd_day
             );
-            return Ok(KalDatePutResponse::Status403_AuthenticationFailed { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+            return Ok(KalDatePutResponse::Status403_AuthenticationFailed {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
         let len = body.len();
         let body: Vec<_> = body
@@ -235,7 +259,6 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
         Ok(res)
     }
 }
-
 
 pub async fn s_get_by_id(
     server: &LTZFServer,

@@ -8,9 +8,9 @@ use crate::error::LTZFError;
 use crate::utils::notify;
 use crate::{Configuration, db};
 
-mod misc;
 mod auth;
 mod compare;
+mod misc;
 mod sitzung;
 mod vorgang;
 

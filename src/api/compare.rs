@@ -985,7 +985,10 @@ mod tests {
     }
 
     fn create_test_dokref_string(s: &str) -> DokRef {
-        DokRef::StringRef(Box::new(StringRef { dc_type: default::Default::default(), value: s.to_string() }))
+        DokRef::StringRef(Box::new(StringRef {
+            dc_type: default::Default::default(),
+            value: s.to_string(),
+        }))
     }
 
     fn create_test_top(nummer: i32) -> Top {
