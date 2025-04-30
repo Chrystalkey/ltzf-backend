@@ -374,12 +374,13 @@ pub struct SitzungFilterParameters {
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
+/// returns a tuple made up of: (total_count, retrieved_items)
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
     page: Option<i32>,
     per_page: Option<i32>,
     tx: &mut sqlx::PgTransaction<'_>,
-) -> Result<Vec<models::Sitzung>> {
+) -> Result<(u32, Vec<models::Sitzung>)> {
     let as_list = sqlx::query!(
         "
       WITH pre_table AS (

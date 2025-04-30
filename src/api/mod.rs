@@ -133,6 +133,252 @@ impl PaginationResponsePart {
         (self.x_page.unwrap_or(0) * self.x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE)) as i64
     }
 }
+
+pub struct DateRange {
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+impl
+    From<(
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    )> for DateRange
+{
+    fn from(
+        value: (
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+    ) -> Self {
+        Self {
+            since: value.0,
+            until: value.1,
+        }
+    }
+}
+pub fn find_applicable_date_range(
+    y: Option<u32>,
+    m: Option<u32>,
+    d: Option<u32>,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    until: Option<chrono::DateTime<chrono::Utc>>,
+    ifmodsince: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<DateRange> {
+    let ymd_date_range = if let Some(y) = y {
+        if let Some(m) = m {
+            if let Some(d) = d {
+                Some((
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
+                ))
+            } else {
+                Some((
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, 1).unwrap(),
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m + 1, 1)
+                        .unwrap()
+                        .checked_sub_days(chrono::Days::new(1))
+                        .unwrap(),
+                ))
+            }
+        } else {
+            Some((
+                chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1).unwrap(),
+                chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31).unwrap(),
+            ))
+        }
+    } else {
+        None
+    }
+    .map(|(a, b)| {
+        (
+            a.and_hms_opt(0, 0, 0).unwrap().and_utc(),
+            b.and_hms_opt(23, 59, 59).unwrap().and_utc(),
+        )
+    });
+
+    let mut since_min = ifmodsince;
+    let mut until_min = until;
+    if since.is_some() {
+        if since_min.is_some() {
+            since_min = Some(since_min.unwrap().min(since.unwrap()));
+        } else {
+            since_min = since;
+        }
+    }
+    if let Some((ymd_s, ymd_u)) = ymd_date_range {
+        if since_min.is_some() {
+            since_min = Some(ymd_s.max(since_min.unwrap()));
+        } else {
+            since_min = Some(ymd_s);
+        }
+        if until_min.is_some() {
+            until_min = Some(ymd_u.min(until_min.unwrap()));
+        } else {
+            until_min = Some(ymd_u);
+        }
+    }
+
+    // semantic check
+    if let Some(sm) = since_min {
+        if sm < chrono::DateTime::parse_from_rfc3339("1945-01-01T00:00:00+00:00").unwrap() {
+            return None;
+        }
+        if let Some(um) = until {
+            if sm >= um {
+                return None;
+            }
+        }
+    }
+
+    if let Some((ys, yu)) = ymd_date_range {
+        if since_min.is_some() && since_min.unwrap() > yu
+            || until_min.is_some() && until_min.unwrap() < ys
+        {
+            None
+        } else {
+            Some((since_min, until_min).into())
+        }
+    } else {
+        Some((since_min, until_min).into())
+    }
+}
+
+#[cfg(test)]
+mod test_applicable_date_range {
+    use super::find_applicable_date_range;
+    use chrono::DateTime;
+
+    #[test]
+    fn test_date_range_none() {
+        let result = find_applicable_date_range(None, None, None, None, None, None);
+        assert!(
+            result.is_some()
+                && result.as_ref().unwrap().since.is_none()
+                && result.unwrap().until.is_none(),
+            "None dates should not fail but produce (None, None)"
+        );
+    }
+    #[test]
+    fn test_date_range_untilsince() {
+        let since = DateTime::parse_from_rfc3339("1960-01-01T00:00:00+00:00")
+            .unwrap()
+            .to_utc();
+        let until = DateTime::parse_from_rfc3339("1960-01-02T00:00:00+00:00")
+            .unwrap()
+            .to_utc();
+        let result = find_applicable_date_range(None, None, None, Some(since), Some(until), None);
+        assert!(
+            result.is_some()
+                && result.as_ref().unwrap().since == Some(since)
+                && result.unwrap().until == Some(until),
+            "Since and until should yield (since, until)"
+        )
+    }
+    #[test]
+    fn test_date_range_ymd() {
+        let y = 2012u32;
+        let m = 5u32;
+        let d = 12u32;
+
+        // ymd
+        let result = find_applicable_date_range(
+            Some(y as u32),
+            Some(m as u32),
+            Some(d as u32),
+            None,
+            None,
+            None,
+        );
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
+        // ym
+        let result =
+            find_applicable_date_range(Some(y as u32), Some(m as u32), None, None, None, None);
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, 31)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
+        // y
+        let result = find_applicable_date_range(Some(y as u32), None, None, None, None, None);
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
+    }
+
+    #[test]
+    fn test_minmax() {
+        let y = 2012u32;
+
+        let since = chrono::NaiveDate::from_ymd_opt(2000, 3, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
+            .unwrap()
+            .and_hms_opt(15, 59, 59)
+            .unwrap()
+            .and_utc();
+
+        let expected_since = chrono::NaiveDate::from_ymd_opt(2012, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
+            .unwrap()
+            .and_hms_opt(15, 59, 59)
+            .unwrap()
+            .and_utc();
+
+        let result =
+            find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None);
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.since.is_some() && result.since.unwrap() == expected_since);
+        assert!(result.until.is_some() && result.until.unwrap() == expected_until);
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod endpoint_test {
     use super::*;
