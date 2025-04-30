@@ -60,7 +60,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<PingResponse> {
-        todo!()
+        Ok(PingResponse::Status200_Pong)
     }
     async fn status(
         &self,
@@ -68,7 +68,12 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<StatusResponse> {
-        todo!()
+        // TODO: implement API is not running for some reason markers
+        Ok(StatusResponse::Status200_APIIsRunning {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 }
 pub struct PaginationResponsePart {

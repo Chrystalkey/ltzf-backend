@@ -151,7 +151,7 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         header_params: &models::AuthDeleteHeaderParams,
     ) -> Result<AuthDeleteResponse> {
         if claims.0 != APIScope::KeyAdder {
-            return Ok(AuthDeleteResponse::Status403_AuthenticationFailed {
+            return Ok(AuthDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -192,7 +192,7 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         body: &models::CreateApiKey,
     ) -> Result<AuthPostResponse> {
         if claims.0 != APIScope::KeyAdder {
-            return Ok(AuthPostResponse::Status403_AuthenticationFailed {
+            return Ok(AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -274,7 +274,7 @@ mod auth_test {
             .unwrap();
         assert_eq!(
             resp,
-            AuthPostResponse::Status403_AuthenticationFailed {
+            AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
@@ -296,7 +296,7 @@ mod auth_test {
             .unwrap();
         assert_eq!(
             resp,
-            AuthPostResponse::Status403_AuthenticationFailed {
+            AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
@@ -318,7 +318,7 @@ mod auth_test {
             .unwrap();
         assert_eq!(
             resp,
-            AuthPostResponse::Status403_AuthenticationFailed {
+            AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
@@ -343,7 +343,7 @@ mod auth_test {
             .unwrap();
         assert_eq!(
             del,
-            AuthDeleteResponse::Status403_AuthenticationFailed {
+            AuthDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
@@ -363,7 +363,7 @@ mod auth_test {
             .unwrap();
         assert_eq!(
             del,
-            AuthDeleteResponse::Status403_AuthenticationFailed {
+            AuthDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None

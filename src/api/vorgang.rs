@@ -10,8 +10,8 @@ use openapi::{
 };
 
 use super::auth::{self, APIScope};
-use super::compare::*;
-use super::sitzung::find_applicable_date_range;
+use super::find_applicable_date_range;
+use super::{PaginationResponsePart, compare::*};
 use crate::db;
 
 #[async_trait]
@@ -22,14 +22,14 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_delete(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::VorgangDeletePathParams,
     ) -> Result<VorgangDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangDeleteResponse::Status403_AuthenticationFailed {
+            return Ok(VorgangDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -51,7 +51,7 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
         body: &models::Vorgang,
     ) -> Result<VorgangIdPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangIdPutResponse::Status403_AuthenticationFailed {
+            return Ok(VorgangIdPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -116,7 +116,7 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
             && claims.0 != APIScope::Admin
             && claims.0 != APIScope::Collector
         {
-            return Ok(VorgangPutResponse::Status403_AuthenticationFailed {
+            return Ok(VorgangPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -153,9 +153,9 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get_by_id(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         header_params: &models::VorgangGetByIdHeaderParams,
         path_params: &models::VorgangGetByIdPathParams,
     ) -> Result<VorgangGetByIdResponse> {
@@ -211,9 +211,9 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         header_params: &models::VorgangGetHeaderParams,
         query_params: &models::VorgangGetQueryParams,
     ) -> Result<VorgangGetResponse> {
@@ -227,8 +227,6 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             header_params.if_modified_since,
         ) {
             let parameters = retrieve::VGGetParameters {
-                limit: query_params.limit,
-                offset: query_params.offset,
                 lower_date: range.since,
                 parlament: query_params.p,
                 upper_date: range.until,
@@ -238,15 +236,21 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
                 iniorg: query_params.iniorg.clone(),
                 inipsn: query_params.inipsn.clone(),
             };
-            let result = retrieve::vorgang_by_parameter(parameters, tx).await?;
-            if result.is_empty() && header_params.if_modified_since.is_none() {
+            let result = retrieve::vorgang_by_parameter(
+                parameters,
+                query_params.page,
+                query_params.per_page,
+                &mut tx,
+            )
+            .await?;
+            if result.1.is_empty() && header_params.if_modified_since.is_none() {
                 tx.rollback().await?;
                 Ok(VorgangGetResponse::Status204_NoContent {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None,
                 })
-            } else if result.is_empty() && header_params.if_modified_since.is_some() {
+            } else if result.1.is_empty() && header_params.if_modified_since.is_some() {
                 tx.rollback().await?;
                 Ok(VorgangGetResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
@@ -255,7 +259,23 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
                 })
             } else {
                 tx.commit().await?;
-                Ok(VorgangGetResponse::Status200_SuccessfulResponseContainingAListOfLegislativeProcessesMatchingTheQueryFilters { body: result, x_total_count: (), x_total_pages: (), x_page: (), x_per_page: (), x_rate_limit_limit: (), x_rate_limit_remaining: (), x_rate_limit_reset: () })
+                let prp = PaginationResponsePart::new(
+                    Some(result.0),
+                    query_params.page,
+                    query_params.per_page,
+                    "/api/v1/vorgang",
+                );
+                Ok(VorgangGetResponse::Status200_Successful {
+                    body: result.1,
+                    x_total_count: prp.x_total_count,
+                    x_total_pages: prp.x_total_pages,
+                    x_page: prp.x_page,
+                    x_per_page: prp.x_per_page,
+                    link: prp.link,
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                })
             }
         } else {
             tx.rollback().await?;
@@ -279,9 +299,12 @@ mod test_endpoints {
     use openapi::apis::unauthorisiert_vorgnge::*;
 
     use openapi::models;
+    use openapi::models::VorgangIdPutPathParams;
+    use openapi::models::VorgangPutHeaderParams;
     use uuid::Uuid;
 
     use crate::api::auth;
+    use crate::api::auth::APIScope;
 
     use super::super::endpoint_test::*;
     // Procedure (Vorgang) tests
@@ -332,7 +355,7 @@ mod test_endpoints {
                 .await
                 .unwrap();
             match response {
-                VorgangGetByIdResponse::Status200_Success(body, ..) => {
+                VorgangGetByIdResponse::Status200_Success { body, .. } => {
                     assert_eq!(body.api_id, test_vorgang.api_id);
                     assert_eq!(body.titel, test_vorgang.titel);
                 }
@@ -384,7 +407,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
+            assert_eq!(
+                response,
+                VorgangGetByIdResponse::Status404_NotFound {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
         }
         let response = server
             .vorgang_get_by_id(
@@ -400,7 +430,14 @@ mod test_endpoints {
             )
             .await
             .unwrap();
-        assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
+        assert_eq!(
+            response,
+            VorgangGetByIdResponse::Status304_NotModified {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
         cleanup_server("test_vorgang_by_id_get").await.unwrap();
     }
 
@@ -446,8 +483,8 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        limit: None,
-                        offset: None,
+                        page: None,
+                        per_page: None,
                         p: None,
                         since: Some(Utc::now()),
                         until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
@@ -477,8 +514,8 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        limit: None,  // Invalid limit
-                        offset: None, // Invalid offset
+                        page: None,
+                        per_page: None,
                         p: None,
                         since: Some(Utc::now() + chrono::Duration::days(365)),
                         until: Some(Utc::now() + chrono::Duration::days(366)),
@@ -493,7 +530,11 @@ mod test_endpoints {
                 .unwrap();
             assert_eq!(
                 response,
-                VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
+                VorgangGetResponse::Status204_NoContent {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
             );
         }
 
@@ -534,8 +575,8 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
+                        page: Some(1),
+                        per_page: Some(32),
                         p: Some(models::Parlament::Bt),
                         since: None,
                         until: None,
@@ -549,10 +590,8 @@ mod test_endpoints {
                 .await
                 .unwrap();
             match response {
-                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(
-                    vorgange,
-                ) => {
-                    assert!(!vorgange.is_empty());
+                VorgangGetResponse::Status200_Successful { body, .. } => {
+                    assert!(!body.is_empty());
                 }
                 response => panic!("Expected successful operation response, got {:?}", response),
             }
@@ -586,7 +625,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, VorgangIdPutResponse::Status201_Created);
+            assert_eq!(
+                response,
+                VorgangIdPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
         }
 
         // 2. Update procedure with insufficient permissions (Collector)
@@ -607,7 +653,7 @@ mod test_endpoints {
                 .unwrap();
             assert_eq!(
                 response,
-                VorgangIdPutResponse::Status403_AuthenticationFailed {
+                VorgangIdPutResponse::Status403_Forbidden {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None
@@ -632,7 +678,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response, VorgangPutResponse::Status201_Success);
+            assert_eq!(
+                response,
+                VorgangPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
         }
 
         // 2. Handle ambiguous matches (conflict)
@@ -656,7 +709,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(rsp1, VorgangIdPutResponse::Status201_Created);
+            assert_eq!(
+                rsp1,
+                VorgangIdPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
 
             let rsp2 = server
                 .vorgang_id_put(
@@ -671,7 +731,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(rsp2, VorgangIdPutResponse::Status201_Created);
+            assert_eq!(
+                rsp2,
+                VorgangIdPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
 
             let conflict_resp = server
                 .vorgang_put(
@@ -679,14 +746,21 @@ mod test_endpoints {
                     &host,
                     &cookies,
                     &(APIScope::Admin, 1),
-                    &VorgangPutQueryParams {
-                        collector: Uuid::nil(),
+                    &VorgangPutHeaderParams {
+                        x_scraper_id: Uuid::nil(),
                     },
                     &vg3,
                 )
                 .await
                 .unwrap();
-            assert_eq!(conflict_resp, VorgangPutResponse::Status409_Conflict);
+            assert_eq!(
+                conflict_resp,
+                VorgangPutResponse::Status409_Conflict {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
         }
 
         // Cleanup
@@ -715,7 +789,14 @@ mod test_endpoints {
                 )
                 .await
                 .unwrap();
-            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
+            assert_eq!(
+                create_response,
+                VorgangPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
 
             // Then delete it
             let response = server
@@ -732,7 +813,11 @@ mod test_endpoints {
                 .unwrap();
             assert_eq!(
                 response,
-                VorgangDeleteResponse::Status204_DeletedSuccessfully,
+                VorgangDeleteResponse::Status204_NoContent {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                },
                 "Failed to delete procedure with id {}",
                 test_vorgang.api_id
             );
@@ -780,7 +865,7 @@ mod test_endpoints {
                 .unwrap();
             assert_eq!(
                 response,
-                VorgangDeleteResponse::Status403_AuthenticationFailed {
+                VorgangDeleteResponse::Status403_Forbidden {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None

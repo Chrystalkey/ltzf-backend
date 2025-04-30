@@ -431,8 +431,6 @@ LIMIT COALESCE($6, 64)",
 
 #[derive(Debug)]
 pub struct VGGetParameters {
-    pub limit: Option<i32>,
-    pub offset: Option<i32>,
     pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
     pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
@@ -442,10 +440,13 @@ pub struct VGGetParameters {
     pub inifch: Option<String>,
     pub vgtyp: Option<models::Vorgangstyp>,
 }
+/// returns (total number of available elements, chosen elements)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
+    page: Option<i32>,
+    per_page: Option<i32>,
     executor: &mut sqlx::PgTransaction<'_>,
-) -> Result<Vec<models::Vorgang>> {
+) -> Result<(i32, Vec<models::Vorgang>)> {
     let vg_list = sqlx::query!(
         "WITH pre_table AS (
         SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang

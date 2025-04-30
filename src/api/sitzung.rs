@@ -30,7 +30,7 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
         path_params: &models::SitzungDeletePathParams,
     ) -> Result<SitzungDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SitzungDeleteResponse::Status403_AuthenticationFailed {
+            return Ok(SitzungDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -52,7 +52,7 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
         body: &models::Sitzung,
     ) -> Result<SidPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SidPutResponse::Status403_AuthenticationFailed {
+            return Ok(SidPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -413,7 +413,7 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
                 path_params.datum,
                 last_upd_day
             );
-            return Ok(KalDatePutResponse::Status403_AuthenticationFailed {
+            return Ok(KalDatePutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
@@ -555,7 +555,7 @@ mod sitzung_test {
                 .unwrap();
             assert_eq!(
                 response,
-                KalDatePutResponse::Status403_AuthenticationFailed {
+                KalDatePutResponse::Status403_Forbidden {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None
@@ -1221,7 +1221,7 @@ mod sitzung_test {
             .unwrap();
         assert_eq!(
             response,
-            SidPutResponse::Status403_AuthenticationFailed {
+            SidPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
@@ -1289,7 +1289,7 @@ mod sitzung_test {
                 .unwrap();
             assert_eq!(
                 response,
-                SitzungDeleteResponse::Status403_AuthenticationFailed {
+                SitzungDeleteResponse::Status403_Forbidden {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None
