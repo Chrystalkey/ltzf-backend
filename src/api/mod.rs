@@ -71,7 +71,68 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         todo!()
     }
 }
+pub struct PaginationResponsePart {
+    pub x_total_count: Option<i32>,
+    pub x_total_pages: Option<i32>,
+    pub x_page: Option<i32>,
+    pub x_per_page: Option<i32>,
+    pub link: Option<String>,
+}
+impl PaginationResponsePart {
+    const DEFAULT_PER_PAGE: i32 = 32;
+    pub fn new(
+        x_total_count: Option<i32>,
+        x_page: Option<i32>,
+        x_per_page: Option<i32>,
+        link_first_part: &str,
+    ) -> Self {
+        let mut link_string = String::new();
+        let x_total_pages = x_total_count
+            .map(|x| (x as f32 / 32.).ceil() as i32)
+            .unwrap_or(0);
+        let x_per_page = x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE);
+        let x_page = x_page.unwrap_or(0);
 
+        if x_page != x_total_pages {
+            link_string = format!(
+                "<\"{}?page={}&per_page={}\">; rel=\"next\", ",
+                link_first_part,
+                x_page + 1,
+                x_per_page
+            );
+        }
+        if x_page != 0 {
+            link_string = format!(
+                "{}<\"{}?page={}&per_page={}\">; rel=\"previous\", ",
+                link_string,
+                link_first_part,
+                x_page - 1,
+                x_per_page
+            );
+        }
+        link_string = format!(
+            "{}<\"{}?page={}&per_page={}\">; rel=\"first\", ",
+            link_string, link_first_part, 0, x_per_page
+        );
+        link_string = format!(
+            "{}<\"{}?page={}&per_page={}\">; rel=\"last\"",
+            link_string, link_first_part, x_total_pages, x_per_page
+        );
+        Self {
+            x_total_count: x_total_count,
+            x_total_pages: Some(x_total_pages),
+            x_page: Some(x_page),
+            x_per_page: Some(x_per_page),
+            link: Some(link_string),
+        }
+    }
+    pub fn limit(&self) -> i64 {
+        self.x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE) as i64
+    }
+    pub fn offset(&self) -> i64 {
+        (self.x_page.unwrap_or(0) * self.x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE)) as i64
+    }
+}
 #[cfg(test)]
 pub(crate) mod endpoint_test {
     use super::*;

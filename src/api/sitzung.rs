@@ -14,7 +14,8 @@ use openapi::models::*;
 use sqlx::PgTransaction;
 
 use super::auth::{self, APIScope};
-use super::compare::*;
+use super::{PaginationResponsePart, compare::*};
+
 #[async_trait]
 impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
@@ -117,14 +118,44 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             .unwrap()
             .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
             .and_utc();
-        let sids = sqlx::query!(
-            "SELECT s.id FROM sitzung s 
+
+        // header building
+        let x_total_count = sqlx::query!(
+            "SELECT count(1) as c FROM sitzung s
         INNER JOIN gremium g ON g.id = s.gr_id
         INNER JOIN parlament p ON p.id = g.parl 
         WHERE termin BETWEEN $1 AND $2 AND p.value = $3",
             dt_begin,
             dt_end,
             path_params.parlament.to_string()
+        )
+        .map(|r| r.c)
+        .fetch_one(&mut *tx)
+        .await?
+        .map(|x| x as i32);
+        let prp = PaginationResponsePart::new(
+            x_total_count,
+            query_params.page,
+            query_params.per_page,
+            &format!(
+                "/api/v1/kalender/{}/{}",
+                path_params.parlament.to_string(),
+                path_params.datum.to_string()
+            ),
+        );
+
+        // actual fetch
+        let sids = sqlx::query!(
+            "SELECT s.id FROM sitzung s 
+        INNER JOIN gremium g ON g.id = s.gr_id
+        INNER JOIN parlament p ON p.id = g.parl 
+        WHERE termin BETWEEN $1 AND $2 AND p.value = $3
+        LIMIT $4 OFFSET $5",
+            dt_begin,
+            dt_end,
+            path_params.parlament.to_string(),
+            prp.limit(),
+            prp.offset()
         )
         .map(|r| r.id)
         .fetch_all(&mut *tx)
@@ -140,19 +171,23 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         for sid in sids {
             vector.push(retrieve::sitzung_by_id(sid, &mut tx).await?);
         }
+
         tx.commit().await?;
         Ok(KalDateGetResponse::Status200_SuccessfulResponse {
             body: vector,
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
-            x_total_count: (),
-            x_total_pages: (),
-            x_page: (),
-            x_per_page: (),
-            link: (),
+            link: prp.link,
+            x_page: prp.x_page,
+            x_per_page: prp.x_per_page,
+            x_total_count: prp.x_total_count,
+            x_total_pages: prp.x_total_pages,
         })
     }
+
+    /// TODO: unify kal_get and kal_date_get by utilising sitzung_retrieve_by_param
+    /// find a way to implement pagination and the prp here
     #[doc = "KalGet - GET /api/v1/kalender"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -185,8 +220,6 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
 
         let params = retrieve::SitzungFilterParameters {
             gremium_like: qparams.gr.clone(),
-            limit: qparams.limit.map(|x| x as u32),
-            offset: qparams.offset.map(|x| x as u32),
             parlament: qparams.p,
             vgid: None,
             wp: qparams.wp.map(|x| x as u32),
@@ -195,7 +228,9 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         };
 
         // retrieval
-        let result = retrieve::sitzung_by_param(&params, &mut tx).await?;
+        let result =
+            retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
+                .await?;
         if result.is_empty() {
             tx.rollback().await?;
             Ok(KalGetResponse::Status204_NoContent {
@@ -589,7 +624,17 @@ pub async fn kal_get_by_param(
             x_rate_limit_reset: None,
         })
     } else {
-        Ok(KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(result))
+        Ok(KalGetResponse::Status200_SuccessfulResponse {
+            body: result,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: (),
+            x_total_pages: (),
+            x_page: (),
+            x_per_page: (),
+            link: (),
+        })
     }
 }
 

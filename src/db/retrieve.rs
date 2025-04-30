@@ -371,13 +371,13 @@ pub struct SitzungFilterParameters {
     pub until: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<u32>,
-    pub limit: Option<u32>,
-    pub offset: Option<u32>,
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
+    page: Option<i32>,
+    per_page: Option<i32>,
     tx: &mut sqlx::PgTransaction<'_>,
 ) -> Result<Vec<models::Sitzung>> {
     let as_list = sqlx::query!(
