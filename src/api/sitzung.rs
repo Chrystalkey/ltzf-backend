@@ -11,6 +11,7 @@ use openapi::apis::adminschnittstellen_sitzungen::*;
 use openapi::apis::kalender_sitzungen_unauthorisiert::*;
 use openapi::apis::sitzungen_unauthorisiert::*;
 use openapi::models;
+use uuid::Uuid;
 
 use super::auth::{self, APIScope};
 use super::{PaginationResponsePart, compare::*, find_applicable_date_range};
@@ -23,9 +24,9 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sitzung_delete(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::SitzungDeletePathParams,
     ) -> Result<SitzungDeleteResponse> {
@@ -44,9 +45,9 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sid_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::SidPutPathParams,
         body: &models::Sitzung,
@@ -75,14 +76,14 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
             }
             match delete::delete_sitzung_by_api_id(api_id, self).await? {
                 SitzungDeleteResponse::Status204_NoContent { .. } => {
-                    insert::insert_sitzung(body, &mut tx, self).await?;
+                    insert::insert_sitzung(body, Uuid::nil(), &mut tx, self).await?;
                 }
                 _ => {
                     unreachable!("If this is reached, some assumptions did not hold")
                 }
             }
         } else {
-            insert::insert_sitzung(body, &mut tx, self).await?;
+            insert::insert_sitzung(body, Uuid::nil(), &mut tx, self).await?;
         }
         tx.commit().await?;
         Ok(SidPutResponse::Status201_Created {
@@ -460,9 +461,8 @@ impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for 
 
         // insert all entries
         for s in &body {
-            insert::insert_sitzung(s, &mut tx, self).await?;
+            insert::insert_sitzung(s, header_params.x_scraper_id, &mut tx, self).await?;
         }
-        todo!("Implement scraper id handling");
         tx.commit().await?;
         Ok(KalDatePutResponse::Status201_Created {
             x_rate_limit_limit: None,

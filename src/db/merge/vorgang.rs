@@ -14,6 +14,7 @@ use crate::utils::notify::notify_ambiguous_match;
 ///     - if it is not mergeable and has no match it is added to the set.
 use crate::{LTZFServer, Result};
 use openapi::models;
+use uuid::Uuid;
 
 /// this function determines what means "matching enough".
 /// 1. wenn api_id matcht
@@ -343,8 +344,8 @@ pub async fn execute_merge_station(
         // if id & in database: add to list of associated documents
         // if document: match & integrate or insert.
         match dok {
-            models::DokRef::String(uuid) => {
-                let uuid = uuid::Uuid::parse_str(uuid)?;
+            models::DokRef::StringRef(uuid) => {
+                let uuid = uuid::Uuid::parse_str(&uuid.value)?;
                 let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
                     .map(|r| r.id)
                     .fetch_optional(&mut **tx)
@@ -443,6 +444,7 @@ pub async fn execute_merge_station(
 pub async fn execute_merge_vorgang(
     model: &models::Vorgang,
     candidate: i32,
+    scraper_id: Uuid,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<()> {
@@ -519,7 +521,7 @@ pub async fn execute_merge_vorgang(
     for stat in &model.stationen {
         match station_merge_candidates(stat, db_id, &mut **tx, srv).await? {
             MatchState::NoMatch => {
-                insert::insert_station(stat.clone(), db_id, tx, srv).await?;
+                insert::insert_station(stat.clone(), db_id, scraper_id, tx, srv).await?;
             }
             MatchState::ExactlyOne(merge_station) => {
                 execute_merge_station(stat, db_id, tx, srv).await?
@@ -548,7 +550,11 @@ pub async fn execute_merge_vorgang(
     Ok(())
 }
 
-pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Result<()> {
+pub async fn run_integration(
+    model: &models::Vorgang,
+    scraper_id: Uuid,
+    server: &LTZFServer,
+) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
     tracing::debug!(
         "Looking for Merge Candidates for Vorgang with api_id: {:?}",
@@ -562,7 +568,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
                 model.api_id
             );
             let model = model.clone();
-            insert::insert_vorgang(&model, &mut tx, server).await?;
+            insert::insert_vorgang(&model, scraper_id, &mut tx, server).await?;
         }
         MatchState::ExactlyOne(one) => {
             let api_id = sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", one)
@@ -575,7 +581,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
                 model.api_id
             );
             let model = model.clone();
-            execute_merge_vorgang(&model, one, &mut tx, server).await?;
+            execute_merge_vorgang(&model, one, scraper_id, &mut tx, server).await?;
         }
         MatchState::Ambiguous(many) => {
             tracing::warn!(
@@ -613,6 +619,7 @@ mod scenariotest {
     use similar::ChangeTag;
     use std::collections::HashSet;
     use std::panic::AssertUnwindSafe;
+    use uuid::Uuid;
 
     use openapi::models::{self, VorgangGetHeaderParams, VorgangGetQueryParams};
     use serde::Deserialize;
@@ -676,7 +683,7 @@ mod scenariotest {
             };
             sqlx::migrate!().run(&server.sqlx_db).await.unwrap();
             for vorgang in pts.context.iter() {
-                crate::db::merge::vorgang::run_integration(vorgang, &server)
+                crate::db::merge::vorgang::run_integration(vorgang, Uuid::nil(), &server)
                     .await
                     .unwrap()
             }
@@ -692,7 +699,7 @@ mod scenariotest {
         }
         async fn push(&self) {
             info!("Running main Merge test");
-            crate::db::merge::vorgang::run_integration(&self.vorgang, &self.server)
+            crate::db::merge::vorgang::run_integration(&self.vorgang, Uuid::nil(), &self.server)
                 .await
                 .unwrap();
         }
@@ -707,18 +714,17 @@ mod scenariotest {
                 parlament: None,
                 lower_date: None,
                 upper_date: None,
-                limit: None,
-                offset: None,
             };
             let mut tx = self.server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs = crate::db::retrieve::vorgang_by_parameter(paramock, &mut tx)
-                .await
-                .unwrap();
+            let db_vorgangs =
+                crate::db::retrieve::vorgang_by_parameter(paramock, None, None, &mut tx)
+                    .await
+                    .unwrap();
 
             tx.rollback().await.unwrap();
             for expected in self.result.iter() {
                 let mut found = false;
-                for db_out in db_vorgangs.iter() {
+                for db_out in db_vorgangs.1.iter() {
                     if db_out == expected {
                         found = true;
                         break;
@@ -756,6 +762,7 @@ mod scenariotest {
                         .map(|e| e.api_id)
                         .collect::<Vec<uuid::Uuid>>(),
                     db_vorgangs
+                        .1
                         .iter()
                         .map(|v| {
                             println!("{}", serde_json::to_string_pretty(v).unwrap());
@@ -766,11 +773,11 @@ mod scenariotest {
             }
 
             assert!(
-                self.result.len() == db_vorgangs.len(),
+                self.result.len() == db_vorgangs.1.len(),
                 "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
                 self.name,
                 self.result.len(),
-                db_vorgangs.len(),
+                db_vorgangs.1.len(),
                 db_vorgangs
             );
         }

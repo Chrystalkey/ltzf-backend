@@ -8,6 +8,7 @@ use openapi::{
     apis::adminschnittstellen_vorgnge::*, apis::collector_schnittstellen_vorgnge::*,
     apis::unauthorisiert_vorgnge::*, models,
 };
+use uuid::Uuid;
 
 use super::auth::{self, APIScope};
 use super::find_applicable_date_range;
@@ -43,9 +44,9 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_id_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::VorgangIdPutPathParams,
         body: &models::Vorgang,
@@ -75,7 +76,7 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
                 }
                 match delete::delete_vorgang_by_api_id(api_id, self).await? {
                     VorgangDeleteResponse::Status204_NoContent { .. } => {
-                        insert::insert_vorgang(body, &mut tx, self).await?;
+                        insert::insert_vorgang(body, Uuid::nil(), &mut tx, self).await?;
                     }
                     _ => {
                         unreachable!("If this is reached, some assumptions did not hold")
@@ -83,7 +84,7 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
                 }
             }
             None => {
-                insert::insert_vorgang(body, &mut tx, self).await?;
+                insert::insert_vorgang(body, Uuid::nil(), &mut tx, self).await?;
             }
         }
         tx.commit().await?;
@@ -122,7 +123,7 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        let rval = merge::vorgang::run_integration(body, self).await;
+        let rval = merge::vorgang::run_integration(body, header_params.x_scraper_id, self).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
