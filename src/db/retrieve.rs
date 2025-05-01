@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::error::*;
 use crate::utils::as_option;
-use openapi::models;
+use openapi::models::{self, TouchedByInner};
 use uuid::Uuid;
 
 pub async fn vorgang_by_id(
@@ -74,6 +74,8 @@ pub async fn vorgang_by_id(
     stationen.sort_by(|a, b| a.zp_start.cmp(&b.zp_start));
 
     Ok(models::Vorgang {
+        touched_by: None,
+
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
@@ -161,6 +163,7 @@ pub async fn station_by_id(
     .await?;
 
     Ok(models::Station {
+        touched_by: None,
         parlament: models::Parlament::from_str(temp_stat.parlv.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
@@ -223,6 +226,8 @@ pub async fn dokument_by_id(
 
     Ok(models::Dokument {
         api_id: Some(rec.api_id),
+        dc_type: std::default::Default::default(),
+        touched_by: None,
         titel: rec.titel,
         kurztitel: rec.kurztitel,
         vorwort: rec.vorwort,
@@ -349,6 +354,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
 
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
+        touched_by: None,
         nummer: scaffold.nummer as u32,
         titel: scaffold.titel,
         public: scaffold.public,

@@ -88,7 +88,7 @@ pub async fn insert_vorgang(
         stat_ids.push(insert_station(stat.clone(), vg_id, scraper_id, tx, server).await?);
     }
     sqlx::query!(
-        "INSERT INTO scraper_touched_vorgang(vg_id, scraper) VALUES ($1, $2)",
+        "INSERT INTO scraper_touched_vorgang(vg_id, scraper) VALUES ($1, $2) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
         vg_id,
         scraper_id
     )
@@ -97,7 +97,7 @@ pub async fn insert_vorgang(
 
     sqlx::query!(
         "INSERT INTO scraper_touched_station(stat_id, scraper) 
-    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
         &stat_ids[..],
         scraper_id
     )
@@ -181,7 +181,7 @@ pub async fn insert_station(
     .await?;
     sqlx::query!(
         "INSERT INTO scraper_touched_dokument(dok_id, scraper) 
-    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
         &did[..],
         scraper_id
     )
@@ -204,7 +204,7 @@ pub async fn insert_station(
         .await?;
         sqlx::query!(
             "INSERT INTO scraper_touched_dokument(dok_id, scraper) 
-        SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+        SELECT sid, $2 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
             &doks[..],
             scraper_id
         )
@@ -329,7 +329,7 @@ pub async fn insert_sitzung(
     .execute(&mut **tx)
     .await?;
     sqlx::query!(
-        "INSERT INTO scraper_touched_sitzung (sid, scraper) VALUES ($1, $2)",
+        "INSERT INTO scraper_touched_sitzung (sid, scraper) VALUES ($1, $2) ON CONFLICT(sid, scraper) DO UPDATE SET time_stamp=NOW()",
         id,
         scraper_id
     )
