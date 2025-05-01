@@ -6,10 +6,12 @@ use crate::{
 };
 use openapi::models;
 use sqlx::PgTransaction;
+use uuid::Uuid;
 
 /// Inserts a new Vorgang into the database.
 pub async fn insert_vorgang(
     vg: &models::Vorgang,
+    scraper_id: Uuid,
     tx: &mut sqlx::PgTransaction<'_>,
     server: &LTZFServer,
 ) -> Result<i32> {
@@ -81,9 +83,27 @@ pub async fn insert_vorgang(
     .await?;
 
     // insert stations
+    let mut stat_ids = vec![];
     for stat in &vg.stationen {
-        insert_station(stat.clone(), vg_id, tx, server).await?;
+        stat_ids.push(insert_station(stat.clone(), vg_id, scraper_id, tx, server).await?);
     }
+    sqlx::query!(
+        "INSERT INTO scraper_touched_vorgang(vg_id, scraper) VALUES ($1, $2)",
+        vg_id,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query!(
+        "INSERT INTO scraper_touched_station(stat_id, scraper) 
+    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+        &stat_ids[..],
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
     tracing::info!("Vorgang Insertion Successful with ID: {}", vg_id);
     Ok(vg_id)
 }
@@ -91,6 +111,7 @@ pub async fn insert_vorgang(
 pub async fn insert_station(
     stat: models::Station,
     vg_id: i32,
+    scraper_id: Uuid,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -158,6 +179,14 @@ pub async fn insert_station(
     )
     .execute(&mut **tx)
     .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, scraper) 
+    SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+        &did[..],
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
 
     // stellungnahmen
     if let Some(stln) = stat.stellungnahmen {
@@ -170,6 +199,14 @@ pub async fn insert_station(
         SELECT $1, did FROM UNNEST($2::int4[]) as did ON CONFLICT DO NOTHING",
             stat_id,
             &doks[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO scraper_touched_dokument(dok_id, scraper) 
+        SELECT sid, $2 FROM UNNEST($1::int4[]) as sid",
+            &doks[..],
+            scraper_id
         )
         .execute(&mut **tx)
         .await?;
@@ -248,6 +285,7 @@ pub async fn insert_dokument(
 
 pub async fn insert_sitzung(
     ass: &models::Sitzung,
+    scraper_id: Uuid,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -287,6 +325,13 @@ pub async fn insert_sitzung(
     SELECT $1, eids FROM UNNEST($2::int4[]) as eids",
         id,
         &exp_ids[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_sitzung (sid, scraper) VALUES ($1, $2)",
+        id,
+        scraper_id
     )
     .execute(&mut **tx)
     .await?;
@@ -471,8 +516,8 @@ pub async fn insert_or_retrieve_dok(
 ) -> Result<i32> {
     match dr {
         models::DokRef::Dokument(dok) => Ok(insert_dokument((**dok).clone(), tx, srv).await?),
-        models::DokRef::String(dapi_id) => {
-            let api_id = uuid::Uuid::from_str(dapi_id.as_str())?;
+        models::DokRef::StringRef(dapi_id) => {
+            let api_id = uuid::Uuid::from_str(dapi_id.value.as_str())?;
             Ok(
                 sqlx::query!("SELECT id FROM dokument WHERE api_id = $1", api_id)
                     .map(|r| r.id)
