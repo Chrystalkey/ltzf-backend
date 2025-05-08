@@ -68,7 +68,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<StatusResponse> {
-        // TODO: implement API is not running for some reason markers
+        // TODO: implement "API is not running for some reason" markers
         Ok(StatusResponse::Status200_APIIsRunning {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -84,7 +84,7 @@ pub struct PaginationResponsePart {
     pub link: Option<String>,
 }
 impl PaginationResponsePart {
-    const DEFAULT_PER_PAGE: i32 = 32;
+    pub const DEFAULT_PER_PAGE: i32 = 32;
     pub fn new(
         x_total_count: Option<i32>,
         x_page: Option<i32>,
@@ -130,12 +130,6 @@ impl PaginationResponsePart {
             x_per_page: Some(x_per_page),
             link: Some(link_string),
         }
-    }
-    pub fn limit(&self) -> i64 {
-        self.x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE) as i64
-    }
-    pub fn offset(&self) -> i64 {
-        (self.x_page.unwrap_or(0) * self.x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE)) as i64
     }
 }
 

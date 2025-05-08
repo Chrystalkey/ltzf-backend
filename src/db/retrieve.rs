@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::error::*;
 use crate::utils::as_option;
-use openapi::models::{self, TouchedByInner};
+use openapi::models;
 use uuid::Uuid;
 
 pub async fn vorgang_by_id(
@@ -73,9 +73,55 @@ pub async fn vorgang_by_id(
     }
     stationen.sort_by(|a, b| a.zp_start.cmp(&b.zp_start));
 
+    // lobbyregistereinträge
+    let mut lobbyreg_records =
+        sqlx::query!("SELECT * FROM lobbyregistereintrag WHERE vg_id = $1", id)
+            .map(|r| {
+                (
+                    r.id,
+                    models::Lobbyregeintrag {
+                        intention: r.intention,
+                        organisation: models::Autor {
+                            fachgebiet: None,
+                            lobbyregister: None,
+                            organisation: "".to_string(),
+                            person: None,
+                        },
+                        link: r.link,
+                        interne_id: r.interne_id,
+                        betroffene_drucksachen: vec![],
+                    },
+                )
+            })
+            .fetch_all(&mut **executor)
+            .await?;
+    let mut lobbyregs = vec![];
+    for (id, object) in lobbyreg_records.drain(..) {
+        let drucks = sqlx::query!(
+            "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
+            id
+        )
+        .map(|r| r.drucksnr)
+        .fetch_all(&mut **executor)
+        .await?;
+        lobbyregs.push(models::Lobbyregeintrag {
+            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", id)
+                .map(|r| models::Autor {
+                    fachgebiet: r.fachgebiet,
+                    lobbyregister: r.lobbyregister,
+                    organisation: r.organisation,
+                    person: r.person,
+                })
+                .fetch_one(&mut **executor)
+                .await?,
+            betroffene_drucksachen: drucks,
+            ..object
+        });
+    }
+
     Ok(models::Vorgang {
         touched_by: None,
-
+        lobbyregister: as_option(lobbyregs),
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
@@ -383,11 +429,11 @@ pub struct SitzungFilterParameters {
 /// returns a tuple made up of: (total_count, retrieved_items)
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
-    page: Option<i32>,
-    per_page: Option<i32>,
+    page: i32,
+    per_page: i32,
     tx: &mut sqlx::PgTransaction<'_>,
-) -> Result<(u32, Vec<models::Sitzung>)> {
-    let as_list = sqlx::query!(
+) -> Result<(i32, Vec<models::Sitzung>)> {
+    let mut as_list = sqlx::query!(
         "
       WITH pre_table AS (
         SELECT a.id, MAX(a.termin) as lastmod FROM  sitzung a
@@ -414,25 +460,27 @@ lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
 lastmod < COALESCE($4, NOW()) AND
 (CAST ($8 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC
-OFFSET COALESCE($5, 0) 
-LIMIT COALESCE($6, 64)",
+OFFSET $5
+LIMIT $6",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
         params.since,
         params.until,
-        params.offset.map(|x|x as i32),
-        params.limit.map(|x|x as i32),
+        (per_page * page) as i64,
+        per_page as i64,
         params.gremium_like,
         params.vgid
     )
     .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
+    let full_count = as_list.len();
+    let as_list = as_list.drain((page * per_page) as usize..per_page as usize);
     let mut vector = Vec::with_capacity(as_list.len());
     for id in as_list {
         vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
     }
-    Ok(vector)
+    Ok((full_count as i32, vector))
 }
 
 #[derive(Debug)]
@@ -449,11 +497,11 @@ pub struct VGGetParameters {
 /// returns (total number of available elements, chosen elements)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
-    page: Option<i32>,
-    per_page: Option<i32>,
+    page: i32,
+    per_page: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<(i32, Vec<models::Vorgang>)> {
-    let vg_list = sqlx::query!(
+    let mut vg_list = sqlx::query!(
         "WITH pre_table AS (
         SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang
             INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
@@ -473,17 +521,20 @@ SELECT * FROM pre_table WHERE
 lastmod > COALESCE($7, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) 
 AND lastmod < COALESCE($8, NOW())
 ORDER BY pre_table.lastmod ASC
-OFFSET COALESCE($9, 0) LIMIT COALESCE($10, 64)
+OFFSET $9 LIMIT $10
 ",params.wp, params.vgtyp.map(|x|x.to_string()),
 params.parlament.map(|p|p.to_string()),
-params.inipsn, params.iniorg, params.inifch, params.lower_date, params.upper_date, params.offset,
-    params.limit)
+params.inipsn, params.iniorg, params.inifch,
+params.lower_date, params.upper_date, (page*per_page) as i64,
+    per_page as i64)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
+    let full_count = vg_list.len();
+    let vg_list = vg_list.drain((page * per_page) as usize..per_page as usize);
 
     let mut vector = Vec::with_capacity(vg_list.len());
     for id in vg_list {
         vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
     }
-    Ok(vector)
+    Ok((full_count as i32, vector))
 }

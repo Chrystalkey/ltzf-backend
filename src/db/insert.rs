@@ -95,6 +95,35 @@ pub async fn insert_vorgang(
     .execute(&mut **tx)
     .await?;
 
+    // insert Lobbyregister
+    if let Some(lobbyr) = &vg.lobbyregister {
+        for l in lobbyr {
+            let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
+            let lrid = sqlx::query!(
+                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+                &l.intention,
+                &l.interne_id,
+                &aid,
+                vg_id,
+                &l.link
+            )
+            .map(|r| r.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+                lrid,
+                &l.betroffene_drucksachen
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+
+    // bookkeeping
     sqlx::query!(
         "INSERT INTO scraper_touched_station(stat_id, scraper) 
     SELECT sid, $2 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",

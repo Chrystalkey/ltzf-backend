@@ -239,8 +239,10 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             };
             let result = retrieve::vorgang_by_parameter(
                 parameters,
-                query_params.page,
-                query_params.per_page,
+                query_params.page.unwrap_or(0),
+                query_params
+                    .per_page
+                    .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
                 &mut tx,
             )
             .await?;

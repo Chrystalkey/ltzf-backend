@@ -538,6 +538,37 @@ pub async fn execute_merge_vorgang(
             }
         }
     }
+    // lobbyregistereinträge are just replaced as-is, no merging
+    sqlx::query!("DELETE FROM lobbyregistereintrag WHERE vg_id = $1", db_id)
+        .execute(&mut **tx)
+        .await?;
+
+    if let Some(lobbyr) = &model.lobbyregister {
+        for l in lobbyr {
+            let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
+            let lrid = sqlx::query!(
+                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+                &l.intention,
+                &l.interne_id,
+                &aid,
+                db_id,
+                &l.link
+            )
+            .map(|r| r.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+                lrid,
+                &l.betroffene_drucksachen
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
 
     tracing::info!(
         "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
@@ -614,7 +645,7 @@ pub async fn run_integration(
 }
 mod scenariotest {
     #![cfg(test)]
-    use crate::{LTZFServer, db::retrieve};
+    use crate::{LTZFServer, api::PaginationResponsePart, db::retrieve};
     use futures::FutureExt;
     use similar::ChangeTag;
     use std::collections::HashSet;
@@ -716,10 +747,14 @@ mod scenariotest {
                 upper_date: None,
             };
             let mut tx = self.server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs =
-                crate::db::retrieve::vorgang_by_parameter(paramock, None, None, &mut tx)
-                    .await
-                    .unwrap();
+            let db_vorgangs = crate::db::retrieve::vorgang_by_parameter(
+                paramock,
+                0,
+                PaginationResponsePart::DEFAULT_PER_PAGE,
+                &mut tx,
+            )
+            .await
+            .unwrap();
 
             tx.rollback().await.unwrap();
             for expected in self.result.iter() {

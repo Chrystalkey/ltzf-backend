@@ -187,6 +187,29 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
     {
         return false;
     }
+    if vg1.lobbyregister.is_some() != vg2.lobbyregister.is_some() {
+        return false;
+    }
+    if let (Some(lr1), Some(lr2)) = (&vg1.lobbyregister, &vg2.lobbyregister) {
+        if lr1.len() != lr2.len() {
+            return false;
+        }
+        let mut svg1 = lr1.clone();
+        let mut svg2 = lr2.clone();
+        svg1.sort_by(|a, b| {
+            a.organisation
+                .organisation
+                .cmp(&b.organisation.organisation)
+        });
+        svg2.sort_by(|a, b| {
+            a.organisation
+                .organisation
+                .cmp(&b.organisation.organisation)
+        });
+        if svg1 != svg2 {
+            return false;
+        }
+    }
 
     // Compare optional fields
     if vg1.ids != vg2.ids || vg1.links != vg2.links {
@@ -1074,7 +1097,7 @@ mod tests {
             titel: "Test Vorgang".to_string(),
             kurztitel: Some("Test Kurztitel".to_string()),
             wahlperiode: 19,
-            lobbyregister: todo!("Implement comparison for Lobbyregister"),
+            lobbyregister: None,
             touched_by: None,
             verfassungsaendernd: false,
             typ: models::Vorgangstyp::GgEinspruch,

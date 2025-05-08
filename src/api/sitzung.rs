@@ -130,8 +130,10 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
                 vgid: None,
                 wp: None,
             },
-            query_params.page,
-            query_params.per_page,
+            query_params.page.unwrap_or(0),
+            query_params
+                .per_page
+                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
             &mut tx,
         )
         .await?;
@@ -211,9 +213,15 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         };
 
         // retrieval
-        let result =
-            retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
-                .await?;
+        let result = retrieve::sitzung_by_param(
+            &params,
+            query_params.page.unwrap_or(0),
+            query_params
+                .per_page
+                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
+            &mut tx,
+        )
+        .await?;
         let prp = PaginationResponsePart::new(
             Some(result.0 as i32),
             query_params.page,
@@ -346,9 +354,15 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
         };
 
         let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = self.sqlx_db.begin().await?;
-        let result =
-            retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
-                .await?;
+        let result = retrieve::sitzung_by_param(
+            &params,
+            query_params.page.unwrap_or(0),
+            query_params
+                .per_page
+                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
+            &mut tx,
+        )
+        .await?;
         let prp = PaginationResponsePart::new(
             Some(result.0 as i32),
             query_params.page,
