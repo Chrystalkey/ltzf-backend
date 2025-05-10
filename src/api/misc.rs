@@ -23,7 +23,21 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
         cookies: &CookieJar,
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
-        todo!()
+        let mut tx = self.sqlx_db.begin().await?;
+        let mut output = vec![];
+
+        tx.commit().await?;
+        return Ok(AutorenGetResponse::Status200_Success {
+            body: output,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: (),
+            x_total_pages: (),
+            x_page: (),
+            x_per_page: (),
+            link: (),
+        });
     }
 }
 
@@ -58,23 +72,46 @@ impl DokumenteUnauthorisiert<LTZFError> for LTZFServer {
     /// DokumentGetById - GET /api/v1/dokument/{api_id}
     async fn dokument_get_by_id(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         path_params: &models::DokumentGetByIdPathParams,
     ) -> Result<DokumentGetByIdResponse> {
-        todo!()
+        let mut tx = self.sqlx_db.begin().await?;
+        let did = sqlx::query!(
+            "SELECT id FROM dokument WHERE api_id = $1",
+            path_params.api_id
+        )
+        .map(|r| r.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(did) = did {
+            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+            tx.commit().await?;
+            return Ok(DokumentGetByIdResponse::Status200_Success {
+                body: dok,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        return Ok(DokumentGetByIdResponse::Status404_NotFound {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 }
+
 #[async_trait]
 impl AdminschnittstellenAutoren<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     /// AutorenDeleteByParam - DELETE /api/v1/autoren
     async fn autoren_delete_by_param(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         query_params: &models::AutorenDeleteByParamQueryParams,
     ) -> Result<AutorenDeleteByParamResponse> {
@@ -84,9 +121,9 @@ impl AdminschnittstellenAutoren<LTZFError> for LTZFServer {
     /// AutorenPut - PUT /api/v1/autoren
     async fn autoren_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         body: &Vec<models::Autor>,
     ) -> Result<AutorenPutResponse> {
@@ -157,25 +194,76 @@ impl AdminschnittstellenDokumente<LTZFError> for LTZFServer {
     /// DokumentDeleteId - DELETE /api/v1/dokument/{api_id}
     async fn dokument_delete_id(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::DokumentDeleteIdPathParams,
     ) -> Result<DokumentDeleteIdResponse> {
-        todo!()
+        if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
+            return Ok(DokumentDeleteIdResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(DokumentDeleteIdResponse::Status204_NoContent {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 
     /// DokumentPutId - PUT /api/v1/dokument/{api_id}
     async fn dokument_put_id(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::DokumentPutIdPathParams,
         body: &models::Dokument,
     ) -> Result<DokumentPutIdResponse> {
-        todo!()
+        if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
+            return Ok(DokumentPutIdResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        let did = sqlx::query!(
+            "SELECT id FROM dokument WHERE api_id = $1",
+            path_params.api_id
+        )
+        .map(|r| r.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(did) = did {
+            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+            if super::compare::compare_dokument(&dok, body) {
+                return Ok(DokumentPutIdResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
+            }
+            sqlx::query!("DELETE FROM dokument WHERE api_id = $1", path_params.api_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        let _ = crate::db::insert::insert_dokument(body.clone(), &mut tx, self).await?;
+
+        tx.commit().await?;
+        return Ok(DokumentPutIdResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 }

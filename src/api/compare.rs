@@ -5,7 +5,7 @@ fn compare_datetime_millis(dt1: &DateTime<Utc>, dt2: &DateTime<Utc>) -> bool {
     dt1.timestamp_millis() == dt2.timestamp_millis()
 }
 
-fn compare_dokument(d1: &Dokument, d2: &Dokument) -> bool {
+pub fn compare_dokument(d1: &Dokument, d2: &Dokument) -> bool {
     if d1.api_id != d2.api_id
         || d1.drucksnr != d2.drucksnr
         || d1.typ != d2.typ
