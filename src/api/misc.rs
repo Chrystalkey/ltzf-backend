@@ -13,18 +13,65 @@ use openapi::apis::enumerations_unauthorisiert::*;
 use openapi::apis::gremien_unauthorisiert::*;
 use openapi::models;
 
+use super::PaginationResponsePart;
+
 #[async_trait]
 impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
     /// AutorenGet - GET /api/v1/autoren
     async fn autoren_get(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let mut output = vec![];
+        let full_authors = sqlx::query!(
+            "SELECT COUNT(1) as cnt FROM autor WHERE
+            person = COALESCE($1, person) AND
+            organisation = COALESCE($2, organisation) AND
+            fachgebiet = COALESCE($3, fachgebiet)
+            ",
+            query_params.inipsn,
+            query_params.iniorg,
+            query_params.inifch
+        )
+        .map(|r| r.cnt)
+        .fetch_one(&mut *tx)
+        .await?
+        .unwrap() as i32;
+
+        let limit = query_params
+            .per_page
+            .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE);
+        let offset = query_params.page.unwrap_or(0) * limit;
+        let output = sqlx::query!(
+            "SELECT * FROM autor WHERE
+            person = COALESCE($1, person) AND
+            organisation = COALESCE($2, organisation) AND
+            fachgebiet = COALESCE($3, fachgebiet)
+            LIMIT $4 OFFSET $5
+            ",
+            query_params.inipsn,
+            query_params.iniorg,
+            query_params.inifch,
+            limit as i64,
+            offset as i64
+        )
+        .map(|r| models::Autor {
+            fachgebiet: r.fachgebiet,
+            person: r.person,
+            lobbyregister: r.lobbyregister,
+            organisation: r.organisation,
+        })
+        .fetch_all(&mut *tx)
+        .await?;
+        let prp = PaginationResponsePart::new(
+            Some(full_authors),
+            query_params.page,
+            query_params.per_page,
+            "/api/v1/autoren",
+        );
 
         tx.commit().await?;
         return Ok(AutorenGetResponse::Status200_Success {
@@ -32,11 +79,11 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
-            x_total_count: (),
-            x_total_pages: (),
-            x_page: (),
-            x_per_page: (),
-            link: (),
+            x_total_count: prp.x_total_count,
+            x_total_pages: prp.x_total_pages,
+            x_page: prp.x_page,
+            x_per_page: prp.x_per_page,
+            link: prp.link,
         });
     }
 }
@@ -45,9 +92,9 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
 impl GremienUnauthorisiert<LTZFError> for LTZFServer {
     async fn gremien_get(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         query_params: &models::GremienGetQueryParams,
     ) -> Result<GremienGetResponse> {
         todo!()
