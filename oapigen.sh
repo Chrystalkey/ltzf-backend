@@ -34,7 +34,7 @@ if [ ! -f "oapi-generator/openapi.yml" ]; then
 fi
 
 # Run openapi-generator
-OPENAPI_GENERATOR_VERSION="7.12.0" ./$DIRECTORY/openapi-generator-cli generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode
+OPENAPI_GENERATOR_VERSION="7.12.0" java -jar ./$DIRECTORY/openapi-generator-cli.jar generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode
 
 # Replace <I, A, E> with <I, A, E, C> in mod.rs using ripgrep and create mod2.rs
 rg '<I, A, E>' -r '<I, A, E, C>' ./oapicode/src/server/mod.rs --passthrough -N > ./oapicode/src/server/mod1.rs
