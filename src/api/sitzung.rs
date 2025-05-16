@@ -116,8 +116,22 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             None,
             None,
             header_params.if_modified_since,
-        )
-        .expect("Path parameter datum is mandatory");
+        );
+        if dr.is_none() && header_params.if_modified_since.is_none() {
+            return Ok(KalDateGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        if dr.is_none() && header_params.if_modified_since.is_some() {
+            return Ok(KalDateGetResponse::Status304_NotModified {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let dr = dr.unwrap();
 
         let dt_begin = dr.since;
         let dt_end = dr.until;

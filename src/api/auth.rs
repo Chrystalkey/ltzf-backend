@@ -316,14 +316,12 @@ mod auth_test {
             )
             .await
             .unwrap();
-        assert_eq!(
-            resp,
-            AuthPostResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
+        assert!(match resp {
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(_) => {
+                true
             }
-        );
+            _ => false,
+        });
         let key = match resp {
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
             _ => panic!("Expected authorized response"),

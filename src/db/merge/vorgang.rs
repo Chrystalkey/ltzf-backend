@@ -705,8 +705,10 @@ mod scenariotest {
 
             let scenario_compile = lse::Scenario::load(&format!("{}", path.display())).unwrap();
 
-            let pts: PTS =
-                serde_json::from_str(&serde_json::to_string(&scenario_compile).unwrap()).unwrap();
+            let pts: PTS = serde_json::from_str(
+                &serde_json::to_string(&scenario_compile).expect(&format!("In scenario {}", name)),
+            )
+            .expect(&format!("In scenario {}", name));
             let server = LTZFServer {
                 config: crate::Configuration {
                     ..Default::default()

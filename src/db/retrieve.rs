@@ -475,7 +475,19 @@ LIMIT $6",
     .fetch_all(&mut **tx)
     .await?;
     let full_count = as_list.len();
-    let as_list = as_list.drain((page * per_page) as usize..per_page as usize);
+    let (start, end) = if full_count < (page * per_page) as usize {
+        (0, 0)
+    } else {
+        (
+            page * per_page,
+            if full_count < (page * per_page + per_page) as usize {
+                full_count
+            } else {
+                (page * per_page + per_page) as usize
+            },
+        )
+    };
+    let as_list = as_list.drain(start as usize..end);
     let mut vector = Vec::with_capacity(as_list.len());
     for id in as_list {
         vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
@@ -530,7 +542,19 @@ params.lower_date, params.upper_date, (page*per_page) as i64,
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
     let full_count = vg_list.len();
-    let vg_list = vg_list.drain((page * per_page) as usize..per_page as usize);
+    let (start, end) = if full_count < (page * per_page) as usize {
+        (0, 0)
+    } else {
+        (
+            page * per_page,
+            if full_count < (page * per_page + per_page) as usize {
+                full_count
+            } else {
+                (page * per_page + per_page) as usize
+            },
+        )
+    };
+    let vg_list = vg_list.drain(start as usize..end);
 
     let mut vector = Vec::with_capacity(vg_list.len());
     for id in vg_list {
