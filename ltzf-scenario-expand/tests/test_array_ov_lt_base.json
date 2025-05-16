@@ -3,15 +3,15 @@
         "xabc": [
             "eins",
             "zwei",
-            "drei"
+            "drei","vier","fünf","sechs","sieben"
         ]
     },
     "overlay" : {
-        "xabc": [ {}, null, "drei", "vier"]
+        "xabc": [ {}, null, "vier", "vier"]
     },
     "expected": {
         "xabc": [
-            "eins", "drei", "vier", "drei"
+            "eins", "vier", "vier", "fünf", "sechs", "sieben"
         ]
     }
 }

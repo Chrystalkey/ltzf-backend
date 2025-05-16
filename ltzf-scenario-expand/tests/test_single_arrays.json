@@ -1,0 +1,17 @@
+{
+    "base": {
+        "xabc": [
+            "eins",
+            "zwei",
+            "drei"
+        ]
+    },
+    "overlay" : {
+        "xabc": [ {}, null, "drei", "vier"]
+    },
+    "expected": {
+        "xabc": [
+            "eins", "drei", "vier"
+        ]
+    }
+}

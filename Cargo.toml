@@ -36,3 +36,4 @@ async-trait = "0.1"
 
 [dev-dependencies]
 similar = "2.7"
+ltzf-scenario-expand = { path="ltzf-scenario-expand",version = "*" }

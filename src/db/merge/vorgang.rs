@@ -643,10 +643,12 @@ pub async fn run_integration(
     tx.commit().await?;
     Ok(())
 }
+
+#[cfg(test)]
 mod scenariotest {
-    #![cfg(test)]
     use crate::{LTZFServer, api::PaginationResponsePart, db::retrieve};
     use futures::FutureExt;
+    use ltzf_scenario_expand as lse;
     use similar::ChangeTag;
     use std::collections::HashSet;
     use std::panic::AssertUnwindSafe;
@@ -700,7 +702,11 @@ mod scenariotest {
             let test_db_url = std::env::var("DATABASE_URL")
                 .unwrap()
                 .replace("5432/ltzf", &format!("5432/testing_{}", name));
-            let pts: PTS = serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+
+            let scenario_compile = lse::Scenario::load(&format!("{}", path.display())).unwrap();
+
+            let pts: PTS =
+                serde_json::from_str(&serde_json::to_string(&scenario_compile).unwrap()).unwrap();
             let server = LTZFServer {
                 config: crate::Configuration {
                     ..Default::default()
