@@ -117,15 +117,8 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             None,
             header_params.if_modified_since,
         );
-        if dr.is_none() && header_params.if_modified_since.is_none() {
-            return Ok(KalDateGetResponse::Status204_NoContent {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        if dr.is_none() && header_params.if_modified_since.is_some() {
-            return Ok(KalDateGetResponse::Status304_NotModified {
+        if dr.is_none() {
+            return Ok(KalDateGetResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,

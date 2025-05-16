@@ -445,8 +445,10 @@ mod test_endpoints {
     }
 
     #[tokio::test]
-    async fn test_vorgang_get_filtered_endpoints() {
-        let server = setup_server("test_vorgang_get_filtered").await.unwrap();
+    async fn test_vorgang_get_filtered_endpoints_empty() {
+        let server = setup_server("test_vorgang_get_filtered_empty")
+            .await
+            .unwrap();
         let test_vorgang = create_test_vorgang();
         // First create the procedure
         {
@@ -540,10 +542,18 @@ mod test_endpoints {
                 }
             );
         }
+        cleanup_server("test_vorgang_get_filtered_empty")
+            .await
+            .unwrap();
+    }
 
-        // 3. Get procedures with filters
+    #[tokio::test]
+    async fn test_vorgang_get_filtered_endpoints_success() {
+        let server = setup_server("test_vorgang_get_filtered_success")
+            .await
+            .unwrap();
+        let test_vorgang = create_test_vorgang();
         {
-            let test_vorgang = create_test_vorgang();
             // First create a procedure with specific parameters
             let create_response = server
                 .vorgang_put(
@@ -567,7 +577,8 @@ mod test_endpoints {
                 }
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-
+        }
+        {
             // Then get it with matching filters
             let response = server
                 .vorgang_get(
@@ -578,7 +589,7 @@ mod test_endpoints {
                         if_modified_since: None,
                     },
                     &models::VorgangGetQueryParams {
-                        page: Some(1),
+                        page: Some(0),
                         per_page: Some(32),
                         p: Some(models::Parlament::Bt),
                         since: None,
@@ -601,7 +612,9 @@ mod test_endpoints {
         }
 
         // Cleanup
-        cleanup_server("test_vorgang_get_filtered").await.unwrap();
+        cleanup_server("test_vorgang_get_filtered_success")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

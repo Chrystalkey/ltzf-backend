@@ -704,11 +704,39 @@ mod scenariotest {
                 .replace("5432/ltzf", &format!("5432/testing_{}", name));
 
             let scenario_compile = lse::Scenario::load(&format!("{}", path.display())).unwrap();
-
-            let pts: PTS = serde_json::from_str(
-                &serde_json::to_string(&scenario_compile).expect(&format!("In scenario {}", name)),
-            )
-            .expect(&format!("In scenario {}", name));
+            let strpretty = serde_json::to_string_pretty(&scenario_compile).unwrap();
+            let dr = models::DokRef::Dokument(Box::new(models::Dokument {
+                autoren: vec![],
+                dc_type: "dokument".to_string(),
+                api_id: None,
+                drucksnr: None,
+                hash: "aölskdjgvaölskdjf".to_string(),
+                kurztitel: None,
+                link: "dölakjsöfldksjf".to_string(),
+                meinung: None,
+                schlagworte: None,
+                titel: "aölsdkfjöalskdfj".to_string(),
+                touched_by: None,
+                typ: models::Doktyp::Antrag,
+                volltext: "ödlkjfjklölökjsdjklö".to_string(),
+                zp_erstellt: None,
+                vorwort: None,
+                zp_modifiziert: chrono::Utc::now(),
+                zp_referenz: chrono::Utc::now(),
+                zusammenfassung: None,
+            }));
+            // TODO: This fucks everything up
+            // there are two issues:
+            // 1. u8 not being serializeable, must change to remove upper/lower limit
+            // 2. the discriminator does not work at all with reference/dokument. Either revert to full doks everywhere or ref/dok without discriminiator
+            std::fs::write("dokument.json", &dr).unwrap();
+            std::fs::write("expanded_scenario_out.json", &strpretty).unwrap();
+            let pts: PTS =
+                serde_json::from_str(&strpretty).expect(&format!("In scenario {}", name));
+            // let pts: PTS = serde_json::from_str(
+            //     &serde_json::to_string(&scenario_compile).expect(&format!("In scenario {}", name)),
+            // )
+            // .expect(&format!("In scenario {}", name));
             let server = LTZFServer {
                 config: crate::Configuration {
                     ..Default::default()

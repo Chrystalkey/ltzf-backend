@@ -533,12 +533,10 @@ SELECT * FROM pre_table WHERE
 lastmod > COALESCE($7, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) 
 AND lastmod < COALESCE($8, NOW())
 ORDER BY pre_table.lastmod ASC
-OFFSET $9 LIMIT $10
 ",params.wp, params.vgtyp.map(|x|x.to_string()),
 params.parlament.map(|p|p.to_string()),
 params.inipsn, params.iniorg, params.inifch,
-params.lower_date, params.upper_date, (page*per_page) as i64,
-    per_page as i64)
+params.lower_date, params.upper_date)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
     let full_count = vg_list.len();
@@ -554,10 +552,9 @@ params.lower_date, params.upper_date, (page*per_page) as i64,
             },
         )
     };
-    let vg_list = vg_list.drain(start as usize..end);
 
     let mut vector = Vec::with_capacity(vg_list.len());
-    for id in vg_list {
+    for id in vg_list.drain(start as usize..end) {
         vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
     }
     Ok((full_count as i32, vector))
