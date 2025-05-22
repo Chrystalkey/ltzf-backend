@@ -76,23 +76,27 @@ fn compare_top(t1: &Top, t2: &Top) -> bool {
         let mut sorted_docs1 = docs1.clone();
         let mut sorted_docs2 = docs2.clone();
         sorted_docs1.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
             _ => std::cmp::Ordering::Equal,
         });
         sorted_docs2.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
             match (d1, d2) {
-                (DokRef::Dokument(doc1), DokRef::Dokument(doc2)) => {
+                (StationDokumenteInner::Dokument(doc1), StationDokumenteInner::Dokument(doc2)) => {
                     if !compare_dokument(doc1, doc2) {
                         return false;
                     }
                 }
-                (DokRef::StringRef(s1), DokRef::StringRef(s2)) => {
+                (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => {
                     if s1 != s2 {
                         return false;
                     }
@@ -272,23 +276,27 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
         let mut docs1 = s1.dokumente.clone();
         let mut docs2 = s2.dokumente.clone();
         docs1.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
             _ => std::cmp::Ordering::Equal,
         });
         docs2.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::StringRef(s1), DokRef::StringRef(s2)) => s1.value.cmp(&s2.value),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in docs1.iter().zip(docs2.iter()) {
             match (d1, d2) {
-                (DokRef::Dokument(doc1), DokRef::Dokument(doc2)) => {
+                (StationDokumenteInner::Dokument(doc1), StationDokumenteInner::Dokument(doc2)) => {
                     if !compare_dokument(doc1, doc2) {
                         return false;
                     }
                 }
-                (DokRef::StringRef(s1), DokRef::StringRef(s2)) => {
+                (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => {
                     if s1 != s2 {
                         return false;
                     }
@@ -598,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_compare_top_dokumente_variants() {
-        // Test with different DokRef variants (Dokument vs String)
+        // Test with different StationDokumenteInner variants (Dokument vs String)
         let top1 = create_test_top(1);
         let mut top2 = top1.clone();
 
@@ -1005,15 +1013,12 @@ mod tests {
         }
     }
 
-    fn create_test_dokref_dokument(api_id: &str) -> DokRef {
-        DokRef::Dokument(Box::new(create_test_dokument(api_id)))
+    fn create_test_dokref_dokument(api_id: &str) -> StationDokumenteInner {
+        StationDokumenteInner::Dokument(Box::new(create_test_dokument(api_id)))
     }
 
-    fn create_test_dokref_string(s: &str) -> DokRef {
-        DokRef::StringRef(Box::new(StringRef {
-            dc_type: default::Default::default(),
-            value: s.to_string(),
-        }))
+    fn create_test_dokref_string(s: &str) -> StationDokumenteInner {
+        StationDokumenteInner::String(Box::new(s.to_string()))
     }
 
     fn create_test_top(nummer: i32) -> Top {

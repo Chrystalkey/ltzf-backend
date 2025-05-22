@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export OPENAPI_GENERATOR_VERSION="7.12.0"
+export OPENAPI_GENERATOR_VERSION="7.13.0"
 DIRECTORY="oapi-generator"
 
 echo "Checking for openapi-generator-cli"
@@ -11,7 +11,7 @@ if [ ! -d "oapi-generator" ]; then
     mkdir oapi-generator
     cd oapi-generator || exit
 
-    curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.12.0/openapi-generator-cli-7.12.0.jar
+    curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar
     curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml
 
     cd ..
@@ -21,7 +21,7 @@ fi
 if [ ! -f "oapi-generator/openapi-generator-cli.jar" ]; then
     echo "Downloading OApi Generator"
     cd oapi-generator || exit
-    curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.12.0/openapi-generator-cli-7.12.0.jar
+    curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar
     cd ..
 fi
 
@@ -34,7 +34,7 @@ if [ ! -f "oapi-generator/openapi.yml" ]; then
 fi
 
 # Run openapi-generator
-OPENAPI_GENERATOR_VERSION="7.12.0" java -jar ./$DIRECTORY/openapi-generator-cli.jar generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode
+java -jar ./$DIRECTORY/openapi-generator-cli.jar generate -g rust-axum -i $DIRECTORY/openapi.yml -o $(pwd)/oapicode
 
 # Replace <I, A, E> with <I, A, E, C> in mod.rs using ripgrep and create mod2.rs
 rg '<I, A, E>' -r '<I, A, E, C>' ./oapicode/src/server/mod.rs --passthrough -N > ./oapicode/src/server/mod1.rs

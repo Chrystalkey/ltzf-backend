@@ -425,7 +425,9 @@ pub(crate) mod endpoint_test {
     // Session (Sitzung) tests
     pub(crate) fn create_test_session() -> models::Sitzung {
         use chrono::{DateTime, Utc};
-        use openapi::models::{Autor, DokRef, Dokument, Gremium, Parlament, Sitzung, Top};
+        use openapi::models::{
+            Autor, Dokument, Gremium, Parlament, Sitzung, StationDokumenteInner, Top,
+        };
         use uuid::Uuid;
 
         // Create a test document
@@ -458,7 +460,7 @@ pub(crate) mod endpoint_test {
         // Create a test top
         let test_top = Top {
             titel: "Test Top".to_string(),
-            dokumente: Some(vec![DokRef::Dokument(Box::new(test_doc))]),
+            dokumente: Some(vec![StationDokumenteInner::Dokument(Box::new(test_doc))]),
             nummer: 1,
             vorgang_id: None,
         };
@@ -495,8 +497,8 @@ pub(crate) mod endpoint_test {
     pub(crate) fn create_test_vorgang() -> models::Vorgang {
         use chrono::{DateTime, Utc};
         use openapi::models::{
-            Autor, DokRef, Doktyp, Dokument, Parlament, Station, Stationstyp, VgIdent, VgIdentTyp,
-            Vorgang, Vorgangstyp,
+            Autor, Doktyp, Dokument, Parlament, Station, StationDokumenteInner, Stationstyp,
+            VgIdent, VgIdentTyp, Vorgang, Vorgangstyp,
         };
         use uuid::Uuid;
 
@@ -530,7 +532,7 @@ pub(crate) mod endpoint_test {
         // Create a test station
         let test_station = Station {
             typ: Stationstyp::ParlInitiativ,
-            dokumente: vec![DokRef::Dokument(Box::new(test_doc))],
+            dokumente: vec![StationDokumenteInner::Dokument(Box::new(test_doc))],
             zp_start: DateTime::from(Utc::now()),
             api_id: Some(Uuid::now_v7()),
             touched_by: None,

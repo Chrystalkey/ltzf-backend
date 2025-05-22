@@ -48,14 +48,14 @@ pub async fn vorgang_merge_candidates(
             s.dokumente
                 .iter()
                 .filter(|&d| {
-                    if let models::DokRef::Dokument(d) = d {
+                    if let models::StationDokumenteInner::Dokument(d) = d {
                         d.typ == models::Doktyp::Entwurf && d.vorwort.is_some()
                     } else {
                         false
                     }
                 })
                 .map(|d| {
-                    if let models::DokRef::Dokument(d) = d {
+                    if let models::StationDokumenteInner::Dokument(d) = d {
                         d.vorwort.clone().unwrap()
                     } else {
                         unreachable!()
@@ -134,9 +134,9 @@ pub async fn station_merge_candidates(
     let dok_hash: Vec<_> = model
         .dokumente
         .iter()
-        .filter(|x| matches!(x, models::DokRef::Dokument(_)))
+        .filter(|x| matches!(x, models::StationDokumenteInner::Dokument(_)))
         .map(|x| {
-            if let models::DokRef::Dokument(d) = x {
+            if let models::StationDokumenteInner::Dokument(d) = x {
                 d.hash.clone()
             } else {
                 unreachable!()
@@ -344,8 +344,8 @@ pub async fn execute_merge_station(
         // if id & in database: add to list of associated documents
         // if document: match & integrate or insert.
         match dok {
-            models::DokRef::StringRef(uuid) => {
-                let uuid = uuid::Uuid::parse_str(&uuid.value)?;
+            models::StationDokumenteInner::String(uuid) => {
+                let uuid = uuid::Uuid::parse_str(&uuid)?;
                 let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
                     .map(|r| r.id)
                     .fetch_optional(&mut **tx)
@@ -357,7 +357,7 @@ pub async fn execute_merge_station(
                 }
                 insert_ids.push(id.unwrap());
             }
-            models::DokRef::Dokument(dok) => {
+            models::StationDokumenteInner::Dokument(dok) => {
                 let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
                 match matches {
                     MatchState::NoMatch => {
@@ -676,7 +676,7 @@ mod scenariotest {
     #[derive(Deserialize)]
     struct PTS {
         context: Vec<models::Vorgang>,
-        vorgang: models::Vorgang,
+        object: models::Vorgang,
         result: Vec<models::Vorgang>,
         #[serde(default = "default_bool")]
         shouldfail: bool,
@@ -704,39 +704,8 @@ mod scenariotest {
                 .replace("5432/ltzf", &format!("5432/testing_{}", name));
 
             let scenario_compile = lse::Scenario::load(&format!("{}", path.display())).unwrap();
-            let strpretty = serde_json::to_string_pretty(&scenario_compile).unwrap();
-            let dr = models::DokRef::Dokument(Box::new(models::Dokument {
-                autoren: vec![],
-                dc_type: "dokument".to_string(),
-                api_id: None,
-                drucksnr: None,
-                hash: "aölskdjgvaölskdjf".to_string(),
-                kurztitel: None,
-                link: "dölakjsöfldksjf".to_string(),
-                meinung: None,
-                schlagworte: None,
-                titel: "aölsdkfjöalskdfj".to_string(),
-                touched_by: None,
-                typ: models::Doktyp::Antrag,
-                volltext: "ödlkjfjklölökjsdjklö".to_string(),
-                zp_erstellt: None,
-                vorwort: None,
-                zp_modifiziert: chrono::Utc::now(),
-                zp_referenz: chrono::Utc::now(),
-                zusammenfassung: None,
-            }));
-            // TODO: This fucks everything up
-            // there are two issues:
-            // 1. u8 not being serializeable, must change to remove upper/lower limit
-            // 2. the discriminator does not work at all with reference/dokument. Either revert to full doks everywhere or ref/dok without discriminiator
-            std::fs::write("dokument.json", &dr).unwrap();
-            std::fs::write("expanded_scenario_out.json", &strpretty).unwrap();
             let pts: PTS =
-                serde_json::from_str(&strpretty).expect(&format!("In scenario {}", name));
-            // let pts: PTS = serde_json::from_str(
-            //     &serde_json::to_string(&scenario_compile).expect(&format!("In scenario {}", name)),
-            // )
-            // .expect(&format!("In scenario {}", name));
+                serde_json::from_str(&serde_json::to_string(&scenario_compile).unwrap()).expect(&format!("In scenario {}", name));
             let server = LTZFServer {
                 config: crate::Configuration {
                     ..Default::default()
@@ -748,7 +717,7 @@ mod scenariotest {
                     .await
                     .unwrap(),
             };
-            sqlx::migrate!().run(&server.sqlx_db).await.unwrap();
+            sqlx::migrate!().run(&server.sqlx_db).await.expect(&format!("In Scenario {}", name));
             for vorgang in pts.context.iter() {
                 crate::db::merge::vorgang::run_integration(vorgang, Uuid::nil(), &server)
                     .await
@@ -757,7 +726,7 @@ mod scenariotest {
             Self {
                 name,
                 context: pts.context,
-                vorgang: pts.vorgang,
+                vorgang: pts.object,
                 result: pts.result,
                 shouldfail: pts.shouldfail,
                 span,

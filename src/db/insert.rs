@@ -539,14 +539,16 @@ pub async fn insert_or_retrieve_autor(
 }
 
 pub async fn insert_or_retrieve_dok(
-    dr: &models::DokRef,
+    dr: &models::StationDokumenteInner,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
     match dr {
-        models::DokRef::Dokument(dok) => Ok(insert_dokument((**dok).clone(), tx, srv).await?),
-        models::DokRef::StringRef(dapi_id) => {
-            let api_id = uuid::Uuid::from_str(dapi_id.value.as_str())?;
+        models::StationDokumenteInner::Dokument(dok) => {
+            Ok(insert_dokument((**dok).clone(), tx, srv).await?)
+        }
+        models::StationDokumenteInner::String(dapi_id) => {
+            let api_id = uuid::Uuid::from_str(dapi_id.as_str())?;
             Ok(
                 sqlx::query!("SELECT id FROM dokument WHERE api_id = $1", api_id)
                     .map(|r| r.id)

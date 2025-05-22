@@ -152,7 +152,10 @@ pub async fn station_by_id(
         doks.push(dokument_by_id(did, executor).await?.into());
     }
     doks.sort_by(|a, b| match (a, b) {
-        (models::DokRef::Dokument(a), models::DokRef::Dokument(b)) => a.link.cmp(&b.link),
+        (
+            models::StationDokumenteInner::Dokument(a),
+            models::StationDokumenteInner::Dokument(b),
+        ) => a.link.cmp(&b.link),
         _ => {
             unreachable!("If this is the case document extraction failed")
         }
@@ -311,7 +314,10 @@ pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<mode
         doks.push(dokument_by_id(did, tx).await?.into());
     }
     doks.sort_by(|a, b| match (a, b) {
-        (models::DokRef::Dokument(a), models::DokRef::Dokument(b)) => a.link.cmp(&b.link),
+        (
+            models::StationDokumenteInner::Dokument(a),
+            models::StationDokumenteInner::Dokument(b),
+        ) => a.link.cmp(&b.link),
         _ => {
             unreachable!("If this is the case document extraction failed")
         }

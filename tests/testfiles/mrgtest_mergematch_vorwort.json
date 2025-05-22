@@ -64,7 +64,6 @@
             "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa3",
             "drucksnr": "18/420",
             "typ": "entwurf",
-            "dc_type": "dokument",
             "titel": "titel eines dokuments",
             "kurztitel": "kurzer doktitel",
             "vorwort": "string",
@@ -95,7 +94,6 @@
         "stellungnahmen": [
           {
             "api_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-            "dc_type": "dokument",
             "typ": "stellungnahme",
             "titel": "Stellungnahme zum Thema Hein Blöd",
             "kurztitel": "Hein Blöd ist actually schlau du Nase",
