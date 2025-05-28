@@ -275,7 +275,6 @@ pub async fn dokument_by_id(
 
     Ok(models::Dokument {
         api_id: Some(rec.api_id),
-        dc_type: std::default::Default::default(),
         touched_by: None,
         titel: rec.titel,
         kurztitel: rec.kurztitel,

@@ -433,7 +433,6 @@ pub(crate) mod endpoint_test {
         // Create a test document
         let test_doc = Dokument {
             touched_by: None,
-            dc_type: std::default::Default::default(),
             api_id: Some(Uuid::now_v7()),
             titel: "Test Document".to_string(),
             kurztitel: None,
@@ -506,7 +505,6 @@ pub(crate) mod endpoint_test {
         let test_doc = Dokument {
             api_id: Some(Uuid::now_v7()),
             titel: "Test Document".to_string(),
-            dc_type: std::default::Default::default(),
             touched_by: None,
             kurztitel: None,
             vorwort: Some("Test Vorwort".to_string()),

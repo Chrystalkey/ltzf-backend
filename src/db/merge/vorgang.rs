@@ -646,101 +646,304 @@ pub async fn run_integration(
 
 #[cfg(test)]
 mod scenariotest {
-    use crate::{LTZFServer, api::PaginationResponsePart, db::retrieve};
-    use futures::FutureExt;
-    use ltzf_scenario_expand as lse;
+    use crate::{LTZFError, LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
+    use openapi::models;
     use similar::ChangeTag;
     use std::collections::HashSet;
-    use std::panic::AssertUnwindSafe;
     use uuid::Uuid;
 
-    use openapi::models::{self, VorgangGetHeaderParams, VorgangGetQueryParams};
-    use serde::Deserialize;
-
-    #[allow(unused)]
-    use tracing::{debug, error, info, warn};
-
-    fn xor(one: bool, two: bool) -> bool {
-        return (one && two) || (!one && !two);
+    async fn setup(name: &str) -> Result<LTZFServer> {
+        todo!()
     }
-    #[allow(unused)]
-    struct TestScenario<'obj> {
-        name: &'obj str,
-        context: Vec<models::Vorgang>,
-        vorgang: models::Vorgang,
-        result: Vec<models::Vorgang>,
-        shouldfail: bool,
-        server: LTZFServer,
-        span: tracing::Span,
+    async fn teardown(name: &str) -> Result<()> {
+        todo!()
     }
-    #[derive(Deserialize)]
-    struct PTS {
+    mod generate {
+        use std::str::FromStr;
+
+        use openapi::models;
+        use uuid::Uuid;
+        pub(crate) fn default_vorgang() -> models::Vorgang {
+            models::Vorgang {
+                api_id: Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef106e").unwrap(),
+                titel: "Testtitel".to_string(),
+                kurztitel: Some("Kurzer Testtitel".to_string()),
+                stationen: vec![default_station()],
+                typ: models::Vorgangstyp::GgZustimmung,
+                verfassungsaendernd: false,
+                wahlperiode: 20,
+                touched_by: None,
+                links: Some(vec!["https://example.com/ichmagmoneten".to_string()]),
+                initiatoren: vec![default_autor_person(), default_autor_institution()],
+                ids: Some(vec![models::VgIdent {
+                    id: "einzigartig".to_string(),
+                    typ: models::VgIdentTyp::Initdrucks,
+                }]),
+                lobbyregister: Some(vec![models::Lobbyregeintrag {
+                    betroffene_drucksachen: vec!["20/2014".to_string()],
+                    intention: "Für die Klicks".to_string(),
+                    interne_id: "as9d8fja9s8djf".to_string(),
+                    link: "https://example.com/einig/gerecht/frei".to_string(),
+                    organisation: default_autor_lobby(),
+                }]),
+            }
+        }
+        pub(crate) fn default_station() -> models::Station {
+            models::Station {
+                api_id: None,
+                typ: models::Stationstyp::ParlAusschber,
+                link: Some("https://an.example.com/leckmichfett".to_string()),
+                gremium_federf: Some(false),
+                titel: Some("rattlesnakes!".to_string()),
+                zp_start: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .unwrap()
+                    .to_utc(),
+                zp_modifiziert: Some(
+                    chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                        .unwrap()
+                        .to_utc(),
+                ),
+                trojanergefahr: Some(2u8),
+                parlament: models::Parlament::Bb,
+                schlagworte: Some(vec!["stationär".to_string()]),
+                touched_by: None,
+                stellungnahmen: Some(vec![default_stellungnahme()]),
+                additional_links: Some(vec![
+                    "https://example.com/videos/aus/der/hoelle".to_string(),
+                ]),
+                dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                    default_dokument(),
+                ))],
+                gremium: Some(default_gremium()),
+            }
+        }
+        pub(crate) fn default_gremium() -> models::Gremium {
+            models::Gremium {
+                link: Some("https://a.xyz".to_string()),
+                name: "Ausschuss für Inneres und Gemüsaufläufe".to_string(),
+                parlament: models::Parlament::Bb,
+                wahlperiode: 20,
+            }
+        }
+        pub(crate) fn default_dokument() -> models::Dokument {
+            models::Dokument{
+                api_id: None,
+                autoren: vec![default_autor_person()],
+                hash: "f98d9d6f136109780d69f6".to_string(),
+                drucksnr: Some("20/441".to_string()),
+                kurztitel: Some("Dokumentblubgedöns".to_string()),
+                link: "https://irgendwo.im.nirgendwo.de".to_string(),
+                meinung: None,
+                titel: "Ganz ausführlicher Titel, der die Schuppenfärbungsverordnung von 2027 zu verändern versucht bevor sie Gesetz wird".to_string(),
+                typ: models::Doktyp::Entwurf,
+                volltext: "Nee, ich denk mir hier keinen Volltext aus. Das wär wirklich viel zu lang. Vor allem zu einer Schuppenfärbeverordnung aus der Zukunft! Soo lächerlich. 
+                Natürlich mal wieder Klassiker, dass die hier \"Schuppen\" und nicht \"Fischschuppen\", \"Gartenschuppen\" oder \"Drachenschuppen\" geschrieben haben. Danke Merkel! 
+                Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
+                vorwort: Some("Vorwort".to_string()),
+                zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
+                schlagworte: Some(vec!["drache".to_string(), "verordnung".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string()]),
+                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
+                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                touched_by: None,
+            }
+        }
+        pub(crate) fn default_stellungnahme() -> models::Dokument {
+            models::Dokument{
+                api_id: None,
+                autoren: vec![default_autor_person()],
+                hash: "f98d9d6f136109780d69f6".to_string(),
+                drucksnr: Some("20/441".to_string()),
+                kurztitel: Some("Dokumentblubgedöns".to_string()),
+                link: "https://irgendwo.im.nirgendwo.de".to_string(),
+                meinung: Some(3u8),
+                titel: "Stelungnahme zu: Ganz ausführlicher Titel, der die Schuppenfärbungsverordnung von 2027 zu verändern versucht bevor sie Gesetz wird".to_string(),
+                typ: models::Doktyp::Stellungnahme,
+                volltext: "Nee, ich denk mir hier keinen Volltext aus. Das wär wirklich viel zu lang. Vor allem zu einer Schuppenfärbeverordnung aus der Zukunft! Soo lächerlich. 
+                Natürlich mal wieder Klassiker, dass die hier \"Schuppen\" und nicht \"Fischschuppen\", \"Gartenschuppen\" oder \"Drachenschuppen\" geschrieben haben. Danke Merkel! 
+                Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
+                vorwort: Some("Vorwort".to_string()),
+                zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
+                schlagworte: Some(vec!["drache".to_string(), "verordnung".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string()]),
+                zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
+                zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
+                touched_by: None,
+            }
+        }
+        pub(crate) fn default_autor_person() -> models::Autor {
+            models::Autor {
+                fachgebiet: None,
+                lobbyregister: None,
+                organisation: "Ministerium der Magie".to_string(),
+                person: Some("Harald Maria Töpfer".to_string()),
+            }
+        }
+        pub(crate) fn default_autor_institution() -> models::Autor {
+            models::Autor {
+                fachgebiet: None,
+                lobbyregister: None,
+                organisation: "Mysterium der Ministerien".to_string(),
+                person: None,
+            }
+        }
+        pub(crate) fn default_autor_experte() -> models::Autor {
+            models::Autor {
+                person: Some("Karl Preis".to_string()),
+                organisation: "Kachelofenbau Hannes".to_string(),
+                fachgebiet: Some("Kachelofenbau".to_string()),
+                lobbyregister: None,
+            }
+        }
+        pub(crate) fn default_autor_lobby() -> models::Autor {
+            models::Autor {
+                fachgebiet: None,
+                lobbyregister: Some(
+                    "https://lobbyregister.beispiel/heinzpeter-karlsbader-ff878f".to_string(),
+                ),
+                organisation: "Kachelofenzerstörung Heinzelfrau".to_string(),
+                person: Some("Heinz-Peter Karlsbader".to_string()),
+            }
+        }
+        pub(crate) fn default_sitzung() -> models::Sitzung {
+            models::Sitzung {
+                api_id: None,
+                touched_by: None,
+                titel: Some("Klogespräche und -lektüre im 22. Jhd.".to_string()),
+                termin: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
+                    .unwrap()
+                    .to_utc(),
+                gremium: default_gremium(),
+                nummer: 42,
+                public: true,
+                link: Some("https://klogefueh.le".to_string()),
+                tops: vec![default_top()],
+                dokumente: Some(vec![default_dokument()]),
+                experten: Some(vec![default_autor_experte()]),
+            }
+        }
+        pub(crate) fn default_top() -> models::Top {
+            models::Top {
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    default_dokument(),
+                ))]),
+                nummer: 1,
+                titel: "Lektüre und Haptik".to_string(),
+                vorgang_id: None,
+            }
+        }
+    }
+    struct Scenario {
         context: Vec<models::Vorgang>,
         object: models::Vorgang,
-        result: Vec<models::Vorgang>,
-        #[serde(default = "default_bool")]
+        expected: Vec<models::Vorgang>,
         shouldfail: bool,
+        name: &'static str,
     }
-    fn default_bool() -> bool {
-        false
+    fn xor(b1: bool, b2: bool) -> bool {
+        return b1 && !b2 || b2 && !b1;
     }
-    impl<'obj> TestScenario<'obj> {
-        async fn new(path: &'obj std::path::Path, server: &LTZFServer) -> Self {
-            let name = path.file_stem().unwrap().to_str().unwrap();
-            info!("Creating Merge Test Scenario with name: {}", name);
-            let span = tracing::span!(tracing::Level::INFO, "Mergetest", name = name);
-            let dropquery = format!("DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);", name);
+    impl Scenario {
+        async fn run(&self) -> Result<()> {
+            let server = self.setup().await?;
+            self.build_context(&server).await?;
+            self.place_object(&server).await?;
+            self.check_result(&server).await?;
+            self.teardown(&server).await?;
+            Ok(())
+        }
+        async fn setup(&self) -> Result<LTZFServer> {
+            let dburl = std::env::var("DATABASE_URL")
+                .expect("Expected to find working DATABASE_URL for testing");
+            let config = crate::Configuration {
+                mail_server: None,
+                mail_user: None,
+                mail_password: None,
+                mail_sender: None,
+                mail_recipient: None,
+                host: "localhost".to_string(),
+                port: 80,
+                db_url: dburl.clone(),
+                config: None,
+                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
+                merge_title_similarity: 0.8,
+            };
+            let master_server = LTZFServer {
+                config: config.clone(),
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
+            };
+            let dropquery = format!(
+                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
+                self.name
+            );
             let query = format!(
                 "CREATE DATABASE \"testing_{}\" WITH OWNER 'ltzf-user';",
-                name
+                self.name
             );
             sqlx::query(&dropquery)
-                .execute(&server.sqlx_db)
-                .await
-                .unwrap();
-            sqlx::query(&query).execute(&server.sqlx_db).await.unwrap();
-            let test_db_url = std::env::var("DATABASE_URL")
-                .unwrap()
-                .replace("5432/ltzf", &format!("5432/testing_{}", name));
+                .execute(&master_server.sqlx_db)
+                .await?;
+            sqlx::query(&query).execute(&master_server.sqlx_db).await?;
 
-            let scenario_compile = lse::Scenario::load(&format!("{}", path.display())).unwrap();
-            let pts: PTS =
-                serde_json::from_str(&serde_json::to_string(&scenario_compile).unwrap()).expect(&format!("In scenario {}", name));
-            let server = LTZFServer {
-                config: crate::Configuration {
-                    ..Default::default()
-                },
-                mailbundle: None,
-                sqlx_db: sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(5)
-                    .connect(&test_db_url)
-                    .await
-                    .unwrap(),
+            let db_url = config
+                .db_url
+                .replace("5432/ltzf", &format!("5432/testing_{}", self.name));
+            let oconfig = crate::Configuration {
+                db_url: db_url.clone(),
+                ..config
             };
-            sqlx::migrate!().run(&server.sqlx_db).await.expect(&format!("In Scenario {}", name));
-            for vorgang in pts.context.iter() {
-                crate::db::merge::vorgang::run_integration(vorgang, Uuid::nil(), &server)
-                    .await
-                    .unwrap()
-            }
-            Self {
-                name,
-                context: pts.context,
-                vorgang: pts.object,
-                result: pts.result,
-                shouldfail: pts.shouldfail,
-                span,
-                server,
-            }
+            let out_server = LTZFServer {
+                config: oconfig,
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&db_url).await?,
+            };
+            sqlx::migrate!().run(&out_server.sqlx_db).await?;
+            Ok(out_server)
         }
-        async fn push(&self) {
-            info!("Running main Merge test");
-            crate::db::merge::vorgang::run_integration(&self.vorgang, Uuid::nil(), &self.server)
-                .await
-                .unwrap();
+
+        async fn teardown(&self, server: &LTZFServer) -> Result<()> {
+            let dburl = std::env::var("DATABASE_URL")
+                .expect("Expected to find working DATABASE_URL for testing");
+            let config = crate::Configuration {
+                mail_server: None,
+                mail_user: None,
+                mail_password: None,
+                mail_sender: None,
+                mail_recipient: None,
+                host: "localhost".to_string(),
+                port: 80,
+                db_url: dburl.clone(),
+                config: None,
+                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
+                merge_title_similarity: 0.8,
+            };
+            let master_server = LTZFServer {
+                config: config.clone(),
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
+            };
+            let dropquery = format!(
+                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
+                self.name
+            );
+            sqlx::query(&dropquery)
+                .execute(&master_server.sqlx_db)
+                .await?;
+            Ok(())
         }
-        async fn check(&self) {
-            info!("Checking for Correctness");
+
+        async fn build_context(&self, server: &LTZFServer) -> Result<()> {
+            for obj in self.context.iter() {
+                super::run_integration(obj, Uuid::nil(), server).await?;
+            }
+            Ok(())
+        }
+        async fn place_object(&self, server: &LTZFServer) -> Result<()> {
+            super::run_integration(&self.object, Uuid::nil(), server).await?;
+            Ok(())
+        }
+        async fn check_result(&self, server: &LTZFServer) -> Result<()> {
             let paramock = retrieve::VGGetParameters {
                 vgtyp: None,
                 wp: None,
@@ -751,8 +954,8 @@ mod scenariotest {
                 lower_date: None,
                 upper_date: None,
             };
-            let mut tx = self.server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs = crate::db::retrieve::vorgang_by_parameter(
+            let mut tx = server.sqlx_db.begin().await.unwrap();
+            let db_vorgangs = retrieve::vorgang_by_parameter(
                 paramock,
                 0,
                 PaginationResponsePart::DEFAULT_PER_PAGE,
@@ -760,9 +963,9 @@ mod scenariotest {
             )
             .await
             .unwrap();
+            tx.commit().await?;
 
-            tx.rollback().await.unwrap();
-            for expected in self.result.iter() {
+            for expected in self.expected.iter() {
                 let mut found = false;
                 for db_out in db_vorgangs.1.iter() {
                     if db_out == expected {
@@ -797,7 +1000,7 @@ mod scenariotest {
                     "({}): Expected to find Vorgang with api_id `{}`, but was not present in the output set, which contained: {:?}.\n\nDetails(Output Set):\n{:#?}",
                     self.name,
                     expected.api_id,
-                    self.result
+                    self.expected
                         .iter()
                         .map(|e| e.api_id)
                         .collect::<Vec<uuid::Uuid>>(),
@@ -813,80 +1016,36 @@ mod scenariotest {
             }
 
             assert!(
-                self.result.len() == db_vorgangs.1.len(),
+                self.expected.len() == db_vorgangs.1.len(),
                 "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
                 self.name,
-                self.result.len(),
+                self.expected.len(),
                 db_vorgangs.1.len(),
                 db_vorgangs
             );
-        }
-        async fn run(self) {
-            self.push().await;
-            self.check().await;
+            todo!()
         }
     }
 
-    #[tokio::test]
-    async fn test_merge_scenarios() {
-        // set up database connection and clear it
-        info!("Setting up Test Database Connection");
-        let test_db_url = std::env::var("DATABASE_URL").unwrap();
-        let master_server = LTZFServer {
-            config: crate::Configuration {
-                ..Default::default()
-            },
-            mailbundle: None,
-            sqlx_db: sqlx::postgres::PgPoolOptions::new()
-                .max_connections(5)
-                .connect(&test_db_url)
-                .await
-                .unwrap(),
-        };
-
-        for path in std::fs::read_dir("tests/testfiles").unwrap() {
-            if let Ok(path) = path {
-                info!("Executing Scenario: {}", path.path().display());
-                let ptb = path.path();
-                let name = ptb.file_stem().unwrap().to_str().unwrap();
-
-                let mut shouldfail = false;
-                let scenario = TestScenario::new(&ptb, &master_server).await;
-                let result = AssertUnwindSafe(async {
-                    shouldfail = scenario.shouldfail;
-                    scenario.run().await
-                })
-                .catch_unwind()
-                .await;
-
-                if result.is_ok() == shouldfail {
-                    assert!(
-                        false,
-                        "The Scenario {} did not behave as expected: {}",
-                        name,
-                        if shouldfail {
-                            "Succeeded, but should fail"
-                        } else {
-                            "Failed but should succeed"
-                        }
-                    );
-                } else {
-                    let query = format!("DROP DATABASE testing_{}", name);
-                    sqlx::query(&query)
-                        .execute(&master_server.sqlx_db)
-                        .await
-                        .unwrap();
-                }
-            } else {
-                error!("Error: {:?}", path.unwrap_err())
-            }
-        }
-    }
     fn dump_objects<T: serde::Serialize, S: serde::Serialize>(expected: &T, actual: &S) -> String {
         format!(
             "{{ \"expected-object\" : {},\n\"actual-object\" : {}}}",
             serde_json::to_string_pretty(expected).unwrap(),
             serde_json::to_string_pretty(actual).unwrap()
         )
+    }
+
+    // one in, again one in, one out
+    #[tokio::test]
+    async fn test_idempotenz() {
+        let vg = generate::default_vorgang();
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg.clone(),
+            expected: vec![vg],
+            name: "idempotenz",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
     }
 }

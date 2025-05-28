@@ -996,7 +996,6 @@ mod tests {
             drucksnr: Some("Test Drucksnr".to_string()),
             typ: models::Doktyp::Entwurf,
             titel: "Test Titel".to_string(),
-            dc_type: default::Default::default(),
             touched_by: None,
             kurztitel: Some("Test Kurztitel".to_string()),
             vorwort: Some("Test Vorwort".to_string()),
