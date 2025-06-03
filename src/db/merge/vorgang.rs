@@ -204,13 +204,20 @@ pub async fn dokument_merge_candidates(
     srv: &LTZFServer,
 ) -> Result<MatchState<i32>> {
     let dids = sqlx::query!(
-        "SELECT d.id FROM dokument d WHERE 
-        d.hash = $1 OR
+        "SELECT d.id FROM dokument d 
+        INNER JOIN dokumententyp dt ON dt.id = d.typ 
+        WHERE 
+        (d.hash = $1 OR
         d.api_id = $2 OR
-        d.drucksnr = $3",
+        d.drucksnr = $3) AND dt.value = $4",
         model.hash,
         model.api_id,
-        model.drucksnr
+        model.drucksnr,
+        srv.guard_ts(
+            model.typ,
+            model.api_id.unwrap_or(Uuid::nil()),
+            "dok_merge_candidates"
+        )?
     )
     .map(|r| r.id)
     .fetch_all(executor)
@@ -652,18 +659,14 @@ mod scenariotest {
     use std::collections::HashSet;
     use uuid::Uuid;
 
-    async fn setup(name: &str) -> Result<LTZFServer> {
-        todo!()
-    }
-    async fn teardown(name: &str) -> Result<()> {
-        todo!()
-    }
     mod generate {
         use std::str::FromStr;
 
         use openapi::models;
         use uuid::Uuid;
         pub(crate) fn default_vorgang() -> models::Vorgang {
+            let mut at = vec![default_autor_person(), default_autor_institution()];
+            at.sort_by(|a, b| a.organisation.cmp(&b.organisation));
             models::Vorgang {
                 api_id: Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef106e").unwrap(),
                 titel: "Testtitel".to_string(),
@@ -674,7 +677,7 @@ mod scenariotest {
                 wahlperiode: 20,
                 touched_by: None,
                 links: Some(vec!["https://example.com/ichmagmoneten".to_string()]),
-                initiatoren: vec![default_autor_person(), default_autor_institution()],
+                initiatoren: at,
                 ids: Some(vec![models::VgIdent {
                     id: "einzigartig".to_string(),
                     typ: models::VgIdentTyp::Initdrucks,
@@ -690,7 +693,7 @@ mod scenariotest {
         }
         pub(crate) fn default_station() -> models::Station {
             models::Station {
-                api_id: None,
+                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeefeeee").unwrap()),
                 typ: models::Stationstyp::ParlAusschber,
                 link: Some("https://an.example.com/leckmichfett".to_string()),
                 gremium_federf: Some(false),
@@ -727,7 +730,7 @@ mod scenariotest {
         }
         pub(crate) fn default_dokument() -> models::Dokument {
             models::Dokument{
-                api_id: None,
+                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef3333").unwrap()),
                 autoren: vec![default_autor_person()],
                 hash: "f98d9d6f136109780d69f6".to_string(),
                 drucksnr: Some("20/441".to_string()),
@@ -741,7 +744,7 @@ mod scenariotest {
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
                 vorwort: Some("Vorwort".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
-                schlagworte: Some(vec!["drache".to_string(), "verordnung".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string()]),
+                schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
                 zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
                 zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
@@ -750,10 +753,10 @@ mod scenariotest {
         }
         pub(crate) fn default_stellungnahme() -> models::Dokument {
             models::Dokument{
-                api_id: None,
+                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef7777").unwrap()),
                 autoren: vec![default_autor_person()],
-                hash: "f98d9d6f136109780d69f6".to_string(),
-                drucksnr: Some("20/441".to_string()),
+                hash: "f98d9d6f13635463450d69f6".to_string(),
+                drucksnr: None,
                 kurztitel: Some("Dokumentblubgedöns".to_string()),
                 link: "https://irgendwo.im.nirgendwo.de".to_string(),
                 meinung: Some(3u8),
@@ -762,9 +765,9 @@ mod scenariotest {
                 volltext: "Nee, ich denk mir hier keinen Volltext aus. Das wär wirklich viel zu lang. Vor allem zu einer Schuppenfärbeverordnung aus der Zukunft! Soo lächerlich. 
                 Natürlich mal wieder Klassiker, dass die hier \"Schuppen\" und nicht \"Fischschuppen\", \"Gartenschuppen\" oder \"Drachenschuppen\" geschrieben haben. Danke Merkel! 
                 Ich persönlich ziehen ja eine Drachenschuppenfärbeverordnung einer Gartenschuppenfärbeverordnung in jedem Fall vor...".to_string(),
-                vorwort: Some("Vorwort".to_string()),
+                vorwort: Some("Stelluingsnahmenvorwort das völlig verschieden von dem Hauptdokument ist".to_string()),
                 zusammenfassung: Some("Zusammenfassungstext kommt hier rein".to_string()),
-                schlagworte: Some(vec!["drache".to_string(), "verordnung".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string()]),
+                schlagworte: Some(vec!["drache".to_string(), "langer text".to_string(), "mächtiggewaltigegon".to_string(), "schuppen".to_string(), "verordnung".to_string()]),
                 zp_erstellt: Some(chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc()),
                 zp_referenz: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
                 zp_modifiziert: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00").unwrap().to_utc(),
@@ -807,7 +810,7 @@ mod scenariotest {
         }
         pub(crate) fn default_sitzung() -> models::Sitzung {
             models::Sitzung {
-                api_id: None,
+                api_id: Some(Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef9999").unwrap()),
                 touched_by: None,
                 titel: Some("Klogespräche und -lektüre im 22. Jhd.".to_string()),
                 termin: chrono::DateTime::parse_from_rfc3339("1950-01-01T22:01:02+00:00")
@@ -995,12 +998,14 @@ mod scenariotest {
                     )
                     .unwrap();
                 }
+                let default_vorgang = generate::default_vorgang();
                 assert!(
                     found,
                     "({}): Expected to find Vorgang with api_id `{}`, but was not present in the output set, which contained: {:?}.\n\nDetails(Output Set):\n{:#?}",
                     self.name,
                     expected.api_id,
-                    self.expected
+                    db_vorgangs
+                        .1
                         .iter()
                         .map(|e| e.api_id)
                         .collect::<Vec<uuid::Uuid>>(),
@@ -1008,10 +1013,18 @@ mod scenariotest {
                         .1
                         .iter()
                         .map(|v| {
-                            println!("{}", serde_json::to_string_pretty(v).unwrap());
-                            ""
+                            println!(
+                                "{}\nDifference to Default(this is 'g'):\n{}\nDefault Vorgang:\n{}",
+                                &serde_json::to_string_pretty(v).unwrap(),
+                                crate::db::merge::display_strdiff(
+                                    &serde_json::to_string_pretty(&default_vorgang).unwrap(),
+                                    &serde_json::to_string_pretty(v).unwrap()
+                                ),
+                                &serde_json::to_string_pretty(&default_vorgang).unwrap()
+                            );
+                            "object, see stdout".to_string()
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<String>>()
                 );
             }
 
@@ -1023,7 +1036,13 @@ mod scenariotest {
                 db_vorgangs.1.len(),
                 db_vorgangs
             );
-            todo!()
+            // check if both lists are equal
+            let mut exp_sorted = self.expected.clone();
+            let mut db_sorted = db_vorgangs.1.clone();
+            exp_sorted.sort_by(|a, b| a.api_id.cmp(&b.api_id));
+            db_sorted.sort_by(|a, b| a.api_id.cmp(&b.api_id));
+            assert_eq!(exp_sorted, db_sorted);
+            Ok(())
         }
     }
 

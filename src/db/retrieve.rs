@@ -91,12 +91,13 @@ pub async fn vorgang_by_id(
                         interne_id: r.interne_id,
                         betroffene_drucksachen: vec![],
                     },
+                    r.organisation,
                 )
             })
             .fetch_all(&mut **executor)
             .await?;
     let mut lobbyregs = vec![];
-    for (id, object) in lobbyreg_records.drain(..) {
+    for (id, object, org_id) in lobbyreg_records.drain(..) {
         let drucks = sqlx::query!(
             "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
             id
@@ -105,7 +106,7 @@ pub async fn vorgang_by_id(
         .fetch_all(&mut **executor)
         .await?;
         lobbyregs.push(models::Lobbyregeintrag {
-            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", id)
+            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", org_id)
                 .map(|r| models::Autor {
                     fachgebiet: r.fachgebiet,
                     lobbyregister: r.lobbyregister,
