@@ -1067,4 +1067,77 @@ mod scenariotest {
         };
         scenario.run().await.unwrap();
     }
+    #[tokio::test]
+    async fn test_merge_matching_ids() {
+        todo!()
+    }
+    #[tokio::test]
+    async fn test_merge_matching_vorwort() {
+        todo!()
+    }
+    #[tokio::test]
+    async fn test_link_ini_ids_merging() {
+        let vg = generate::default_vorgang();
+        let mut vg_mod = vg.clone();
+        vg_mod.links = Some(vec!["https://example.com".to_string()]);
+        vg_mod.ids = Some(vec![models::VgIdent {
+            id: "einzigartig".to_string(),
+            typ: models::VgIdentTyp::Initdrucks,
+        }]);
+        vg_mod.initiatoren = vec![models::Autor {
+            person: Some("Max Mustermann".to_string()),
+            organisation: "Musterorganisation".to_string(),
+            fachgebiet: Some("Musterfachgebiet".to_string()),
+            lobbyregister: Some("Musterlobbyregister".to_string()),
+        }];
+
+        let vg_exp = vg.clone();
+        vg_exp.links = Some(); //merged
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg_mod.clone(),
+            expected: vec![vg_mod],
+            name: "link_ini_ids_merging",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_vorgang_weak_property_change_override() {
+        let vg = generate::default_vorgang();
+        let mut vg_mod = vg.clone();
+        vg_mod.titel = "Testtitel".to_string();
+        vg_mod.kurztitel = Some("Testkurztitel".to_string());
+        vg_mod.wahlperiode = 20;
+        vg_mod.verfassungsaendernd = true;
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg_mod.clone(),
+            expected: vec![vg_mod],
+            name: "weak_prop_change_override",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_not_merged_but_separate() {
+        todo!()
+    }
+    #[tokio::test]
+    async fn test_schlagwort_duplicate_elimination() {
+        todo!()
+    }
+    #[tokio::test]
+    async fn test_schlagwort_formatting() {
+        todo!()
+    }
+
+    #[tokio::test]
+    async fn test_station_merging_on_weak_property_changes() {
+        todo!()
+    }
+    #[tokio::test]
+    async fn test_dokument_merging_on_weak_property_changes() {
+        todo!()
+    }
 }
