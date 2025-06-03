@@ -200,16 +200,8 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
         }
         let mut svg1 = lr1.clone();
         let mut svg2 = lr2.clone();
-        svg1.sort_by(|a, b| {
-            a.organisation
-                .organisation
-                .cmp(&b.organisation.organisation)
-        });
-        svg2.sort_by(|a, b| {
-            a.organisation
-                .organisation
-                .cmp(&b.organisation.organisation)
-        });
+        svg1.sort_by(|a, b| a.interne_id.cmp(&b.interne_id));
+        svg2.sort_by(|a, b| a.interne_id.cmp(&b.interne_id));
         if svg1 != svg2 {
             return false;
         }
