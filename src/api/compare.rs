@@ -1,6 +1,25 @@
 use chrono::{DateTime, Utc};
 use openapi::models::*;
 
+pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let (l, s) = if a.len() > b.len() { (a, b) } else { (b, a) };
+    for x in l.iter() {
+        let mut found = false;
+        for y in s.iter() {
+            if x == y {
+                found = true;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
+}
+
 fn compare_datetime_millis(dt1: &DateTime<Utc>, dt2: &DateTime<Utc>) -> bool {
     dt1.timestamp_millis() == dt2.timestamp_millis()
 }

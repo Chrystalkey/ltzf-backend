@@ -653,7 +653,11 @@ pub async fn run_integration(
 
 #[cfg(test)]
 mod scenariotest {
-    use crate::{LTZFError, LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
+    use crate::{
+        LTZFError, LTZFServer, Result,
+        api::{PaginationResponsePart, compare::oicomp},
+        db::retrieve,
+    };
     use openapi::models;
     use similar::ChangeTag;
     use std::{collections::HashSet, str::FromStr};
@@ -968,82 +972,38 @@ mod scenariotest {
             .unwrap();
             tx.commit().await?;
 
-            for expected in self.expected.iter() {
-                let mut found = false;
-                for db_out in db_vorgangs.1.iter() {
-                    if crate::api::compare::compare_vorgang(db_out, expected) {
-                        found = true;
-                        break;
-                    } else if xor(db_out.api_id != expected.api_id, self.shouldfail) {
-                        std::fs::write(
-                            format!("tests/{}_dumpa.json", self.name),
-                            dump_objects(&expected, &db_out),
-                        )
-                        .unwrap();
-                        assert!(
-                            false,
-                            "Differing object have the same api id: `{}`. Difference:\n{}",
-                            db_out.api_id,
-                            crate::db::merge::display_strdiff(
-                                &serde_json::to_string_pretty(expected).unwrap(),
-                                &serde_json::to_string_pretty(db_out).unwrap()
-                            )
-                        );
-                    }
-                }
-                if !xor(found, self.shouldfail) {
-                    std::fs::write(
-                        format!("tests/{}_dump.json", self.name),
-                        serde_json::to_string_pretty(expected).unwrap(),
-                    )
-                    .unwrap();
-                    let default_vorgang = generate::default_vorgang();
-                    assert!(
-                        !xor(found, self.shouldfail),
-                        "({}): Expected to find Vorgang with api_id `{}`, but was not present in the output set, which contained: {:?}.\n\nDetails(Output Set):\n{:#?}",
-                        self.name,
-                        expected.api_id,
-                        db_vorgangs
-                            .1
-                            .iter()
-                            .map(|e| e.api_id)
-                            .collect::<Vec<uuid::Uuid>>(),
-                        db_vorgangs
-                            .1
-                            .iter()
-                            .map(|v| {
-                                println!(
-                                    "{}\nDifference to Default(this is 'g'):\n{}\nDefault Vorgang:\n{}",
-                                    &serde_json::to_string_pretty(v).unwrap(),
-                                    crate::db::merge::display_strdiff(
-                                        &serde_json::to_string_pretty(&default_vorgang).unwrap(),
-                                        &serde_json::to_string_pretty(v).unwrap()
-                                    ),
-                                    &serde_json::to_string_pretty(&default_vorgang).unwrap()
-                                );
-                                "object, see stdout".to_string()
-                            })
-                            .collect::<Vec<String>>()
-                    );
-                }
+            let equality = oicomp(&self.expected, &db_vorgangs.1);
+            if !equality && !self.shouldfail {
+                let exp_content = self
+                    .expected
+                    .iter()
+                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let dbv_content = db_vorgangs
+                    .1
+                    .iter()
+                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                std::fs::write(
+                    format!("tests/{}_dump.json", self.name),
+                    format!(
+                        "{{\n\"expected\": [{}],\n\"actual\": [{}]}}",
+                        exp_content, dbv_content
+                    ),
+                )
+                .unwrap();
+                assert!(
+                    false,
+                    "Expected and Actual Contents were not equal. Dump: {}",
+                    format!("tests/{}_dump.json", self.name)
+                );
             }
-
             assert!(
-                self.expected.len() == db_vorgangs.1.len(),
-                "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
-                self.name,
-                self.expected.len(),
-                db_vorgangs.1.len(),
-                db_vorgangs
+                !(equality && self.shouldfail),
+                "Expected Case to fail, but actual output was equal to expectation"
             );
-            // check if both lists are equal
-            let mut exp_sorted = self.expected.clone();
-            let mut db_sorted = db_vorgangs.1.clone();
-            exp_sorted.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            db_sorted.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            for x in exp_sorted.iter().zip(db_sorted.iter()) {
-                assert!(crate::api::compare::compare_vorgang(x.0, x.1))
-            }
             Ok(())
         }
     }
@@ -1090,7 +1050,25 @@ mod scenariotest {
         scenario.run().await.unwrap();
     }
     #[tokio::test]
-    async fn test_merge_matching_vorwort() {}
+    async fn test_merge_matching_vorwort() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = generate::default_vorgang();
+        vg2.api_id = Uuid::nil(); // take out api id matching
+        vg2.titel = "Anderer Titel".to_string();
+        vg2.ids = Some(vec![]); // take out id matching
+
+        let mut vg_exp = vg.clone();
+        vg_exp.titel = vg2.titel.clone();
+
+        let scenario = Scenario {
+            name: "merge_matching_ids",
+            shouldfail: false,
+            context: vec![vg],
+            object: vg2,
+            expected: vec![vg_exp],
+        };
+        scenario.run().await.unwrap();
+    }
     #[tokio::test]
     async fn test_link_ini_ids_merging() {
         let vg = generate::default_vorgang();
@@ -1162,14 +1140,65 @@ mod scenariotest {
         scenario.run().await.unwrap();
     }
     #[tokio::test]
-    async fn test_not_merged_but_separate() {}
+    async fn test_not_merged_but_separate() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = vg.clone();
+        vg2.api_id = Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef3452").unwrap();
+        vg2.ids = None;
+        vg2.stationen = vec![];
+        vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg2.clone(),
+            expected: vec![vg, vg2],
+            name: "not_merged_but_separate",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
     #[tokio::test]
-    async fn test_schlagwort_duplicate_elimination() {}
-    #[tokio::test]
-    async fn test_schlagwort_formatting() {}
+    async fn test_schlagwort_duplicate_elimination_and_formatting() {
+        let mut vg = generate::default_vorgang();
+        vg.stationen[0].schlagworte = Some(vec![
+            "AiNz".to_string(),
+            "ainz".to_string(),
+            "AINZ".to_string(),
+        ]);
+        let vg2 = vg.clone();
 
+        let mut vg_exp = vg.clone();
+        vg_exp.stationen[0].schlagworte = Some(vec!["ainz".to_string()]);
+        let scenario = Scenario {
+            context: vec![vg],
+            object: vg2,
+            expected: vec![vg_exp],
+            shouldfail: false,
+            name: "schlagwort_duplicate_elimination_and_formatting",
+        };
+        scenario.run().await.unwrap();
+    }
     #[tokio::test]
-    async fn test_station_merging_on_weak_property_changes() {}
+    async fn test_station_merging_on_weak_property_changes() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = vg.clone();
+        vg2.stationen[0].link = Some("https://other.link".to_string());
+        vg2.stationen[0].titel = Some("Weirder anderer Titel".to_string());
+        vg2.stationen[0].zp_modifiziert = Some(chrono::Utc::now());
+        vg2.stationen[0].gremium_federf = Some(true);
+        vg2.stationen[0].trojanergefahr = Some(4u8);
+        vg2.stationen[0].zp_start = chrono::Utc::now();
+
+        let scenario = Scenario {
+            context: vec![vg],
+            object: vg2.clone(),
+            expected: vec![vg2],
+            name: "station_weak_props_change",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
     #[tokio::test]
-    async fn test_dokument_merging_on_weak_property_changes() {}
+    async fn test_dokument_merging_on_weak_property_changes() {
+        // TODO: Dokument & Stellungnahme
+    }
 }
