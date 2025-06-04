@@ -1146,9 +1146,10 @@ mod scenariotest {
     async fn test_not_merged_but_separate() {
         let vg = generate::default_vorgang();
         let mut vg2 = vg.clone();
-        vg2.api_id = Uuid::from_str("b18bee64-c0ff-eeee-ff0c-deadbeef3452").unwrap();
+        vg2.api_id = Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef3452").unwrap();
         vg2.ids = None;
         vg2.stationen = vec![];
+
         vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();
         let scenario = Scenario {
             context: vec![vg.clone()],
