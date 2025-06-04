@@ -19,7 +19,7 @@ jobs:
       - name: formatting
         run: cargo fmt --check
       - name: install ripgrep
-        run: apt install ripgrep
+        run: sudo apt install ripgrep
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: clippy
@@ -58,7 +58,7 @@ jobs:
           profile: minimal
           override: true
       - name: install ripgrep
-        run: apt install ripgrep
+        run: sudo apt install ripgrep
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: install sqlx cli
