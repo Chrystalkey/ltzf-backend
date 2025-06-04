@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT scope,value as named_scope FROM api_keys INNER JOIN api_scope ON scope=api_scope.id WHERE key_hash = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "named_scope",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "2768ce8d57cd61377945ab64419ed8effe43a2fbeef57826c23ca8b984fc80a6"
+}

@@ -9,6 +9,7 @@ use openapi::apis::ApiKeyAuthHeader;
 use openapi::apis::authentication::*;
 use openapi::apis::authentication_keyadder_schnittstellen::*;
 use openapi::models;
+use openapi::models::RotationResponse;
 use rand::distr::Alphanumeric;
 use rand::{Rng, rng};
 use sha256::digest;
@@ -227,18 +228,59 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         body: &openapi::models::AuthRotateRequest,
     ) -> Result<AuthRotateResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder{
+            return Ok(AuthRotateResponse::Status403_Forbidden { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        let old_key_entry = sqlx::query!("SELECT scope,value as named_scope FROM api_keys INNER JOIN api_scope ON scope=api_scope.id WHERE key_hash = $1", body.old_key_hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if old_key_entry.is_none(){
+            tracing::warn!("While rotating key: Expected to find old key with hash {} in the database", body.old_key_hash);
+            return Ok(AuthRotateResponse::Status404_NotFound { x_rate_limit_limit: None, x_rate_limit_remaining: None, x_rate_limit_reset: None });
+        }
+        let old_key_entry = old_key_entry.unwrap();
+        // new key, replacing the old one
+        let new_key = generate_api_key().await;
+        let key_digest = digest(new_key.clone());
+
+        sqlx::query!(
+            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope)
+        VALUES
+        ($1, $2, $3, $4)",
+            key_digest,
+            claims.1,
+            chrono::Utc::now() + chrono::Duration::days(365),
+            old_key_entry.scope
+        )
+        .execute(&self.sqlx_db)
+        .await?;
+        let expiration_date = chrono::Utc::now()+chrono::Duration::days(1);
+        sqlx::query!("UPDATE api_keys 
+        SET expires_at = $2 
+        WHERE key_hash = $1", 
+        body.old_key_hash, expiration_date.clone())
+        .execute(&mut *tx).await?;
+
+        tracing::info!("Rotated API Key with Scope: {:?}", old_key_entry.named_scope);
+        Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(
+            RotationResponse{
+                new_api_key: new_key,
+                rotation_complete_date: expiration_date
+            }
+        ))
     }
 }
+
 #[async_trait]
 impl Authentication<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     /// AuthStatus - GET /api/v1/auth/status
     async fn auth_status(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
     ) -> Result<AuthStatusResponse> {
         todo!()
@@ -249,11 +291,78 @@ impl Authentication<LTZFError> for LTZFServer {
 mod auth_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
-    use openapi::apis::authentication::*;
     use openapi::apis::authentication_keyadder_schnittstellen::*;
     use openapi::models;
 
     use super::super::endpoint_test::*;
+
+    #[tokio::test]
+    async fn test_auth_rotate(){
+        let server = setup_server("test_auth_rot").await.unwrap();
+        let response = server
+        .auth_rotate(
+            &Method::POST,
+            &Host("localhost".to_string()),
+            &CookieJar::new(),
+            &(super::APIScope::Collector, 1),
+            &models::AuthRotateRequest{
+                old_key_hash: "abc123abc123".to_string(),
+            }
+        )
+        .await;
+        match response{
+            Ok(AuthRotateResponse::Status403_Forbidden { ..}) => {},
+            _=> assert!(false, "Expected to fail with too little permission")
+        }
+        // next: Not Found
+        let response = server
+        .auth_rotate(
+            &Method::POST,
+            &Host("localhost".to_string()),
+            &CookieJar::new(),
+            &(super::APIScope::KeyAdder, 1),
+            &models::AuthRotateRequest{
+                old_key_hash: "abc123abc123".to_string(),
+            }
+        )
+        .await;
+        match response{
+            Ok(AuthRotateResponse::Status404_NotFound { ..}) => {},
+            _=> assert!(false, "Expected to fail with NotFound")
+        }
+
+        // next: success!
+        let key = server.auth_post(
+            &Method::POST,
+            &Host("localhost".to_string()),
+            &CookieJar::new(),
+            &(super::APIScope::KeyAdder, 1),
+            &models::CreateApiKey {
+                scope: "keyadder".to_string(),
+                expires_at: None,
+            }).await.unwrap();
+        let key = if let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) = key{
+            key
+        }else{
+            panic!("Expected Successful Key creation response")
+        };
+        let response = server.auth_rotate(
+            &Method::POST,
+            &Host("localhost".to_string()),
+            &CookieJar::new(),
+            &(super::APIScope::KeyAdder, 1),
+            &models::AuthRotateRequest{
+                old_key_hash: sha256::digest(&key).to_string()
+            }).await;
+        match response {
+            Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(rotrsp)) =>{
+                assert_ne!(rotrsp.new_api_key, key);
+                assert!(rotrsp.rotation_complete_date > chrono::Utc::now());
+            },
+            resp => assert!(false, "Expected a successful response, got {:?}", resp)
+        }
+        
+    }
 
     // Authentication tests
     #[tokio::test]
