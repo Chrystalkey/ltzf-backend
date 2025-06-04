@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use openapi::models::*;
 
-pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>) -> bool {
+pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>, comp: &dyn Fn(&T, &T) -> bool) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -9,7 +9,7 @@ pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>) -> bool {
     for x in l.iter() {
         let mut found = false;
         for y in s.iter() {
-            if x == y {
+            if comp(x, y) {
                 found = true;
             }
         }

@@ -11,8 +11,8 @@ use openapi::{
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
+use super::compare::*;
 use super::find_applicable_date_range;
-use super::{PaginationResponsePart, compare::*};
 use crate::db;
 
 #[async_trait]
@@ -239,10 +239,8 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
             };
             let result = retrieve::vorgang_by_parameter(
                 parameters,
-                query_params.page.unwrap_or(0),
-                query_params
-                    .per_page
-                    .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
+                query_params.page,
+                query_params.per_page,
                 &mut tx,
             )
             .await?;
@@ -262,19 +260,14 @@ impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
                 })
             } else {
                 tx.commit().await?;
-                let prp = PaginationResponsePart::new(
-                    Some(result.0),
-                    query_params.page,
-                    query_params.per_page,
-                    "/api/v1/vorgang",
-                );
+                let prp = &result.0;
                 Ok(VorgangGetResponse::Status200_Successful {
                     body: result.1,
-                    x_total_count: prp.x_total_count,
-                    x_total_pages: prp.x_total_pages,
-                    x_page: prp.x_page,
-                    x_per_page: prp.x_per_page,
-                    link: prp.link,
+                    x_total_count: Some(prp.x_total_count),
+                    x_total_pages: Some(prp.x_total_pages),
+                    x_page: Some(prp.x_page),
+                    x_per_page: Some(prp.x_per_page),
+                    link: Some(prp.generate_link_header("/api/v1/vorgang")),
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None,

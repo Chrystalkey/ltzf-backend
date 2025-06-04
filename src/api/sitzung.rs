@@ -14,7 +14,7 @@ use openapi::models;
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
-use super::{PaginationResponsePart, compare::*, find_applicable_date_range};
+use super::{compare::*, find_applicable_date_range};
 
 #[async_trait]
 impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
@@ -128,7 +128,7 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
 
         let dt_begin = dr.since;
         let dt_end = dr.until;
-        let values = sitzung_by_param(
+        let result = sitzung_by_param(
             &SitzungFilterParameters {
                 parlament: Some(path_params.parlament),
                 gremium_like: None,
@@ -137,26 +137,15 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
                 vgid: None,
                 wp: None,
             },
-            query_params.page.unwrap_or(0),
-            query_params
-                .per_page
-                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
+            query_params.page,
+            query_params.per_page,
             &mut tx,
         )
         .await?;
 
-        let prp = PaginationResponsePart::new(
-            Some(values.0 as i32),
-            query_params.page,
-            query_params.per_page,
-            &format!(
-                "/api/v1/kalender/{}/{}",
-                path_params.parlament.to_string(),
-                path_params.datum.to_string()
-            ),
-        );
+        let prp = &result.0;
 
-        if values.1.is_empty() {
+        if result.1.is_empty() {
             tx.rollback().await?;
             return Ok(KalDateGetResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
@@ -166,15 +155,19 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         }
         tx.commit().await?;
         Ok(KalDateGetResponse::Status200_SuccessfulResponse {
-            body: values.1,
+            body: result.1,
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
-            link: prp.link,
-            x_page: prp.x_page,
-            x_per_page: prp.x_per_page,
-            x_total_count: prp.x_total_count,
-            x_total_pages: prp.x_total_pages,
+            link: Some(prp.generate_link_header(&format!(
+                "/api/v1/kalender/{}/{}",
+                path_params.parlament.to_string(),
+                path_params.datum.to_string()
+            ))),
+            x_page: Some(prp.x_page),
+            x_per_page: Some(prp.x_per_page),
+            x_total_count: Some(prp.x_total_count),
+            x_total_pages: Some(prp.x_total_pages),
         })
     }
 
@@ -220,21 +213,9 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
         };
 
         // retrieval
-        let result = retrieve::sitzung_by_param(
-            &params,
-            query_params.page.unwrap_or(0),
-            query_params
-                .per_page
-                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
-            &mut tx,
-        )
-        .await?;
-        let prp = PaginationResponsePart::new(
-            Some(result.0 as i32),
-            query_params.page,
-            query_params.per_page,
-            "/api/v1/kalender",
-        );
+        let result =
+            retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
+                .await?;
         if result.1.is_empty() {
             tx.rollback().await?;
             Ok(KalGetResponse::Status204_NoContent {
@@ -250,16 +231,17 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             })
         } else {
             tx.commit().await?;
+            let prp = &result.0;
             Ok(KalGetResponse::Status200_SuccessfulResponse {
                 body: result.1,
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
-                x_total_count: prp.x_total_count,
-                x_total_pages: prp.x_total_pages,
-                x_page: prp.x_page,
-                x_per_page: prp.x_per_page,
-                link: prp.link,
+                x_total_count: Some(prp.x_total_count),
+                x_total_pages: Some(prp.x_total_pages),
+                x_page: Some(prp.x_page),
+                x_per_page: Some(prp.x_per_page),
+                link: Some(prp.generate_link_header("/api/v1/kalender")),
             })
         }
     }
@@ -361,21 +343,10 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
         };
 
         let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = self.sqlx_db.begin().await?;
-        let result = retrieve::sitzung_by_param(
-            &params,
-            query_params.page.unwrap_or(0),
-            query_params
-                .per_page
-                .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE),
-            &mut tx,
-        )
-        .await?;
-        let prp = PaginationResponsePart::new(
-            Some(result.0 as i32),
-            query_params.page,
-            query_params.per_page,
-            "/api/v1/sitzung",
-        );
+        let result =
+            retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
+                .await?;
+        let prp = result.0;
         tx.commit().await?;
         if result.1.is_empty() && header_params.if_modified_since.is_none() {
             Ok(SGetResponse::Status204_NoContent {
@@ -395,11 +366,11 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
-                x_total_count: prp.x_total_count,
-                x_total_pages: prp.x_total_pages,
-                x_page: prp.x_page,
-                x_per_page: prp.x_per_page,
-                link: prp.link,
+                x_total_count: Some(prp.x_total_count),
+                x_total_pages: Some(prp.x_total_pages),
+                x_page: Some(prp.x_page),
+                x_per_page: Some(prp.x_per_page),
+                link: Some(prp.generate_link_header("/api/v1/sitzung")),
             })
         }
     }

@@ -655,7 +655,10 @@ pub async fn run_integration(
 mod scenariotest {
     use crate::{
         LTZFError, LTZFServer, Result,
-        api::{PaginationResponsePart, compare::oicomp},
+        api::{
+            PaginationResponsePart,
+            compare::{compare_vorgang, oicomp},
+        },
         db::retrieve,
     };
     use openapi::models;
@@ -964,15 +967,15 @@ mod scenariotest {
             let mut tx = server.sqlx_db.begin().await.unwrap();
             let db_vorgangs = retrieve::vorgang_by_parameter(
                 paramock,
-                0,
-                PaginationResponsePart::DEFAULT_PER_PAGE,
+                None,
+                Some(PaginationResponsePart::MAX_PER_PAGE),
                 &mut tx,
             )
             .await
             .unwrap();
             tx.commit().await?;
 
-            let equality = oicomp(&self.expected, &db_vorgangs.1);
+            let equality = oicomp(&self.expected, &db_vorgangs.1, &compare_vorgang);
             if !equality && !self.shouldfail {
                 let exp_content = self
                     .expected
@@ -1143,7 +1146,7 @@ mod scenariotest {
     async fn test_not_merged_but_separate() {
         let vg = generate::default_vorgang();
         let mut vg2 = vg.clone();
-        vg2.api_id = Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeef3452").unwrap();
+        vg2.api_id = Uuid::from_str("b18bee64-c0ff-eeee-ff0c-deadbeef3452").unwrap();
         vg2.ids = None;
         vg2.stationen = vec![];
         vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();

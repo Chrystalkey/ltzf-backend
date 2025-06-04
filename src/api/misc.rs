@@ -41,10 +41,8 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
         .await?
         .unwrap() as i32;
 
-        let limit = query_params
-            .per_page
-            .unwrap_or(PaginationResponsePart::DEFAULT_PER_PAGE);
-        let offset = query_params.page.unwrap_or(0) * limit;
+        let prp =
+            PaginationResponsePart::new(full_authors, query_params.page, query_params.per_page);
         let output = sqlx::query!(
             "SELECT * FROM autor WHERE
             person = COALESCE($1, person) AND
@@ -55,8 +53,8 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
             query_params.inipsn,
             query_params.iniorg,
             query_params.inifch,
-            limit as i64,
-            offset as i64
+            prp.limit(),
+            prp.offset()
         )
         .map(|r| models::Autor {
             fachgebiet: r.fachgebiet,
@@ -66,12 +64,6 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
         })
         .fetch_all(&mut *tx)
         .await?;
-        let prp = PaginationResponsePart::new(
-            Some(full_authors),
-            query_params.page,
-            query_params.per_page,
-            "/api/v1/autoren",
-        );
 
         tx.commit().await?;
         return Ok(AutorenGetResponse::Status200_Success {
@@ -79,11 +71,11 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
-            x_total_count: prp.x_total_count,
-            x_total_pages: prp.x_total_pages,
-            x_page: prp.x_page,
-            x_per_page: prp.x_per_page,
-            link: prp.link,
+            x_total_count: Some(prp.x_total_count),
+            x_total_pages: Some(prp.x_total_pages),
+            x_page: Some(prp.x_page),
+            x_per_page: Some(prp.x_per_page),
+            link: Some(prp.generate_link_header("/api/v1/autoren")),
         });
     }
 }

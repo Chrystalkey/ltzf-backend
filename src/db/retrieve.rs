@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::api::PaginationResponsePart;
 use crate::error::*;
 use crate::utils::as_option;
 use openapi::models;
@@ -435,10 +436,10 @@ pub struct SitzungFilterParameters {
 /// returns a tuple made up of: (total_count, retrieved_items)
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
-    page: i32,
-    per_page: i32,
+    page: Option<i32>,
+    per_page: Option<i32>,
     tx: &mut sqlx::PgTransaction<'_>,
-) -> Result<(i32, Vec<models::Sitzung>)> {
+) -> Result<(PaginationResponsePart, Vec<models::Sitzung>)> {
     let mut as_list = sqlx::query!(
         "
       WITH pre_table AS (
@@ -447,7 +448,7 @@ pub async fn sitzung_by_param(
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp = 		COALESCE($2, g.wp)
-        AND (SIMILARITY(g.name, $7) > 0.66 OR $7 IS NULL)
+        AND (SIMILARITY(g.name, $5) > 0.66 OR $5 IS NULL)
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -464,41 +465,29 @@ pub async fn sitzung_by_param(
 SELECT * FROM pre_table WHERE
 lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
 lastmod < COALESCE($4, NOW()) AND
-(CAST ($8 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id)))
-ORDER BY pre_table.lastmod ASC
-OFFSET $5
-LIMIT $6",
+(CAST ($6 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
+ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
         params.since,
         params.until,
-        (per_page * page) as i64,
-        per_page as i64,
         params.gremium_like,
         params.vgid
     )
     .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
-    let full_count = as_list.len();
-    let (start, end) = if full_count < (page * per_page) as usize {
-        (0, 0)
-    } else {
-        (
-            page * per_page,
-            if full_count < (page * per_page + per_page) as usize {
-                full_count
-            } else {
-                (page * per_page + per_page) as usize
-            },
-        )
-    };
-    let as_list = as_list.drain(start as usize..end);
+    let prp = PaginationResponsePart::new(as_list.len() as i32, page, per_page);
+    if as_list.is_empty() {
+        return Ok((prp, vec![]));
+    }
+
+    let as_list = as_list.drain(prp.start()..prp.end());
     let mut vector = Vec::with_capacity(as_list.len());
     for id in as_list {
         vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
     }
-    Ok((full_count as i32, vector))
+    Ok((prp, vector))
 }
 
 #[derive(Debug)]
@@ -515,10 +504,10 @@ pub struct VGGetParameters {
 /// returns (total number of available elements, chosen elements)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
-    page: i32,
-    per_page: i32,
+    page: Option<i32>,
+    per_page: Option<i32>,
     executor: &mut sqlx::PgTransaction<'_>,
-) -> Result<(i32, Vec<models::Vorgang>)> {
+) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
     let mut vg_list = sqlx::query!(
         "WITH pre_table AS (
         SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang
@@ -545,23 +534,14 @@ params.inipsn, params.iniorg, params.inifch,
 params.lower_date, params.upper_date)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
-    let full_count = vg_list.len();
-    let (start, end) = if full_count < (page * per_page) as usize {
-        (0, 0)
-    } else {
-        (
-            page * per_page,
-            if full_count < (page * per_page + per_page) as usize {
-                full_count
-            } else {
-                (page * per_page + per_page) as usize
-            },
-        )
-    };
+    let prp = PaginationResponsePart::new(vg_list.len() as i32, page, per_page);
+    if vg_list.is_empty() {
+        return Ok((prp, vec![]));
+    }
 
     let mut vector = Vec::with_capacity(vg_list.len());
-    for id in vg_list.drain(start as usize..end) {
+    for id in vg_list.drain(prp.start()..prp.end()) {
         vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
     }
-    Ok((full_count as i32, vector))
+    Ok((prp, vector))
 }

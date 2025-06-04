@@ -76,63 +76,90 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         })
     }
 }
+#[derive(Debug)]
 pub struct PaginationResponsePart {
-    pub x_total_count: Option<i32>,
-    pub x_total_pages: Option<i32>,
-    pub x_page: Option<i32>,
-    pub x_per_page: Option<i32>,
-    pub link: Option<String>,
+    pub x_total_count: i32,
+    pub x_total_pages: i32,
+    pub x_page: i32,
+    pub x_per_page: i32,
 }
 impl PaginationResponsePart {
     pub const DEFAULT_PER_PAGE: i32 = 32;
-    pub fn new(
-        x_total_count: Option<i32>,
-        x_page: Option<i32>,
-        x_per_page: Option<i32>,
-        link_first_part: &str,
-    ) -> Self {
-        let mut link_string = String::new();
-        let x_total_pages = x_total_count
-            .map(|x| (x as f32 / 32.).ceil() as i32)
-            .unwrap_or(0);
-        let x_per_page = x_per_page.unwrap_or(Self::DEFAULT_PER_PAGE);
-        let x_page = x_page.unwrap_or(0);
+    pub const MAX_PER_PAGE: i32 = 256;
+    pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
+        let x_per_page = x_per_page
+            .map(|x| x.min(Self::MAX_PER_PAGE).max(0))
+            .unwrap_or(Self::DEFAULT_PER_PAGE);
+        let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil() as i32;
+        let x_page = x_page.map(|x| x.max(1).min(x_total_pages)).unwrap_or(1);
 
-        if x_page != x_total_pages {
+        Self {
+            x_total_count: x_total_count,
+            x_total_pages: x_total_pages,
+            x_page: x_page,
+            x_per_page: x_per_page,
+        }
+    }
+    pub fn limit(&self) -> i64 {
+        self.x_per_page as i64
+    }
+    pub fn offset(&self) -> i64 {
+        ((self.x_page - 1) * self.x_per_page) as i64
+    }
+    pub fn start(&self) -> usize {
+        ((self.x_page - 1) * self.x_per_page) as usize
+    }
+    pub fn end(&self) -> usize {
+        (self.offset() + self.limit())
+            .min(self.x_total_count as i64)
+            .max(0) as usize
+    }
+    pub fn generate_link_header(&self, link_first_part: &str) -> String {
+        let mut link_string = String::new();
+        if self.x_page != self.x_total_pages {
             link_string = format!(
                 "<\"{}?page={}&per_page={}\">; rel=\"next\", ",
                 link_first_part,
-                x_page + 1,
-                x_per_page
+                self.x_page + 1,
+                self.x_per_page
             );
         }
-        if x_page != 0 {
+        if self.x_page != 0 {
             link_string = format!(
                 "{}<\"{}?page={}&per_page={}\">; rel=\"previous\", ",
                 link_string,
                 link_first_part,
-                x_page - 1,
-                x_per_page
+                self.x_page - 1,
+                self.x_per_page
             );
         }
         link_string = format!(
             "{}<\"{}?page={}&per_page={}\">; rel=\"first\", ",
-            link_string, link_first_part, 0, x_per_page
+            link_string, link_first_part, 0, self.x_per_page
         );
         link_string = format!(
             "{}<\"{}?page={}&per_page={}\">; rel=\"last\"",
-            link_string, link_first_part, x_total_pages, x_per_page
+            link_string, link_first_part, self.x_total_pages, self.x_per_page
         );
-        Self {
-            x_total_count: x_total_count,
-            x_total_pages: Some(x_total_pages),
-            x_page: Some(x_page),
-            x_per_page: Some(x_per_page),
-            link: Some(link_string),
-        }
+        return link_string;
     }
 }
 
+#[cfg(test)]
+mod prp_test {
+    use crate::api::PaginationResponsePart;
+
+    #[test]
+    fn test_start_and_end() {
+        let prp = PaginationResponsePart::new(0, None, None);
+        assert_eq!(prp.start(), 0);
+        assert_eq!(prp.end(), 0, "{:?}", prp);
+
+        let prp = PaginationResponsePart::new(1, None, None);
+        assert_eq!(prp.start(), 0);
+        assert_eq!(prp.end(), 1);
+    }
+}
 pub struct DateRange {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
