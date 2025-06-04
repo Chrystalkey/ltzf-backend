@@ -1,5 +1,6 @@
 pub mod vorgang;
 
+#[derive(Debug)]
 pub enum MatchState<T> {
     Ambiguous(Vec<T>),
     ExactlyOne(T),

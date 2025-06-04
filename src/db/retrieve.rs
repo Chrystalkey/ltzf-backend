@@ -132,7 +132,7 @@ pub async fn vorgang_by_id(
         typ: models::Vorgangstyp::from_str(pre_vg.value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         initiatoren: init_inst,
-        ids: Some(ids),
+        ids: as_option(ids),
         links: Some(links),
         stationen,
     })
