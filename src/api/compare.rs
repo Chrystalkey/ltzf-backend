@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use openapi::models::*;
 
+#[cfg(test)]
 pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>, comp: &dyn Fn(&T, &T) -> bool) -> bool {
     if a.len() != b.len() {
         return false;
@@ -371,8 +372,6 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::default;
-
     use super::*;
     use chrono::{Duration, Timelike};
     use openapi::models;
@@ -1125,7 +1124,7 @@ mod tests {
     #[test]
     fn test_compare_station_all_fields() {
         // Test comprehensive station field comparison
-        let mut station1 = create_test_station("00000000-0000-0000-0000-000000000001");
+        let station1 = create_test_station("00000000-0000-0000-0000-000000000001");
         let mut station2 = station1.clone();
 
         // Test all station fields individually
@@ -1178,7 +1177,7 @@ mod tests {
     #[test]
     fn test_compare_autor_comprehensive() {
         // Test autor comparison comprehensively via dokument comparison
-        let mut doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        let doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
         let mut doc2 = doc1.clone();
 
         // Different autor person
@@ -1348,8 +1347,8 @@ mod tests {
     #[test]
     fn test_compare_vorgang_touched_by_field() {
         // Test that touched_by field is ignored in comparison (if present)
-        let mut vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
-        let mut vg2 = vg1.clone();
+        let vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
+        let vg2 = vg1.clone();
 
         // The touched_by field should not affect comparison since it's metadata
         // Note: The actual comparison function might not include touched_by

@@ -878,6 +878,7 @@ mod scenariotest {
             let server = self.setup().await?;
             self.build_context(&server).await?;
             self.place_object(&server).await?;
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             self.check_result(&server).await?;
             self.teardown(&server).await?;
             Ok(())

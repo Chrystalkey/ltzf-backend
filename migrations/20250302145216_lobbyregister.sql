@@ -17,3 +17,4 @@ ALTER TABLE scraper_touched_vorgang ADD CONSTRAINT "unique_scraper-vg" UNIQUE (v
 ALTER TABLE scraper_touched_station ADD CONSTRAINT "unique_scraper-sn" UNIQUE (stat_id, scraper);
 ALTER TABLE scraper_touched_dokument ADD CONSTRAINT "unique_scraper-dk" UNIQUE (dok_id, scraper);
 ALTER TABLE scraper_touched_sitzung ADD CONSTRAINT "unique_scraper-sg" UNIQUE (sid, scraper);
+ALTER TABLE api_keys ADD COLUMN rotated_for INTEGER REFERENCES api_keys(id) DEFAULT NULL;
