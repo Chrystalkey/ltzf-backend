@@ -92,6 +92,189 @@ impl GremienUnauthorisiert<LTZFError> for LTZFServer {
         todo!()
     }
 }
+#[cfg(test)]
+mod test {
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use openapi::{
+        apis::{
+            adminschnittstellen_vorgnge::AdminschnittstellenVorgnge,
+            gremien_unauthorisiert::{GremienGetResponse, GremienUnauthorisiert},
+        },
+        models,
+    };
+
+    use crate::utils::test::TestSetup;
+    use crate::{api::auth::APIScope, utils::test::generate};
+
+    #[tokio::test]
+    async fn test_gremien_get() {
+        let scenario = TestSetup::new("test_gremien_get").await;
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: None,
+                    p: None,
+                    page: None,
+                    per_page: None,
+                    wp: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status204_NoContent { .. }) => {}
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+        let vorgang = generate::default_vorgang();
+        let rsp = scenario
+            .server
+            .vorgang_id_put(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: vorgang.api_id,
+                },
+                &vorgang,
+            )
+            .await
+            .unwrap();
+        match rsp {
+            openapi::apis::adminschnittstellen_vorgnge::VorgangIdPutResponse::Status201_Created { .. } => {},
+            xxx => assert!(false, "Expected succes, got {:?}", xxx)
+        }
+
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: None,
+                    p: None,
+                    page: None,
+                    per_page: None,
+                    wp: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
+                assert!(body.contains(&generate::default_gremium()));
+                assert_eq!(body.len(), 1);
+            }
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: Some("Inneres".to_string()),
+                    p: None,
+                    page: None,
+                    per_page: None,
+                    wp: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
+                assert!(body.contains(&generate::default_gremium()));
+                assert_eq!(body.len(), 1);
+            }
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: None,
+                    p: Some(models::Parlament::Bb),
+                    page: None,
+                    per_page: None,
+                    wp: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
+                assert!(body.contains(&generate::default_gremium()));
+                assert_eq!(body.len(), 1);
+            }
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: None,
+                    p: None,
+                    page: None,
+                    per_page: None,
+                    wp: Some(20),
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
+                assert!(body.contains(&generate::default_gremium()));
+                assert_eq!(body.len(), 1);
+            }
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+
+        let result = scenario
+            .server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    gr: None,
+                    p: Some(models::Parlament::Be),
+                    page: None,
+                    per_page: None,
+                    wp: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(GremienGetResponse::Status204_NoContent { .. }) => {}
+            _ => {
+                assert!(false, "Expected to find no entries")
+            }
+        }
+        scenario.teardown().await;
+    }
+}
 #[async_trait]
 impl EnumerationsUnauthorisiert<LTZFError> for LTZFServer {
     /// EnumGet - GET /api/v1/enumeration/{name}

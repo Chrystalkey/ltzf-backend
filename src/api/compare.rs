@@ -99,14 +99,14 @@ fn compare_top(t1: &Top, t2: &Top) -> bool {
             (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
                 d1.api_id.cmp(&d2.api_id)
             }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         sorted_docs2.sort_by(|a, b| match (a, b) {
             (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
                 d1.api_id.cmp(&d2.api_id)
             }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
@@ -321,14 +321,14 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
             (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
                 d1.api_id.cmp(&d2.api_id)
             }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         docs2.sort_by(|a, b| match (a, b) {
             (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
                 d1.api_id.cmp(&d2.api_id)
             }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(&s2),
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in docs1.iter().zip(docs2.iter()) {

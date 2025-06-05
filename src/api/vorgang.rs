@@ -301,14 +301,15 @@ mod test_endpoints {
 
     use crate::api::auth;
     use crate::api::auth::APIScope;
+    use crate::utils::test::TestSetup;
 
     use super::super::endpoint_test::*;
     // Procedure (Vorgang) tests
     #[tokio::test]
     async fn test_vorgang_get_by_id_endpoints() {
         // Setup test server and database
-        let server = setup_server("test_vorgang_by_id_get").await.unwrap();
-
+        let scenario = TestSetup::new("test_vorgang_by_id_get").await;
+        let server = &scenario.server;
         let test_vorgang = create_test_vorgang();
         // First create the procedure
         let create_response = server
@@ -434,14 +435,13 @@ mod test_endpoints {
                 x_rate_limit_reset: None
             }
         );
-        cleanup_server("test_vorgang_by_id_get").await.unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_vorgang_get_filtered_endpoints_empty() {
-        let server = setup_server("test_vorgang_get_filtered_empty")
-            .await
-            .unwrap();
+        let scenario = TestSetup::new("test_vorgang_get_filtered_empty").await;
+        let server = &scenario.server;
         let test_vorgang = create_test_vorgang();
         // First create the procedure
         {
@@ -535,16 +535,13 @@ mod test_endpoints {
                 }
             );
         }
-        cleanup_server("test_vorgang_get_filtered_empty")
-            .await
-            .unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_vorgang_get_filtered_endpoints_success() {
-        let server = setup_server("test_vorgang_get_filtered_success")
-            .await
-            .unwrap();
+        let scenario = TestSetup::new("test_vorgang_get_filtered_success").await;
+        let server = &scenario.server;
         let test_vorgang = create_test_vorgang();
         {
             // First create a procedure with specific parameters
@@ -605,15 +602,14 @@ mod test_endpoints {
         }
 
         // Cleanup
-        cleanup_server("test_vorgang_get_filtered_success")
-            .await
-            .unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_vorgang_put_endpoint() {
         // Setup test server and database
-        let server = setup_server("test_vorgang_put").await.unwrap();
+        let scenario = TestSetup::new("test_vorgang_put").await;
+        let server = &scenario.server;
         let host = Host("localhost".to_string());
         let cookies = CookieJar::new();
 
@@ -773,13 +769,15 @@ mod test_endpoints {
         }
 
         // Cleanup
-        cleanup_server("test_vorgang_put").await.unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_vorgang_delete_endpoints() {
         // Setup test server and database
-        let server = setup_server("test_vorgang_delete").await.unwrap();
+        let scenario = TestSetup::new("test_vorgang_delete").await;
+        let server = &scenario.server;
+
         // Test cases for vorgang_delete:
         // 1. Delete existing procedure with proper permissions
         {
@@ -883,6 +881,6 @@ mod test_endpoints {
         }
 
         // Cleanup
-        cleanup_server("test_vorgang_delete").await.unwrap();
+        scenario.teardown().await;
     }
 }

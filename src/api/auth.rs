@@ -334,10 +334,11 @@ mod auth_test {
     use openapi::apis::authentication_keyadder_schnittstellen::*;
     use openapi::models;
 
-    use super::super::endpoint_test::*;
+    use crate::utils::test::TestSetup;
     #[tokio::test]
     async fn test_auth_status() {
-        let server = setup_server("test_auth_status").await.unwrap();
+        let scenario = crate::utils::test::TestSetup::new("test_auth_status").await;
+        let server = &scenario.server;
         let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
         let key = server
             .auth_post(
@@ -414,13 +415,13 @@ mod auth_test {
                 assert!(false, "Expected Successful response, got {:?}", r)
             }
         }
-
-        cleanup_server("test_auth_status").await.unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_auth_rotate() {
-        let server = setup_server("test_auth_rot").await.unwrap();
+        let scenario = TestSetup::new("test_auth_rot").await;
+        let server = &scenario.server;
         let response = server
             .auth_rotate(
                 &Method::POST,
@@ -490,13 +491,15 @@ mod auth_test {
             },
             resp => assert!(false, "Expected a successful response, got {:?}", resp)
         }
-        cleanup_server("test_auth_rot").await.unwrap();
+        scenario.teardown().await;
     }
 
     // Authentication tests
     #[tokio::test]
     async fn test_auth_auth() {
-        let server = setup_server("test_auth").await.unwrap();
+        let scenario = TestSetup::new("test_auth_post").await;
+        let server = &scenario.server;
+
         let resp = server
             .auth_post(
                 &Method::POST,
@@ -648,6 +651,6 @@ mod auth_test {
             }
         );
 
-        cleanup_server("test_auth").await.unwrap();
+        scenario.teardown().await;
     }
 }

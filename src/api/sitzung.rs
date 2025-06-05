@@ -161,8 +161,7 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             x_rate_limit_reset: None,
             link: Some(prp.generate_link_header(&format!(
                 "/api/v1/kalender/{}/{}",
-                path_params.parlament.to_string(),
-                path_params.datum.to_string()
+                path_params.parlament, path_params.datum
             ))),
             x_page: Some(prp.x_page),
             x_per_page: Some(prp.x_per_page),
@@ -477,6 +476,8 @@ mod sitzung_test {
     use openapi::models;
     use uuid::Uuid;
 
+    use crate::utils::test::TestSetup;
+
     use super::super::auth;
     use super::super::endpoint_test::*;
 
@@ -484,7 +485,8 @@ mod sitzung_test {
     #[tokio::test]
     async fn test_calendar_endpoints() {
         // Setup test server and database
-        let server = setup_server("test_calendar").await.unwrap();
+        let scenario = TestSetup::new("test_calendar").await;
+        let server = &scenario.server;
         let host = Host("localhost".to_string());
         let cookies = CookieJar::new();
 
@@ -780,13 +782,14 @@ mod sitzung_test {
         // TODO: Test for Status204_NoContent
 
         // Cleanup
-        cleanup_server("test_calendar").await.unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     pub(crate) async fn test_session_get_endpoints() {
         // Setup test server and database
-        let server = setup_server("test_session_get").await.unwrap();
+        let scenario = TestSetup::new("test_session_get").await;
+        let server = &scenario.server;
 
         let test_session = create_test_session();
         // First create the session
@@ -1096,12 +1099,13 @@ mod sitzung_test {
             );
         }
         // Cleanup
-        cleanup_server("test_session_get").await.unwrap();
+        scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_session_modify_endpoints() {
-        let server = setup_server("session_modify_ep").await.unwrap();
+        let scenario = TestSetup::new("session_modify_ep").await;
+        let server = &scenario.server;
         let sitzung = create_test_session();
         // - Input non-existing session
         {
@@ -1288,6 +1292,6 @@ mod sitzung_test {
                 }
             );
         }
-        cleanup_server("session_modify_ep").await.unwrap();
+        scenario.teardown().await;
     }
 }

@@ -88,16 +88,16 @@ impl PaginationResponsePart {
     pub const MAX_PER_PAGE: i32 = 256;
     pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
         let x_per_page = x_per_page
-            .map(|x| x.min(Self::MAX_PER_PAGE).max(0))
+            .map(|x| x.clamp(0, Self::MAX_PER_PAGE))
             .unwrap_or(Self::DEFAULT_PER_PAGE);
         let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil() as i32;
-        let x_page = x_page.map(|x| x.max(1).min(x_total_pages)).unwrap_or(1);
+        let x_page = x_page.map(|x| x.clamp(1, x_total_pages)).unwrap_or(1);
 
         Self {
-            x_total_count: x_total_count,
-            x_total_pages: x_total_pages,
-            x_page: x_page,
-            x_per_page: x_per_page,
+            x_total_count,
+            x_total_pages,
+            x_page,
+            x_per_page,
         }
     }
     pub fn limit(&self) -> i64 {
@@ -141,7 +141,7 @@ impl PaginationResponsePart {
             "{}<\"{}?page={}&per_page={}\">; rel=\"last\"",
             link_string, link_first_part, self.x_total_pages, self.x_per_page
         );
-        return link_string;
+        link_string
     }
 }
 
@@ -407,47 +407,7 @@ mod test_applicable_date_range {
 
 #[cfg(test)]
 pub(crate) mod endpoint_test {
-    use super::*;
-    use crate::{LTZFServer, Result};
     use openapi::models;
-    use sha256::digest;
-    const MASTER_URL: &str = "postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf";
-
-    pub(crate) async fn setup_server(dbname: &str) -> Result<LTZFServer> {
-        let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", dbname))
-            .execute(&create_pool)
-            .await?;
-        sqlx::query(&format!(
-            "CREATE DATABASE {} WITH OWNER 'ltzf-user'",
-            dbname
-        ))
-        .execute(&create_pool)
-        .await?;
-        let pool = sqlx::PgPool::connect(&format!(
-            "postgres://ltzf-user:ltzf-pass@localhost:5432/{}",
-            dbname
-        ))
-        .await
-        .unwrap();
-        sqlx::migrate!().run(&pool).await?;
-        let hash = digest("total-nutzloser-wert");
-        sqlx::query!(
-            "INSERT INTO api_keys(key_hash, scope, created_by)
-            VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-            ON CONFLICT DO NOTHING;", hash)
-        .execute(&pool).await?;
-        Ok(LTZFServer::new(pool, Configuration::default(), None))
-    }
-
-    pub(crate) async fn cleanup_server(dbname: &str) -> Result<()> {
-        let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE {} WITH (FORCE);", dbname))
-            .execute(&create_pool)
-            .await?;
-        Ok(())
-    }
 
     // Session (Sitzung) tests
     pub(crate) fn create_test_session() -> models::Sitzung {
