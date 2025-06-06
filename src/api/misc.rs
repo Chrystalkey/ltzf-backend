@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -89,7 +91,59 @@ impl GremienUnauthorisiert<LTZFError> for LTZFServer {
         _cookies: &CookieJar,
         query_params: &models::GremienGetQueryParams,
     ) -> Result<GremienGetResponse> {
-        todo!()
+        let mut tx = self.sqlx_db.begin().await?;
+        let mut result = sqlx::query!(
+            "SELECT g.id FROM gremium g
+        INNER JOIN parlament p ON p.id = g.parl 
+        WHERE p.value = COALESCE($1, p.value) AND
+        g.wp = COALESCE($2, g.wp) AND
+        ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))
+        ",
+            query_params.p.map(|x| x.to_string()),
+            query_params.wp,
+            query_params.gr
+        )
+        .map(|r| r.id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if result.is_empty() {
+            return Ok(GremienGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let prp = PaginationResponsePart::new(
+            result.len() as i32,
+            query_params.page,
+            query_params.per_page,
+        );
+        let selected_ids: Vec<i32> = result.drain(prp.start()..prp.end()).collect();
+        let result = sqlx::query!(
+            "SELECT g.link, g.name, g.wp, p.value as parl FROM gremium g
+        INNER JOIN parlament p ON p.id = g.parl
+        WHERE g.id = ANY($1::int4[])",
+            &selected_ids[..]
+        )
+        .map(|r| models::Gremium {
+            link: r.link,
+            name: r.name,
+            parlament: models::Parlament::from_str(&r.parl).unwrap(),
+            wahlperiode: r.wp as u32,
+        })
+        .fetch_all(&mut *tx)
+        .await?;
+        Ok(GremienGetResponse::Status200_Success {
+            body: result,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: Some(prp.x_total_count),
+            x_total_pages: Some(prp.x_total_pages),
+            x_page: Some(prp.x_page),
+            x_per_page: Some(prp.x_per_page),
+            link: Some(prp.generate_link_header("/api/v1/gremien")),
+        })
     }
 }
 #[cfg(test)]
@@ -196,8 +250,8 @@ mod test {
                 assert!(body.contains(&generate::default_gremium()));
                 assert_eq!(body.len(), 1);
             }
-            _ => {
-                assert!(false, "Expected to find no entries")
+            got => {
+                assert!(false, "Expected to find Some entries, got {:?}", got)
             }
         }
 
