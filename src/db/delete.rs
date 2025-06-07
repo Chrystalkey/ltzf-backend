@@ -1,6 +1,6 @@
 use crate::{LTZFServer, Result};
-use openapi::apis::adminschnittstellen_sitzungen::*;
-use openapi::apis::adminschnittstellen_vorgnge::*;
+use openapi::apis::data_administration_sitzung::*;
+use openapi::apis::data_administration_vorgang::*;
 use uuid::Uuid;
 
 pub async fn delete_vorgang_by_api_id(

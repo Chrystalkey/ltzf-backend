@@ -5,21 +5,14 @@ use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::Host;
-use openapi::apis::adminschnittstellen_autoren::*;
-use openapi::apis::adminschnittstellen_dokumente::*;
-use openapi::apis::adminschnittstellen_enumerations::*;
-use openapi::apis::adminschnittstellen_gremien::*;
-use openapi::apis::autoren_unauthorisiert::*;
-use openapi::apis::dokumente_unauthorisiert::*;
-use openapi::apis::enumerations_unauthorisiert::*;
-use openapi::apis::gremien_unauthorisiert::*;
+use openapi::apis::data_administration_miscellaneous::*;
+use openapi::apis::miscellaneous_unauthorisiert::*;
 use openapi::models;
 
 use super::PaginationResponsePart;
 
 #[async_trait]
-impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
-    /// AutorenGet - GET /api/v1/autoren
+impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
     async fn autoren_get(
         &self,
         _method: &Method,
@@ -80,10 +73,7 @@ impl AutorenUnauthorisiert<LTZFError> for LTZFServer {
             link: Some(prp.generate_link_header("/api/v1/autoren")),
         });
     }
-}
 
-#[async_trait]
-impl GremienUnauthorisiert<LTZFError> for LTZFServer {
     async fn gremien_get(
         &self,
         _method: &Method,
@@ -145,15 +135,60 @@ impl GremienUnauthorisiert<LTZFError> for LTZFServer {
             link: Some(prp.generate_link_header("/api/v1/gremien")),
         })
     }
+
+    /// EnumGet - GET /api/v1/enumeration/{name}
+    async fn enum_get(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        path_params: &models::EnumGetPathParams,
+        query_params: &models::EnumGetQueryParams,
+    ) -> Result<EnumGetResponse> {
+        todo!()
+    }
+
+    /// DokumentGetById - GET /api/v1/dokument/{api_id}
+    async fn dokument_get_by_id(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        path_params: &models::DokumentGetByIdPathParams,
+    ) -> Result<DokumentGetByIdResponse> {
+        let mut tx = self.sqlx_db.begin().await?;
+        let did = sqlx::query!(
+            "SELECT id FROM dokument WHERE api_id = $1",
+            path_params.api_id
+        )
+        .map(|r| r.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(did) = did {
+            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+            tx.commit().await?;
+            return Ok(DokumentGetByIdResponse::Status200_Success {
+                body: dok,
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        return Ok(DokumentGetByIdResponse::Status404_NotFound {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
+    }
 }
 #[cfg(test)]
-mod test {
+mod test_unauthorisiert {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::{
         apis::{
-            adminschnittstellen_vorgnge::AdminschnittstellenVorgnge,
-            gremien_unauthorisiert::{GremienGetResponse, GremienUnauthorisiert},
+            data_administration_vorgang::DataAdministrationVorgang,
+            miscellaneous_unauthorisiert::{GremienGetResponse, MiscellaneousUnauthorisiert},
         },
         models,
     };
@@ -201,7 +236,7 @@ mod test {
             .await
             .unwrap();
         match rsp {
-            openapi::apis::adminschnittstellen_vorgnge::VorgangIdPutResponse::Status201_Created { .. } => {},
+            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
             xxx => assert!(false, "Expected succes, got {:?}", xxx)
         }
 
@@ -329,58 +364,9 @@ mod test {
         scenario.teardown().await;
     }
 }
-#[async_trait]
-impl EnumerationsUnauthorisiert<LTZFError> for LTZFServer {
-    /// EnumGet - GET /api/v1/enumeration/{name}
-    async fn enum_get(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        path_params: &models::EnumGetPathParams,
-        query_params: &models::EnumGetQueryParams,
-    ) -> Result<EnumGetResponse> {
-        todo!()
-    }
-}
-#[async_trait]
-impl DokumenteUnauthorisiert<LTZFError> for LTZFServer {
-    /// DokumentGetById - GET /api/v1/dokument/{api_id}
-    async fn dokument_get_by_id(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        path_params: &models::DokumentGetByIdPathParams,
-    ) -> Result<DokumentGetByIdResponse> {
-        let mut tx = self.sqlx_db.begin().await?;
-        let did = sqlx::query!(
-            "SELECT id FROM dokument WHERE api_id = $1",
-            path_params.api_id
-        )
-        .map(|r| r.id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(did) = did {
-            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-            tx.commit().await?;
-            return Ok(DokumentGetByIdResponse::Status200_Success {
-                body: dok,
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        return Ok(DokumentGetByIdResponse::Status404_NotFound {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        });
-    }
-}
 
 #[async_trait]
-impl AdminschnittstellenAutoren<LTZFError> for LTZFServer {
+impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     /// AutorenDeleteByParam - DELETE /api/v1/autoren
     async fn autoren_delete_by_param(
@@ -401,15 +387,11 @@ impl AdminschnittstellenAutoren<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &Vec<models::Autor>,
+        body: &models::AutorenPutRequest,
     ) -> Result<AutorenPutResponse> {
         todo!()
     }
-}
 
-#[async_trait]
-impl AdminschnittstellenGremien<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     /// GremienDeleteByParam - DELETE /api/v1/gremien
     async fn gremien_delete_by_param(
         &self,
@@ -429,15 +411,11 @@ impl AdminschnittstellenGremien<LTZFError> for LTZFServer {
         host: &Host,
         cookies: &CookieJar,
         claims: &Self::Claims,
-        body: &Vec<models::Gremium>,
+        body: &models::GremienPutRequest,
     ) -> Result<GremienPutResponse> {
         todo!()
     }
-}
 
-#[async_trait]
-impl AdminschnittstellenEnumerations<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     /// EnumDelete - DELETE /api/v1/enumeration/{name}/{item}
     async fn enum_delete(
         &self,
@@ -458,15 +436,11 @@ impl AdminschnittstellenEnumerations<LTZFError> for LTZFServer {
         cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::EnumPutPathParams,
-        body: &Vec<models::EnumPutRequestInner>,
+        body: &models::EnumPutRequest,
     ) -> Result<EnumPutResponse> {
         todo!()
     }
-}
 
-#[async_trait]
-impl AdminschnittstellenDokumente<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     /// DokumentDeleteId - DELETE /api/v1/dokument/{api_id}
     async fn dokument_delete_id(
         &self,

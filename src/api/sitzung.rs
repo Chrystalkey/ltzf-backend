@@ -6,10 +6,9 @@ use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::{CookieJar, Host};
 use chrono::Datelike;
-use openapi::apis::adminschnittstellen_collector_schnittstellen_kalender_sitzungen::*;
-use openapi::apis::adminschnittstellen_sitzungen::*;
-use openapi::apis::kalender_sitzungen_unauthorisiert::*;
-use openapi::apis::sitzungen_unauthorisiert::*;
+use openapi::apis::collector_schnittstellen_sitzung::*;
+use openapi::apis::data_administration_sitzung::*;
+use openapi::apis::sitzung_unauthorisiert::*;
 use openapi::models;
 use uuid::Uuid;
 
@@ -17,7 +16,7 @@ use super::auth::{self, APIScope};
 use super::{compare::*, find_applicable_date_range};
 
 #[async_trait]
-impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
+impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "SitzungDelete - DELETE /api/v1/sitzung/{sid}"]
     #[must_use]
@@ -95,7 +94,95 @@ impl AdminschnittstellenSitzungen<LTZFError> for LTZFServer {
 }
 
 #[async_trait]
-impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
+impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
+
+    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn kal_date_put(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        header_params: &models::KalDatePutHeaderParams,
+        path_params: &models::KalDatePutPathParams,
+        body: &Vec<models::Sitzung>,
+    ) -> Result<KalDatePutResponse> {
+        let last_upd_day = chrono::Utc::now()
+            .date_naive()
+            .checked_sub_days(chrono::Days::new(1))
+            .unwrap();
+        if !(claims.0 == APIScope::Admin
+            || claims.0 == APIScope::KeyAdder
+            || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
+        {
+            tracing::warn!(
+                "Unauthorized kal_date_put with path date {} and last upd day {}",
+                path_params.datum,
+                last_upd_day
+            );
+            return Ok(KalDatePutResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let len = body.len();
+        let body: Vec<_> = body
+            .iter()
+            .filter(|&f| f.termin.date_naive() >= last_upd_day)
+            .cloned()
+            .collect();
+
+        if len != body.len() {
+            tracing::info!(
+                "Filtered {} Sitzung entries due to date constraints",
+                len - body.len()
+            );
+        }
+
+        let mut tx = self.sqlx_db.begin().await?;
+
+        let dt_begin = path_params
+            .datum
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
+        let dt_end = path_params
+            .datum
+            .checked_add_days(chrono::Days::new(1))
+            .unwrap()
+            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
+            .and_utc();
+        // delete all entries that fit the description
+        sqlx::query!(
+            "DELETE FROM sitzung WHERE sitzung.id = ANY(SELECT s.id FROM sitzung s 
+        INNER JOIN gremium g ON g.id=s.gr_id 
+        INNER JOIN parlament p ON p.id=g.parl 
+        WHERE p.value = $1 AND s.termin BETWEEN $2 AND $3)",
+            path_params.parlament.to_string(),
+            dt_begin,
+            dt_end
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // insert all entries
+        for s in &body {
+            insert::insert_sitzung(s, header_params.x_scraper_id, &mut tx, self).await?;
+        }
+        tx.commit().await?;
+        Ok(KalDatePutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
+    }
+}
+
+#[async_trait]
+impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -244,10 +331,7 @@ impl KalenderSitzungenUnauthorisiert<LTZFError> for LTZFServer {
             })
         }
     }
-}
 
-#[async_trait]
-impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
     #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -375,103 +459,14 @@ impl SitzungenUnauthorisiert<LTZFError> for LTZFServer {
     }
 }
 
-#[async_trait]
-impl AdminschnittstellenCollectorSchnittstellenKalenderSitzungen<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
-
-    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn kal_date_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        header_params: &models::KalDatePutHeaderParams,
-        path_params: &models::KalDatePutPathParams,
-        body: &Vec<models::Sitzung>,
-    ) -> Result<KalDatePutResponse> {
-        let last_upd_day = chrono::Utc::now()
-            .date_naive()
-            .checked_sub_days(chrono::Days::new(1))
-            .unwrap();
-        if !(claims.0 == APIScope::Admin
-            || claims.0 == APIScope::KeyAdder
-            || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
-        {
-            tracing::warn!(
-                "Unauthorized kal_date_put with path date {} and last upd day {}",
-                path_params.datum,
-                last_upd_day
-            );
-            return Ok(KalDatePutResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let len = body.len();
-        let body: Vec<_> = body
-            .iter()
-            .filter(|&f| f.termin.date_naive() >= last_upd_day)
-            .cloned()
-            .collect();
-
-        if len != body.len() {
-            tracing::info!(
-                "Filtered {} Sitzung entries due to date constraints",
-                len - body.len()
-            );
-        }
-
-        let mut tx = self.sqlx_db.begin().await?;
-
-        let dt_begin = path_params
-            .datum
-            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-            .and_utc();
-        let dt_end = path_params
-            .datum
-            .checked_add_days(chrono::Days::new(1))
-            .unwrap()
-            .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
-            .and_utc();
-        // delete all entries that fit the description
-        sqlx::query!(
-            "DELETE FROM sitzung WHERE sitzung.id = ANY(SELECT s.id FROM sitzung s 
-        INNER JOIN gremium g ON g.id=s.gr_id 
-        INNER JOIN parlament p ON p.id=g.parl 
-        WHERE p.value = $1 AND s.termin BETWEEN $2 AND $3)",
-            path_params.parlament.to_string(),
-            dt_begin,
-            dt_end
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // insert all entries
-        for s in &body {
-            insert::insert_sitzung(s, header_params.x_scraper_id, &mut tx, self).await?;
-        }
-        tx.commit().await?;
-        Ok(KalDatePutResponse::Status201_Created {
-            x_rate_limit_limit: None,
-            x_rate_limit_remaining: None,
-            x_rate_limit_reset: None,
-        })
-    }
-}
-
 #[cfg(test)]
 mod sitzung_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use chrono::Utc;
-    use openapi::apis::adminschnittstellen_collector_schnittstellen_kalender_sitzungen::*;
-    use openapi::apis::adminschnittstellen_sitzungen::*;
-    use openapi::apis::kalender_sitzungen_unauthorisiert::*;
-    use openapi::apis::sitzungen_unauthorisiert::*;
+    use openapi::apis::collector_schnittstellen_sitzung::*;
+    use openapi::apis::data_administration_sitzung::*;
+    use openapi::apis::sitzung_unauthorisiert::*;
 
     use openapi::models;
     use uuid::Uuid;

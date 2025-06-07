@@ -4,10 +4,10 @@ use crate::{LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::{CookieJar, Host};
-use openapi::{
-    apis::adminschnittstellen_vorgnge::*, apis::collector_schnittstellen_vorgnge::*,
-    apis::unauthorisiert_vorgnge::*, models,
+use openapi::apis::{
+    collector_schnittstellen_vorgang::*, data_administration_vorgang::*, unauthorisiert_vorgang::*,
 };
+use openapi::models;
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
@@ -16,7 +16,7 @@ use super::find_applicable_date_range;
 use crate::db;
 
 #[async_trait]
-impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
+impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "VorgangDelete - DELETE /api/v1/vorgang/{vorgang_id}"]
     #[must_use]
@@ -97,7 +97,7 @@ impl AdminschnittstellenVorgnge<LTZFError> for LTZFServer {
 }
 
 #[async_trait]
-impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
+impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
     #[doc = "VorgangPut - PUT /api/v1/vorgang"]
@@ -148,7 +148,7 @@ impl CollectorSchnittstellenVorgnge<LTZFError> for LTZFServer {
 }
 
 #[async_trait]
-impl UnauthorisiertVorgnge<LTZFError> for LTZFServer {
+impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     #[doc = "VorgangGetById - GET /api/v1/vorgang/{vorgang_id}"]
     #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
@@ -290,9 +290,9 @@ mod test_endpoints {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use chrono::Utc;
-    use openapi::apis::adminschnittstellen_vorgnge::*;
-    use openapi::apis::collector_schnittstellen_vorgnge::*;
-    use openapi::apis::unauthorisiert_vorgnge::*;
+    use openapi::apis::collector_schnittstellen_vorgang::*;
+    use openapi::apis::data_administration_vorgang::*;
+    use openapi::apis::unauthorisiert_vorgang::*;
 
     use openapi::models;
     use openapi::models::VorgangIdPutPathParams;

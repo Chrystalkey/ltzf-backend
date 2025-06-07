@@ -6,8 +6,9 @@ use axum::http::Method;
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::Host;
 use openapi::apis::ApiKeyAuthHeader;
-use openapi::apis::authentication::*;
-use openapi::apis::authentication_keyadder_schnittstellen::*;
+use openapi::apis::authentifizierung::*;
+use openapi::apis::authentifizierung_keyadder_schnittstellen::AuthentifizierungKeyadderSchnittstellen;
+use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
 use openapi::models;
 use openapi::models::RotationResponse;
 use rand::distr::Alphanumeric;
@@ -138,7 +139,7 @@ impl ApiKeyAuthHeader for LTZFServer {
 }
 
 #[async_trait]
-impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
+impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "AuthDelete - DELETE /api/v1/auth"]
     #[must_use]
@@ -296,7 +297,7 @@ impl AuthenticationKeyadderSchnittstellen<LTZFError> for LTZFServer {
 }
 
 #[async_trait]
-impl Authentication<LTZFError> for LTZFServer {
+impl Authentifizierung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     /// AuthStatus - GET /api/v1/auth/status
     async fn auth_status(
@@ -330,8 +331,8 @@ impl Authentication<LTZFError> for LTZFServer {
 mod auth_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
-    use openapi::apis::authentication::{AuthStatusResponse, Authentication};
-    use openapi::apis::authentication_keyadder_schnittstellen::*;
+    use openapi::apis::authentifizierung::{AuthStatusResponse, Authentifizierung};
+    use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
     use openapi::models;
 
     use crate::utils::test::TestSetup;
