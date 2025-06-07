@@ -97,6 +97,7 @@ pub(crate) mod test {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) mod generate {
         use std::str::FromStr;
 

@@ -139,12 +139,13 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
     /// EnumGet - GET /api/v1/enumeration/{name}
     async fn enum_get(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         path_params: &models::EnumGetPathParams,
         query_params: &models::EnumGetQueryParams,
     ) -> Result<EnumGetResponse> {
+        // welche enums gibts?
         todo!()
     }
 
@@ -395,9 +396,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     /// GremienDeleteByParam - DELETE /api/v1/gremien
     async fn gremien_delete_by_param(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         query_params: &models::GremienDeleteByParamQueryParams,
     ) -> Result<GremienDeleteByParamResponse> {
@@ -407,9 +408,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     /// GremienPut - PUT /api/v1/gremien
     async fn gremien_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         body: &models::GremienPutRequest,
     ) -> Result<GremienPutResponse> {
@@ -419,9 +420,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     /// EnumDelete - DELETE /api/v1/enumeration/{name}/{item}
     async fn enum_delete(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::EnumDeletePathParams,
     ) -> Result<EnumDeleteResponse> {
@@ -431,9 +432,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     /// EnumPut - PUT /api/v1/enumeration/{name}
     async fn enum_put(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::EnumPutPathParams,
         body: &models::EnumPutRequest,
