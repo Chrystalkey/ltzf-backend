@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.id FROM dokumententyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "57ba455d5a573b05acbb9943d449268d6a877410eb99fd30b1dc73cc83f19de6"
+}

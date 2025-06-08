@@ -146,7 +146,146 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::EnumGetQueryParams,
     ) -> Result<EnumGetResponse> {
         // welche enums gibts?
-        todo!()
+        // - vorgangstyp
+        // - vg-id-typ
+        // - schlagwort
+        // - dokumententyp
+        // - stationstyp
+        let contains = query_params
+            .contains
+            .as_ref()
+            .map(|x| x.to_lowercase())
+            .unwrap_or("".to_string());
+        let mut tx = self.sqlx_db.begin().await?;
+        let mut filtered_ids = match path_params.name.as_str() {
+            "vorgangstyp" => {
+                sqlx::query!(
+                    "SELECT v.id FROM vorgangstyp v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
+                    contains
+                )
+                .map(|r| r.id)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "vg-id-typ" => {
+                sqlx::query!(
+                    "SELECT v.id FROM vg_ident_typ v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+                    contains
+                )
+                .map(|r| r.id)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "schlagwort" => {
+                sqlx::query!(
+                    "SELECT v.id FROM schlagwort v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+                    contains
+                )
+                .map(|r| r.id)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "dokumententyp" => sqlx::query!(
+                "SELECT v.id FROM dokumententyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+                contains
+            )
+            .map(|r| r.id)
+            .fetch_all(&mut *tx)
+            .await?,
+            "stationstyp" => {
+                sqlx::query!(
+                    "SELECT v.id FROM stationstyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+                    contains
+                )
+                .map(|r| r.id)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            name => {
+                tracing::warn!("enum_get called with unknown enumeration `{name}`");
+                return Ok(EnumGetResponse::Status404_NotFound {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
+            }
+        };
+        if filtered_ids.is_empty() {
+            return Ok(EnumGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+
+        let prp = PaginationResponsePart::new(
+            filtered_ids.len() as i32,
+            query_params.page,
+            query_params.per_page,
+        );
+        let select_few: Vec<i32> = filtered_ids.drain(prp.start()..prp.end()).collect();
+        let values = match path_params.name.as_str() {
+            "vorgangstyp" => {
+                sqlx::query!(
+                    "SELECT v.value FROM vorgangstyp v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "vg-id-typ" => {
+                sqlx::query!(
+                    "SELECT v.value FROM vg_ident_typ v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "schlagwort" => {
+                sqlx::query!(
+                    "SELECT v.value FROM schlagwort v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "dokumententyp" => {
+                sqlx::query!(
+                    "SELECT v.value FROM dokumententyp v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            "stationstyp" => {
+                sqlx::query!(
+                    "SELECT v.value FROM stationstyp v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
+            _ => unreachable!(
+                "This portion of code cannot be reached since the condition is now checked for the second time"
+            ),
+        };
+
+        return Ok(EnumGetResponse::Status200_Success {
+            body: values,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: Some(prp.x_total_count),
+            x_total_pages: Some(prp.x_total_pages),
+            x_page: Some(prp.x_page),
+            x_per_page: Some(prp.x_per_page),
+            link: Some(prp.generate_link_header(&format!("/api/v1/enum/{}", path_params.name))),
+        });
     }
 
     /// DokumentGetById - GET /api/v1/dokument/{api_id}
@@ -189,7 +328,9 @@ mod test_unauthorisiert {
     use openapi::{
         apis::{
             data_administration_vorgang::DataAdministrationVorgang,
-            miscellaneous_unauthorisiert::{GremienGetResponse, MiscellaneousUnauthorisiert},
+            miscellaneous_unauthorisiert::{
+                EnumGetResponse, GremienGetResponse, MiscellaneousUnauthorisiert,
+            },
         },
         models,
     };
@@ -198,8 +339,8 @@ mod test_unauthorisiert {
     use crate::{api::auth::APIScope, utils::test::generate};
 
     #[tokio::test]
-    async fn test_gremien_get() {
-        let scenario = TestSetup::new("test_gremien_get").await;
+    async fn test_gremien_get_nocontent() {
+        let scenario = TestSetup::new("test_gremien_get_nocontent").await;
         let result = scenario
             .server
             .gremien_get(
@@ -221,6 +362,11 @@ mod test_unauthorisiert {
                 assert!(false, "Expected to find no entries")
             }
         }
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn test_gremium_get_success() {
+        let scenario = TestSetup::new("test_gremium_get_success").await;
         let vorgang = generate::default_vorgang();
         let rsp = scenario
             .server
@@ -360,6 +506,132 @@ mod test_unauthorisiert {
             Ok(GremienGetResponse::Status204_NoContent { .. }) => {}
             _ => {
                 assert!(false, "Expected to find no entries")
+            }
+        }
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn test_enum_get_nocontent() {
+        let scenario = TestSetup::new("test_enum_get_nocontent").await;
+        let test_parameters = vec![
+            "vorgangstyp",
+            "vg-id-typ",
+            "dokumententyp",
+            "schlagwort",
+            "stationstyp",
+        ];
+        for tp in test_parameters {
+            let result = scenario
+                .server
+                .enum_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::EnumGetPathParams {
+                        name: tp.to_string(),
+                    },
+                    &models::EnumGetQueryParams {
+                        contains: Some("apfelsaftcocktail".to_string()), // hoffentlich kommt niemand auf die depperte idee apfelsaftcocktail-Gesetzgebung zu machen
+                        page: None,
+                        per_page: None,
+                    },
+                )
+                .await;
+            match result {
+                Ok(EnumGetResponse::Status204_NoContent { .. }) => {}
+                res => {
+                    assert!(false, "Expected to find no entries, got {:?} instead", res)
+                }
+            }
+        }
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_enum_get_notfound() {
+        let scenario = TestSetup::new("test_enum_get_notfound").await;
+        let result = scenario
+            .server
+            .enum_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::EnumGetPathParams {
+                    name: "komplettandererwert".to_string(),
+                },
+                &models::EnumGetQueryParams {
+                    contains: Some("apfelsaftcocktail".to_string()), // hoffentlich kommt niemand auf die depperte idee apfelsaftcocktail-Gesetzgebung zu machen
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await;
+        match result {
+            Ok(EnumGetResponse::Status404_NotFound { .. }) => {}
+            res => {
+                assert!(false, "Expected to get \"notFound\", got {:?} instead", res)
+            }
+        }
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_enum_get_success() {
+        let scenario = TestSetup::new("test_enum_get_success").await;
+        let test_cases_one = vec![
+            ("vorgangstyp", "einspruch"),
+            ("vg-id-typ", "initdrucks"),
+            ("dokumententyp", "entwurf"),
+            ("stationstyp", "blt"),
+            ("schlagwort", "schuppe"),
+        ];
+        let vorgang = generate::default_vorgang();
+        let rsp = scenario
+            .server
+            .vorgang_id_put(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: vorgang.api_id,
+                },
+                &vorgang,
+            )
+            .await
+            .unwrap();
+        match rsp {
+            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
+            xxx => assert!(false, "Expected succes, got {:?}", xxx)
+        }
+        for (name, mtch) in test_cases_one {
+            let result = scenario
+                .server
+                .enum_get(
+                    &Method::GET,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &models::EnumGetPathParams {
+                        name: name.to_string(),
+                    },
+                    &models::EnumGetQueryParams {
+                        contains: Some(mtch.to_string()),
+                        page: None,
+                        per_page: None,
+                    },
+                )
+                .await;
+            match result {
+                Ok(EnumGetResponse::Status200_Success { body, .. }) => {
+                    assert!(!body.is_empty(), "with test case `{}` / `{}`", name, mtch);
+                }
+                res => {
+                    assert!(
+                        false,
+                        "Expected to get success, got {:?} instead with test case `{}` / `{}`",
+                        res, name, mtch
+                    )
+                }
             }
         }
         scenario.teardown().await;

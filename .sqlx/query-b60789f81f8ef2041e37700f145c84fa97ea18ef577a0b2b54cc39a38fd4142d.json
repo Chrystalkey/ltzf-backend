@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.value FROM dokumententyp v WHERE v.id = ANY($1::int4[])",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b60789f81f8ef2041e37700f145c84fa97ea18ef577a0b2b54cc39a38fd4142d"
+}

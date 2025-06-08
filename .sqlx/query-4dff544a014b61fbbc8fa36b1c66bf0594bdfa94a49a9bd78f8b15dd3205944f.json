@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.value FROM schlagwort v WHERE v.id = ANY($1::int4[])",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4dff544a014b61fbbc8fa36b1c66bf0594bdfa94a49a9bd78f8b15dd3205944f"
+}
