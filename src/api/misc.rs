@@ -653,18 +653,6 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         todo!()
     }
 
-    /// AutorenPut - PUT /api/v1/autoren
-    async fn autoren_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        body: &models::AutorenPutRequest,
-    ) -> Result<AutorenPutResponse> {
-        todo!()
-    }
-
     /// GremienDeleteByParam - DELETE /api/v1/gremien
     async fn gremien_delete_by_param(
         &self,
@@ -677,18 +665,6 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         todo!()
     }
 
-    /// GremienPut - PUT /api/v1/gremien
-    async fn gremien_put(
-        &self,
-        _method: &Method,
-        _host: &Host,
-        _cookies: &CookieJar,
-        claims: &Self::Claims,
-        body: &models::GremienPutRequest,
-    ) -> Result<GremienPutResponse> {
-        todo!()
-    }
-
     /// EnumDelete - DELETE /api/v1/enumeration/{name}/{item}
     async fn enum_delete(
         &self,
@@ -698,6 +674,30 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         path_params: &models::EnumDeletePathParams,
     ) -> Result<EnumDeleteResponse> {
+        todo!()
+    }
+
+    /// AutorenPut - PUT /api/v1/autoren
+    async fn autoren_put(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::AutorenPutRequest,
+    ) -> Result<AutorenPutResponse> {
+        todo!()
+    }
+
+    /// GremienPut - PUT /api/v1/gremien
+    async fn gremien_put(
+        &self,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
+        claims: &Self::Claims,
+        body: &models::GremienPutRequest,
+    ) -> Result<GremienPutResponse> {
         todo!()
     }
 
@@ -788,5 +788,67 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
         });
+    }
+}
+
+#[cfg(test)]
+mod test_authorisiert {
+    use crate::api::auth::APIScope;
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
+    use openapi::models;
+
+    use crate::LTZFServer;
+    use crate::utils::test::{TestSetup, generate};
+
+    async fn insert_default_vorgang(server: &LTZFServer) {
+        let vorgang = generate::default_vorgang();
+        let rsp = server
+            .vorgang_id_put(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: vorgang.api_id,
+                },
+                &vorgang,
+            )
+            .await
+            .unwrap();
+        match rsp {
+            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
+            xxx => assert!(false, "Expected succes, got {:?}", xxx)
+        }
+    }
+    #[tokio::test]
+    async fn test_autor_delete() {
+        let scenario = TestSetup::new("test_autor_delete").await;
+        todo!("check permissions");
+        insert_default_vorgang(&scenario.server).await;
+        todo!("check no content response and empty autor_get response");
+
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_enum_delete() {
+        let scenario = TestSetup::new("test_autor_delete").await;
+        todo!("check permissions");
+        insert_default_vorgang(&scenario.server).await;
+        todo!("check no content response and empty enum_get response");
+
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_gremien_delete() {
+        let scenario = TestSetup::new("test_autor_delete").await;
+        todo!("check permissions");
+        insert_default_vorgang(&scenario.server).await;
+        todo!("check no content response and empty gremien_get response");
+
+        scenario.teardown().await;
     }
 }
