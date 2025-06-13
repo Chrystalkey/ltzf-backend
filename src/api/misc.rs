@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::api::auth::APIScope;
 use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -21,7 +22,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let full_authors = sqlx::query!(
+        let author_count = sqlx::query!(
             "SELECT COUNT(1) as cnt FROM autor WHERE
             person = COALESCE($1, person) AND
             organisation = COALESCE($2, organisation) AND
@@ -37,12 +38,13 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .unwrap() as i32;
 
         let prp =
-            PaginationResponsePart::new(full_authors, query_params.page, query_params.per_page);
+            PaginationResponsePart::new(author_count, query_params.page, query_params.per_page);
         let output = sqlx::query!(
             "SELECT * FROM autor WHERE
-            person = COALESCE($1, person) AND
+            ($1::text IS NULL OR person = COALESCE($1, person)) AND
             organisation = COALESCE($2, organisation) AND
-            fachgebiet = COALESCE($3, fachgebiet)
+            ($3::text IS NULL OR fachgebiet = COALESCE($3, fachgebiet))
+            ORDER BY organisation ASC, person ASC, fachgebiet ASC
             LIMIT $4 OFFSET $5
             ",
             query_params.inipsn,
@@ -59,7 +61,13 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         })
         .fetch_all(&mut *tx)
         .await?;
-
+        if output.is_empty() {
+            return Ok(AutorenGetResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
         tx.commit().await?;
         return Ok(AutorenGetResponse::Status200_Success {
             body: output,
@@ -329,7 +337,8 @@ mod test_unauthorisiert {
         apis::{
             data_administration_vorgang::DataAdministrationVorgang,
             miscellaneous_unauthorisiert::{
-                EnumGetResponse, GremienGetResponse, MiscellaneousUnauthorisiert,
+                AutorenGetResponse, EnumGetResponse, GremienGetResponse,
+                MiscellaneousUnauthorisiert,
             },
         },
         models,
@@ -337,6 +346,79 @@ mod test_unauthorisiert {
 
     use crate::utils::test::TestSetup;
     use crate::{api::auth::APIScope, utils::test::generate};
+    #[tokio::test]
+    async fn test_autor_get_nocontent() {
+        let scenario = TestSetup::new("autor_get_nocontent").await;
+        let r = scenario
+            .server
+            .autoren_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::AutorenGetQueryParams {
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: None,
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(r, AutorenGetResponse::Status204_NoContent { .. }));
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_autor_get_success() {
+        let scenario = TestSetup::new("autor_get_success").await;
+
+        let vorgang = generate::default_vorgang();
+        let rsp = scenario
+            .server
+            .vorgang_id_put(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: vorgang.api_id,
+                },
+                &vorgang,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+
+        let r = scenario
+            .server
+            .autoren_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::AutorenGetQueryParams {
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: None,
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            match &r {
+                AutorenGetResponse::Status200_Success { body, .. } => {
+                    assert!(!body.is_empty(), "Body is empty, expected some object");
+                    true
+                }
+                _ => false,
+            },
+            "Expected Successful response, got {:?}",
+            r
+        );
+        scenario.teardown().await;
+    }
 
     #[tokio::test]
     async fn test_gremien_get_nocontent() {
@@ -355,13 +437,12 @@ mod test_unauthorisiert {
                     wp: None,
                 },
             )
-            .await;
-        match result {
-            Ok(GremienGetResponse::Status204_NoContent { .. }) => {}
-            _ => {
-                assert!(false, "Expected to find no entries")
-            }
-        }
+            .await
+            .unwrap();
+        assert!(
+            matches!(result, GremienGetResponse::Status204_NoContent { .. }),
+            "Expected to find no entries"
+        );
         scenario.teardown().await;
     }
     #[tokio::test]
@@ -382,10 +463,7 @@ mod test_unauthorisiert {
             )
             .await
             .unwrap();
-        match rsp {
-            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
-            xxx => assert!(false, "Expected succes, got {:?}", xxx)
-        }
+        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
 
         let result = scenario
             .server
@@ -650,7 +728,45 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         query_params: &models::AutorenDeleteByParamQueryParams,
     ) -> Result<AutorenDeleteByParamResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(AutorenDeleteByParamResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let empty_qp = models::AutorenDeleteByParamQueryParams {
+            inipsn: None,
+            inifch: None,
+            iniorg: None,
+        };
+        if *query_params == empty_qp {
+            return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        sqlx::query!(
+            "
+        DELETE FROM autor a WHERE 
+        (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
+        a.organisation = COALESCE($2, a.organisation) AND
+        (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))
+        ",
+            query_params.inipsn,
+            query_params.iniorg,
+            query_params.inifch
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 
     /// GremienDeleteByParam - DELETE /api/v1/gremien
@@ -662,7 +778,45 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         query_params: &models::GremienDeleteByParamQueryParams,
     ) -> Result<GremienDeleteByParamResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(GremienDeleteByParamResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let empty_qp = models::GremienDeleteByParamQueryParams {
+            gr: None,
+            p: None,
+            wp: None,
+        };
+        if *query_params == empty_qp {
+            return Ok(GremienDeleteByParamResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        sqlx::query!(
+            "
+        DELETE FROM gremium g WHERE 
+        g.name = COALESCE($1, g.name) AND
+        g.wp = COALESCE($2, g.wp) AND
+        g.parl = COALESCE((SELECT id FROM parlament p WHERE p.value = $3), g.parl)
+        ",
+            query_params.gr,
+            query_params.wp,
+            query_params.p.as_ref().map(|x| x.to_string())
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(GremienDeleteByParamResponse::Status204_NoContent {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 
     /// EnumDelete - DELETE /api/v1/enumeration/{name}/{item}
@@ -793,10 +947,18 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
 #[cfg(test)]
 mod test_authorisiert {
+    use std::str::FromStr;
+
     use crate::api::auth::APIScope;
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
+    use openapi::apis::data_administration_miscellaneous::{
+        AutorenDeleteByParamResponse, DataAdministrationMiscellaneous, GremienDeleteByParamResponse,
+    };
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
+    use openapi::apis::miscellaneous_unauthorisiert::{
+        GremienGetResponse, MiscellaneousUnauthorisiert,
+    };
     use openapi::models;
 
     use crate::LTZFServer;
@@ -822,19 +984,168 @@ mod test_authorisiert {
             xxx => assert!(false, "Expected succes, got {:?}", xxx)
         }
     }
+    async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
+        let autoren = server
+            .autoren_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::AutorenGetQueryParams {
+                    page: None,
+                    per_page: None,
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: None,
+                },
+            )
+            .await
+            .unwrap();
+        match autoren {
+            openapi::apis::miscellaneous_unauthorisiert::AutorenGetResponse::Status200_Success { body, ..} => body,
+            _ => vec![]
+        }
+    }
+    async fn fetch_all_gremien(server: &LTZFServer) -> Vec<models::Gremium> {
+        let autoren = server
+            .gremien_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::GremienGetQueryParams {
+                    page: None,
+                    per_page: None,
+                    gr: None,
+                    p: None,
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        match autoren {
+            GremienGetResponse::Status200_Success { body, .. } => body,
+            _ => vec![],
+        }
+    }
     #[tokio::test]
     async fn test_autor_delete() {
         let scenario = TestSetup::new("test_autor_delete").await;
-        todo!("check permissions");
+        let r = scenario
+            .server
+            .autoren_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::AutorenDeleteByParamQueryParams {
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            AutorenDeleteByParamResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
         insert_default_vorgang(&scenario.server).await;
-        todo!("check no content response and empty autor_get response");
+        let autoren = fetch_all_authors(&scenario.server).await;
+        let r = scenario
+            .server
+            .autoren_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::AutorenDeleteByParamQueryParams {
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            AutorenDeleteByParamResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        assert_eq!(
+            autoren,
+            fetch_all_authors(&scenario.server).await,
+            "Expected no deleted item due to no filter applied"
+        );
+
+        let r = scenario
+            .server
+            .autoren_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::AutorenDeleteByParamQueryParams {
+                    inifch: None,
+                    iniorg: Some("Mysterium der Ministerien".to_string()),
+                    inipsn: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            AutorenDeleteByParamResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        let autoren_now = fetch_all_authors(&scenario.server).await;
+        assert!(
+            autoren.len() > autoren_now.len(),
+            "Expected: {:?}, Got {:?}",
+            autoren,
+            autoren_now
+        );
+        let autoren = autoren_now;
+        let r = scenario
+            .server
+            .autoren_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::AutorenDeleteByParamQueryParams {
+                    inifch: None,
+                    iniorg: None,
+                    inipsn: Some("Harald Maria Töpfer".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            AutorenDeleteByParamResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        let autoren_now = fetch_all_authors(&scenario.server).await;
+        assert!(autoren.len() > autoren_now.len());
 
         scenario.teardown().await;
     }
 
     #[tokio::test]
     async fn test_enum_delete() {
-        let scenario = TestSetup::new("test_autor_delete").await;
+        let scenario = TestSetup::new("test_enum_delete").await;
         todo!("check permissions");
         insert_default_vorgang(&scenario.server).await;
         todo!("check no content response and empty enum_get response");
@@ -844,11 +1155,137 @@ mod test_authorisiert {
 
     #[tokio::test]
     async fn test_gremien_delete() {
-        let scenario = TestSetup::new("test_autor_delete").await;
-        todo!("check permissions");
-        insert_default_vorgang(&scenario.server).await;
-        todo!("check no content response and empty gremien_get response");
+        let scenario = TestSetup::new("test_gremien_delete").await;
+        let r = scenario
+            .server
+            .gremien_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::GremienDeleteByParamQueryParams {
+                    gr: None,
+                    p: None,
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            r,
+            GremienDeleteByParamResponse::Status403_Forbidden { .. }
+        ));
 
+        let mut vorgang = generate::default_vorgang();
+        let std_station = generate::default_station();
+        vorgang.stationen.push(models::Station {
+            api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-aaaa-deadbeef106e").unwrap()),
+            gremium: Some(models::Gremium {
+                link: None,
+                name: "abc123".to_string(),
+                parlament: models::Parlament::Br,
+                wahlperiode: 17,
+            }),
+            ..std_station.clone()
+        });
+        vorgang.stationen.push(models::Station {
+            api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-bbbb-deadbeef106e").unwrap()),
+            gremium: Some(models::Gremium {
+                link: None,
+                name: "rrrrrr".to_string(),
+                parlament: models::Parlament::Bt,
+                wahlperiode: 12,
+            }),
+            ..std_station.clone()
+        });
+
+        let rsp = scenario
+            .server
+            .vorgang_id_put(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: vorgang.api_id,
+                },
+                &vorgang,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            rsp,
+            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }
+        ));
+
+        let gremien = fetch_all_gremien(&scenario.server).await;
+        let r = scenario
+            .server
+            .gremien_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::GremienDeleteByParamQueryParams {
+                    gr: Some("abc123".to_string()),
+                    p: None,
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            r,
+            GremienDeleteByParamResponse::Status204_NoContent { .. }
+        ));
+        let new_gremien = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() > new_gremien.len());
+        let gremien = new_gremien;
+
+        let r = scenario
+            .server
+            .gremien_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::GremienDeleteByParamQueryParams {
+                    gr: None,
+                    p: Some(models::Parlament::Bt),
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            r,
+            GremienDeleteByParamResponse::Status204_NoContent { .. }
+        ));
+        let new_gremien = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() > new_gremien.len());
+        let gremien = new_gremien;
+
+        let r = scenario
+            .server
+            .gremien_delete_by_param(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::GremienDeleteByParamQueryParams {
+                    gr: None,
+                    p: None,
+                    wp: Some(20),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            r,
+            GremienDeleteByParamResponse::Status204_NoContent { .. }
+        ));
+        let new_gremien = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() > new_gremien.len());
         scenario.teardown().await;
     }
 }
