@@ -482,15 +482,11 @@ mod test_unauthorisiert {
                 },
             )
             .await;
-        match result {
-            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
-                assert!(body.contains(&generate::default_gremium()));
-                assert_eq!(body.len(), 1);
-            }
-            _ => {
-                assert!(false, "Expected to find no entries")
-            }
-        }
+
+        assert!(
+            matches!(&result, Ok(GremienGetResponse::Status200_Success { body, .. }) if body.len() == 1 && body.contains(&generate::default_gremium())),
+            "Expected to find exactly one entry"
+        );
 
         let result = scenario
             .server
@@ -507,15 +503,11 @@ mod test_unauthorisiert {
                 },
             )
             .await;
-        match result {
-            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
-                assert!(body.contains(&generate::default_gremium()));
-                assert_eq!(body.len(), 1);
-            }
-            got => {
-                assert!(false, "Expected to find Some entries, got {:?}", got)
-            }
-        }
+        assert!(
+            matches!(&result, Ok(GremienGetResponse::Status200_Success { body, .. }) if body.len() == 1 && body.contains(&generate::default_gremium())),
+            "Expected to find Some entries, got {:?}",
+            result
+        );
 
         let result = scenario
             .server
@@ -532,15 +524,10 @@ mod test_unauthorisiert {
                 },
             )
             .await;
-        match result {
-            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
-                assert!(body.contains(&generate::default_gremium()));
-                assert_eq!(body.len(), 1);
-            }
-            _ => {
-                assert!(false, "Expected to find no entries")
-            }
-        }
+        assert!(
+            matches!(&result, Ok(GremienGetResponse::Status200_Success { body, .. }) if body.len() == 1 && body.contains(&generate::default_gremium())),
+            "Expected to find no entries"
+        );
 
         let result = scenario
             .server
@@ -557,15 +544,10 @@ mod test_unauthorisiert {
                 },
             )
             .await;
-        match result {
-            Ok(GremienGetResponse::Status200_Success { body, .. }) => {
-                assert!(body.contains(&generate::default_gremium()));
-                assert_eq!(body.len(), 1);
-            }
-            _ => {
-                assert!(false, "Expected to find no entries")
-            }
-        }
+        assert!(
+            matches!(&result, Ok(GremienGetResponse::Status200_Success { body, .. }) if body.len() == 1 && body.contains(&generate::default_gremium())),
+            "Expected to find no entries"
+        );
 
         let result = scenario
             .server
@@ -582,12 +564,10 @@ mod test_unauthorisiert {
                 },
             )
             .await;
-        match result {
-            Ok(GremienGetResponse::Status204_NoContent { .. }) => {}
-            _ => {
-                assert!(false, "Expected to find no entries")
-            }
-        }
+        assert!(
+            matches!(&result, Ok(GremienGetResponse::Status204_NoContent { .. })),
+            "Expected to find no entries"
+        );
         scenario.teardown().await;
     }
     #[tokio::test]
@@ -616,12 +596,11 @@ mod test_unauthorisiert {
                     },
                 )
                 .await;
-            match result {
-                Ok(EnumGetResponse::Status204_NoContent { .. }) => {}
-                res => {
-                    assert!(false, "Expected to find no entries, got {:?} instead", res)
-                }
-            }
+            assert!(
+                matches!(&result, Ok(EnumGetResponse::Status204_NoContent { .. })),
+                "Expected to find no entries, got {:?} instead",
+                result
+            );
         }
         scenario.teardown().await;
     }
@@ -652,10 +631,8 @@ mod test_unauthorisiert {
             )
             .await
             .unwrap();
-        match rsp {
-            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
-            xxx => assert!(false, "Expected succes, got {:?}", xxx)
-        }
+        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+
         for (name, mtch) in test_cases_one {
             let result = scenario
                 .server
@@ -870,7 +847,14 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         body: &models::AutorenPutRequest,
     ) -> Result<AutorenPutResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(AutorenPutResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        todo!("{:?}", body)
     }
 
     /// GremienPut - PUT /api/v1/gremien
@@ -882,7 +866,14 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         body: &models::GremienPutRequest,
     ) -> Result<GremienPutResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(GremienPutResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        todo!("{:?}", body)
     }
 
     /// EnumPut - PUT /api/v1/enumeration/{name}
@@ -895,7 +886,14 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         path_params: &models::EnumPutPathParams,
         body: &models::EnumPutRequest,
     ) -> Result<EnumPutResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(EnumPutResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        todo!("{:?} // {:?}", path_params, body);
     }
 
     /// DokumentDeleteId - DELETE /api/v1/dokument/{api_id}
@@ -1010,10 +1008,7 @@ mod test_authorisiert {
             )
             .await
             .unwrap();
-        match rsp {
-            openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. } => {},
-            xxx => assert!(false, "Expected succes, got {:?}", xxx)
-        }
+        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
     }
     async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
         let autoren = server

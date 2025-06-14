@@ -367,21 +367,11 @@ mod auth_test {
                 &(super::APIScope::KeyAdder, 2),
             )
             .await;
-        match resp {
-            Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) => {
-                assert!(
-                    r.expires_at - expiry_date < chrono::Duration::milliseconds(1),
-                    "(expected) {} vs {}(gotten)",
-                    expiry_date,
-                    r.expires_at
-                );
-                assert_eq!(r.scope, "keyadder".to_string());
-                assert!(!r.is_being_rotated)
-            }
-            r => {
-                assert!(false, "Expected Successful response, got {:?}", r)
-            }
-        }
+        assert!(
+            matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) if r.expires_at - expiry_date < chrono::Duration::milliseconds(1) && r.scope == "keyadder" && !r.is_being_rotated),
+            "Expected Successful response, got {:?}",
+            resp
+        );
 
         let _rot_key = server
             .auth_rotate(
@@ -403,19 +393,15 @@ mod auth_test {
                 &(super::APIScope::KeyAdder, 2),
             )
             .await;
-        match key_status_rot {
-            Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) => {
-                assert!(
-                    (r.expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
-                        < chrono::Duration::seconds(1)
-                );
-                assert_eq!(r.scope, "keyadder".to_string());
-                assert!(r.is_being_rotated);
-            }
-            r => {
-                assert!(false, "Expected Successful response, got {:?}", r)
-            }
-        }
+        assert!(
+            matches!(&key_status_rot,
+                Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) if (r.expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
+                < chrono::Duration::seconds(1) && r.scope == "keyadder" && r.is_being_rotated
+            ),
+            "Expected Successful response, got {:?}",
+            key_status_rot
+        );
+
         scenario.teardown().await;
     }
 
@@ -434,10 +420,13 @@ mod auth_test {
                 },
             )
             .await;
-        match response {
-            Ok(AuthRotateResponse::Status403_Forbidden { .. }) => {}
-            _ => assert!(false, "Expected to fail with too little permission"),
-        }
+        assert!(
+            matches!(
+                &response,
+                Ok(AuthRotateResponse::Status403_Forbidden { .. })
+            ),
+            "Expected to fail with too little permission"
+        );
         // next: Not Found
         let response = server
             .auth_rotate(
@@ -450,10 +439,10 @@ mod auth_test {
                 },
             )
             .await;
-        match response {
-            Ok(AuthRotateResponse::Status404_NotFound { .. }) => {}
-            _ => assert!(false, "Expected to fail with NotFound"),
-        }
+        assert!(matches!(
+            &response,
+            Ok(AuthRotateResponse::Status404_NotFound { .. })
+        ));
 
         // next: success!
         let key = server
@@ -485,13 +474,9 @@ mod auth_test {
                 },
             )
             .await;
-        match response {
-            Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(rotrsp)) =>{
-                assert_ne!(rotrsp.new_api_key, key);
-                assert!(rotrsp.rotation_complete_date > chrono::Utc::now());
-            },
-            resp => assert!(false, "Expected a successful response, got {:?}", resp)
-        }
+        assert!(matches!(&response,
+            Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(rotrsp)) if rotrsp.new_api_key != key && rotrsp.rotation_complete_date > chrono::Utc::now()
+        ));
         scenario.teardown().await;
     }
 
