@@ -879,6 +879,8 @@ mod test_authorisiert {
     #[tokio::test]
     async fn test_gremium_put() {
         let scenario = TestSetup::new("test_gremium_put").await;
+        insert_default_vorgang(&scenario.server).await;
+
         // check permissions
         let response = scenario
             .server
