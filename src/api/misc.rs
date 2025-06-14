@@ -873,7 +873,155 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        todo!("{:?}", body)
+        // check if replacing contain an index larger than the object list
+        // if so: Bad Request
+        if let Some(replc) = &body.replacing {
+            for rpl in replc.iter() {
+                if rpl.replaced_by as usize >= body.objects.len() {
+                    return Ok(GremienPutResponse::Status400_BadRequest {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            }
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        // check if all gremien are existent in the database
+        // check if none of the replacing gremien are in the database
+        // if both: NotModified
+
+        let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+        for gr in body.objects.iter() {
+            names.push(gr.name.clone());
+            pvalues.push(gr.parlament.to_string());
+            wps.push(gr.wahlperiode as i32);
+            links.push(gr.link.clone());
+        }
+        if gremien_all_exist(&mut tx, &body.objects).await? {
+            // flatten the replacement objects and check for existence
+            if let Some(repl) = &body.replacing {
+                let flattened: Vec<models::Gremium> = repl
+                    .iter()
+                    .flat_map(|o| o.values.iter())
+                    .cloned()
+                    .collect();
+                if gremien_all_exist(&mut tx, &flattened).await? {
+                    return Ok(GremienPutResponse::Status304_NotModified {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            } else {
+                return Ok(GremienPutResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
+            }
+        }
+
+        // insert all gremien, fetch their IDs
+        let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+        for gr in body.objects.iter() {
+            names.push(gr.name.clone());
+            pvalues.push(gr.parlament.to_string());
+            wps.push(gr.wahlperiode as i32);
+            links.push(gr.link.clone());
+        }
+        let new_ids = sqlx::query!("
+        INSERT INTO gremium(name, parl, wp, link) 
+        
+        SELECT nm, p.id, wp, ln FROM UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) AS iv(nm, pname, wp, ln)
+        INNER JOIN parlament p ON p.value = iv.pname
+
+        ON CONFLICT ON CONSTRAINT unique_combo 
+        DO UPDATE SET link = EXCLUDED.link
+
+        RETURNING gremium.id
+        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        .map(|r| r.id)
+        .fetch_all(&mut *tx).await?;
+
+        if body.replacing.is_none() {
+            tx.commit().await?;
+            // if there is nothing to replace, we are done here
+            // CAREFUL: HERE DANGLING GREMIUM ENTRIES ARE CREATED
+            return Ok(GremienPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        // for each replacing gremium:
+        // for each table referencing it: Update those tables with the new id
+        // tables that reference a gremium:
+        // - station(gr_id)
+        // - sitzung(gr_id)
+        let mut replacement_tuples = vec![];
+        for entry in body.replacing.as_ref().unwrap().iter() {
+            let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
+            for value in entry.values.iter() {
+                vnames.push(value.name.clone());
+                vwps.push(value.wahlperiode as i32);
+                vpvals.push(value.parlament.to_string());
+            }
+            let value_ids: Vec<_> = sqlx::query!(
+                "SELECT $4::int4 as repl_with, g.id as origin FROM
+                UNNEST($1::text[], $2::text[], $3::int4[]) as iv(nm, pv, wp)
+                INNER JOIN parlament p ON p.value = iv.pv
+                INNER JOIN gremium g ON 
+                g.name=iv.nm AND g.parl = p.id AND g.wp=iv.wp",
+                &vnames[..],
+                &vpvals[..],
+                &vwps[..],
+                new_ids[entry.replaced_by as usize] as i32
+            )
+            .map(|r| (r.repl_with.unwrap(), r.origin))
+            .fetch_all(&mut *tx)
+            .await?;
+            replacement_tuples.extend(value_ids);
+        }
+        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
+        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
+
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE station 
+        SET gr_id = (SELECT new FROM lookup WHERE old=gr_id)
+        WHERE gr_id = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE sitzung 
+        SET gr_id = (SELECT new FROM lookup WHERE old=gr_id)
+        WHERE gr_id = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM gremium g WHERE g.id = ANY($1::int4[])",
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // return 201Created
+        tx.commit().await?;
+        Ok(GremienPutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 
     /// EnumPut - PUT /api/v1/enumeration/{name}
@@ -972,7 +1120,35 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 }
+async fn gremien_all_exist(
+    tx: &mut sqlx::PgTransaction<'_>,
+    gremien: &[models::Gremium],
+) -> Result<bool> {
+    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+    for gr in gremien.iter() {
+        names.push(gr.name.clone());
+        pvalues.push(gr.parlament.to_string());
+        wps.push(gr.wahlperiode as i32);
+        links.push(gr.link.clone());
+    }
 
+    let existing_obj_cnt = sqlx::query!("SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
+        WHERE EXISTS (
+            SELECT 1 FROM gremium g 
+        INNER JOIN parlament p ON g.parl = p.id
+        WHERE 
+            g.name = input_vector.name AND
+            p.value = input_vector.pvalue AND
+            g.wp = input_vector.wp AND
+            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
+        )
+        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        .map(|r| r.cnt)
+        .fetch_one(&mut **tx).await?.unwrap();
+
+    Ok(existing_obj_cnt as usize == gremien.len())
+}
 #[cfg(test)]
 mod test_authorisiert {
     use std::str::FromStr;
@@ -982,7 +1158,7 @@ mod test_authorisiert {
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{
         AutorenDeleteByParamResponse, DataAdministrationMiscellaneous, EnumDeleteResponse,
-        GremienDeleteByParamResponse,
+        GremienDeleteByParamResponse, GremienPutResponse,
     };
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
     use openapi::apis::miscellaneous_unauthorisiert::{
@@ -1058,7 +1234,7 @@ mod test_authorisiert {
         let r = scenario
             .server
             .autoren_delete_by_param(
-                &Method::GET,
+                &Method::DELETE,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
@@ -1357,6 +1533,151 @@ mod test_authorisiert {
         ));
         let new_gremien = fetch_all_gremien(&scenario.server).await;
         assert!(gremien.len() > new_gremien.len());
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_enum_put() {
+        let scenario = TestSetup::new("test_enum_put").await;
+        scenario.teardown().await;
+    }
+    #[tokio::test]
+    async fn test_autor_put() {
+        let scenario = TestSetup::new("test_autor_put").await;
+        scenario.teardown().await;
+    }
+    async fn gp_with(
+        server: &LTZFServer,
+        gpr: &models::GremienPutRequest,
+    ) -> crate::Result<GremienPutResponse> {
+        server
+            .gremien_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                gpr,
+            )
+            .await
+    }
+    #[tokio::test]
+    async fn test_gremium_put() {
+        let scenario = TestSetup::new("test_gremium_put").await;
+        // check permissions
+        let response = scenario
+            .server
+            .gremien_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::GremienPutRequest {
+                    objects: vec![],
+                    replacing: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            GremienPutResponse::Status403_Forbidden { .. }
+        ));
+        let other_gremium = models::Gremium {
+            link: None,
+            name: "Ausschuss für Ware Diggah".to_string(),
+            parlament: models::Parlament::Bv,
+            wahlperiode: 42,
+        };
+        // check insert without conflict
+        let gremien = fetch_all_gremien(&scenario.server).await;
+        let response = gp_with(
+            &scenario.server,
+            &models::GremienPutRequest {
+                objects: vec![other_gremium.clone()],
+                replacing: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            GremienPutResponse::Status201_Created { .. }
+        ));
+        let gremien_new = fetch_all_gremien(&scenario.server).await;
+        assert!(gremien.len() < gremien_new.len());
+        assert!(gremien_new.contains(&other_gremium));
+        let gremien = gremien_new;
+
+        // check insert with conflict
+        let response = gp_with(
+            &scenario.server,
+            &models::GremienPutRequest {
+                objects: vec![other_gremium.clone()],
+                replacing: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            GremienPutResponse::Status304_NotModified { .. }
+        ));
+        let gremien_new = fetch_all_gremien(&scenario.server).await;
+        assert_eq!(gremien.len(), gremien_new.len());
+        let gremien = gremien_new;
+
+        // check replace
+        let repl_grm = models::Gremium {
+            link: None,
+            name: "Ausschuss für Ware Diggah2".to_string(),
+            parlament: models::Parlament::Bv,
+            wahlperiode: 42,
+        };
+        let response = gp_with(
+            &scenario.server,
+            &models::GremienPutRequest {
+                objects: vec![repl_grm.clone()],
+                replacing: Some(vec![models::GremienPutRequestReplacingInner {
+                    replaced_by: 0,
+                    values: vec![other_gremium.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            GremienPutResponse::Status201_Created { .. }
+        ));
+        let gremien_new = fetch_all_gremien(&scenario.server).await;
+        assert_eq!(gremien.len(), gremien_new.len());
+        assert!(gremien_new.contains(&repl_grm));
+
+        // malformed request
+        let response = gp_with(
+            &scenario.server,
+            &models::GremienPutRequest {
+                objects: vec![models::Gremium {
+                    link: None,
+                    name: "Ausschuss für Ware Diggah2".to_string(),
+                    parlament: models::Parlament::Bv,
+                    wahlperiode: 42,
+                }],
+                replacing: Some(vec![models::GremienPutRequestReplacingInner {
+                    replaced_by: 1,
+                    values: vec![other_gremium.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            GremienPutResponse::Status400_BadRequest { .. }
+        ));
+        let gremien_new = fetch_all_gremien(&scenario.server).await;
+        assert_eq!(gremien.len(), gremien_new.len());
+
         scenario.teardown().await;
     }
 }
