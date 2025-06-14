@@ -19,7 +19,6 @@ use super::{compare::*, find_applicable_date_range};
 impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "SitzungDelete - DELETE /api/v1/sitzung/{sid}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sitzung_delete(
         &self,
@@ -40,7 +39,6 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     }
 
     #[doc = "SidPut - PUT /api/v1/sitzung/{sid}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sid_put(
         &self,
@@ -98,7 +96,6 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
     #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_put(
         &self,
@@ -184,7 +181,6 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 #[async_trait]
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_get(
         &self,
@@ -260,7 +256,6 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     /// TODO: unify kal_get and kal_date_get by utilising sitzung_retrieve_by_param
     /// find a way to implement pagination and the prp here
     #[doc = "KalGet - GET /api/v1/kalender"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_get(
         &self,
@@ -333,7 +328,6 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     }
 
     #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get_by_id(
         &self,
@@ -391,7 +385,6 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     }
 
     #[doc = "SGet - GET /api/v1/sitzung"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get(
         &self,

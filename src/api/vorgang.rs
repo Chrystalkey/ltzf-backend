@@ -19,7 +19,6 @@ use crate::db;
 impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "VorgangDelete - DELETE /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_delete(
         &self,
@@ -40,7 +39,6 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     }
 
     #[doc = "VorgangIdPut - PUT /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_id_put(
         &self,
@@ -101,7 +99,6 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
     #[doc = "VorgangPut - PUT /api/v1/vorgang"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_put(
         &self,
@@ -150,7 +147,6 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 #[async_trait]
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     #[doc = "VorgangGetById - GET /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get_by_id(
         &self,
@@ -208,7 +204,6 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     }
 
     #[doc = "VorgangGet - GET /api/v1/vorgang"]
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get(
         &self,
