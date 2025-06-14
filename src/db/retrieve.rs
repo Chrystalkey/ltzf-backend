@@ -545,3 +545,33 @@ params.lower_date, params.upper_date)
     }
     Ok((prp, vector))
 }
+
+pub(crate) async fn gremien_all_exist(
+    tx: &mut sqlx::PgTransaction<'_>,
+    gremien: &[models::Gremium],
+) -> Result<bool> {
+    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+    for gr in gremien.iter() {
+        names.push(gr.name.clone());
+        pvalues.push(gr.parlament.to_string());
+        wps.push(gr.wahlperiode as i32);
+        links.push(gr.link.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query!("SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
+        WHERE EXISTS (
+            SELECT 1 FROM gremium g 
+        INNER JOIN parlament p ON g.parl = p.id
+        WHERE 
+            g.name = input_vector.name AND
+            p.value = input_vector.pvalue AND
+            g.wp = input_vector.wp AND
+            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
+        )
+        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        .map(|r| r.cnt)
+        .fetch_one(&mut **tx).await?.unwrap();
+
+    Ok(existing_obj_cnt as usize == gremien.len())
+}
