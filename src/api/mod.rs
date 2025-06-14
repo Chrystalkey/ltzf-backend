@@ -12,6 +12,7 @@ use openapi::apis::unauthorisiert::*;
 pub(crate) mod auth;
 pub(crate) mod compare;
 pub(crate) mod misc;
+pub(crate) mod misc_auth;
 pub(crate) mod sitzung;
 pub(crate) mod vorgang;
 
