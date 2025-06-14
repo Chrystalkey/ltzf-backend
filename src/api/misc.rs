@@ -153,20 +153,14 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         path_params: &models::EnumGetPathParams,
         query_params: &models::EnumGetQueryParams,
     ) -> Result<EnumGetResponse> {
-        // welche enums gibts?
-        // - vorgangstyp
-        // - vg-id-typ
-        // - schlagwort
-        // - dokumententyp
-        // - stationstyp
         let contains = query_params
             .contains
             .as_ref()
             .map(|x| x.to_lowercase())
             .unwrap_or("".to_string());
         let mut tx = self.sqlx_db.begin().await?;
-        let mut filtered_ids = match path_params.name.as_str() {
-            "vorgangstyp" => {
+        let mut filtered_ids = match path_params.name {
+            models::EnumerationNames::Vorgangstypen => {
                 sqlx::query!(
                     "SELECT v.id FROM vorgangstyp v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
                     contains
@@ -175,7 +169,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "vg-id-typ" => {
+            models::EnumerationNames::Vgidtypen => {
                 sqlx::query!(
                     "SELECT v.id FROM vg_ident_typ v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
                     contains
@@ -184,7 +178,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "schlagwort" => {
+            models::EnumerationNames::Schlagworte => {
                 sqlx::query!(
                     "SELECT v.id FROM schlagwort v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
                     contains
@@ -193,14 +187,14 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "dokumententyp" => sqlx::query!(
+            models::EnumerationNames::Dokumententypen => sqlx::query!(
                 "SELECT v.id FROM dokumententyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
                 contains
             )
             .map(|r| r.id)
             .fetch_all(&mut *tx)
             .await?,
-            "stationstyp" => {
+            models::EnumerationNames::Stationstypen => {
                 sqlx::query!(
                     "SELECT v.id FROM stationstyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
                     contains
@@ -209,13 +203,15 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            name => {
-                tracing::warn!("enum_get called with unknown enumeration `{name}`");
-                return Ok(EnumGetResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None,
-                });
+            models::EnumerationNames::Parlamente => {
+                let contains = contains.to_uppercase();
+                sqlx::query!(
+                    "SELECT v.id FROM parlament v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+                    contains
+                )
+                .map(|r| r.id)
+                .fetch_all(&mut *tx)
+                .await?
             }
         };
         if filtered_ids.is_empty() {
@@ -232,8 +228,8 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             query_params.per_page,
         );
         let select_few: Vec<i32> = filtered_ids.drain(prp.start()..prp.end()).collect();
-        let values = match path_params.name.as_str() {
-            "vorgangstyp" => {
+        let values = match path_params.name {
+            models::EnumerationNames::Vorgangstypen => {
                 sqlx::query!(
                     "SELECT v.value FROM vorgangstyp v WHERE v.id = ANY($1::int4[])",
                     &select_few[..]
@@ -242,7 +238,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "vg-id-typ" => {
+            models::EnumerationNames::Vgidtypen => {
                 sqlx::query!(
                     "SELECT v.value FROM vg_ident_typ v WHERE v.id = ANY($1::int4[])",
                     &select_few[..]
@@ -251,7 +247,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "schlagwort" => {
+            models::EnumerationNames::Schlagworte => {
                 sqlx::query!(
                     "SELECT v.value FROM schlagwort v WHERE v.id = ANY($1::int4[])",
                     &select_few[..]
@@ -260,7 +256,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "dokumententyp" => {
+            models::EnumerationNames::Dokumententypen => {
                 sqlx::query!(
                     "SELECT v.value FROM dokumententyp v WHERE v.id = ANY($1::int4[])",
                     &select_few[..]
@@ -269,7 +265,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            "stationstyp" => {
+            models::EnumerationNames::Stationstypen => {
                 sqlx::query!(
                     "SELECT v.value FROM stationstyp v WHERE v.id = ANY($1::int4[])",
                     &select_few[..]
@@ -278,9 +274,15 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 .fetch_all(&mut *tx)
                 .await?
             }
-            _ => unreachable!(
-                "This portion of code cannot be reached since the condition is now checked for the second time"
-            ),
+            models::EnumerationNames::Parlamente => {
+                sqlx::query!(
+                    "SELECT v.value FROM parlament v WHERE v.id = ANY($1::int4[])",
+                    &select_few[..]
+                )
+                .map(|r| r.value)
+                .fetch_all(&mut *tx)
+                .await?
+            }
         };
 
         return Ok(EnumGetResponse::Status200_Success {
@@ -592,11 +594,12 @@ mod test_unauthorisiert {
     async fn test_enum_get_nocontent() {
         let scenario = TestSetup::new("test_enum_get_nocontent").await;
         let test_parameters = vec![
-            "vorgangstyp",
-            "vg-id-typ",
-            "dokumententyp",
-            "schlagwort",
-            "stationstyp",
+            models::EnumerationNames::Parlamente,
+            models::EnumerationNames::Dokumententypen,
+            models::EnumerationNames::Vgidtypen,
+            models::EnumerationNames::Vorgangstypen,
+            models::EnumerationNames::Stationstypen,
+            models::EnumerationNames::Schlagworte,
         ];
         for tp in test_parameters {
             let result = scenario
@@ -605,9 +608,7 @@ mod test_unauthorisiert {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &models::EnumGetPathParams {
-                        name: tp.to_string(),
-                    },
+                    &models::EnumGetPathParams { name: tp },
                     &models::EnumGetQueryParams {
                         contains: Some("apfelsaftcocktail".to_string()), // hoffentlich kommt niemand auf die depperte idee apfelsaftcocktail-Gesetzgebung zu machen
                         page: None,
@@ -626,42 +627,15 @@ mod test_unauthorisiert {
     }
 
     #[tokio::test]
-    async fn test_enum_get_notfound() {
-        let scenario = TestSetup::new("test_enum_get_notfound").await;
-        let result = scenario
-            .server
-            .enum_get(
-                &Method::GET,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &models::EnumGetPathParams {
-                    name: "komplettandererwert".to_string(),
-                },
-                &models::EnumGetQueryParams {
-                    contains: Some("apfelsaftcocktail".to_string()), // hoffentlich kommt niemand auf die depperte idee apfelsaftcocktail-Gesetzgebung zu machen
-                    page: None,
-                    per_page: None,
-                },
-            )
-            .await;
-        match result {
-            Ok(EnumGetResponse::Status404_NotFound { .. }) => {}
-            res => {
-                assert!(false, "Expected to get \"notFound\", got {:?} instead", res)
-            }
-        }
-        scenario.teardown().await;
-    }
-
-    #[tokio::test]
     async fn test_enum_get_success() {
         let scenario = TestSetup::new("test_enum_get_success").await;
         let test_cases_one = vec![
-            ("vorgangstyp", "einspruch"),
-            ("vg-id-typ", "initdrucks"),
-            ("dokumententyp", "entwurf"),
-            ("stationstyp", "blt"),
-            ("schlagwort", "schuppe"),
+            (models::EnumerationNames::Vorgangstypen, "einspruch"),
+            (models::EnumerationNames::Vgidtypen, "initdrucks"),
+            (models::EnumerationNames::Dokumententypen, "entwurf"),
+            (models::EnumerationNames::Stationstypen, "blt"),
+            (models::EnumerationNames::Schlagworte, "schuppe"),
+            (models::EnumerationNames::Parlamente, "B"),
         ];
         let vorgang = generate::default_vorgang();
         let rsp = scenario
@@ -689,9 +663,7 @@ mod test_unauthorisiert {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &models::EnumGetPathParams {
-                        name: name.to_string(),
-                    },
+                    &models::EnumGetPathParams { name },
                     &models::EnumGetQueryParams {
                         contains: Some(mtch.to_string()),
                         page: None,
@@ -699,18 +671,13 @@ mod test_unauthorisiert {
                     },
                 )
                 .await;
-            match result {
-                Ok(EnumGetResponse::Status200_Success { body, .. }) => {
-                    assert!(!body.is_empty(), "with test case `{}` / `{}`", name, mtch);
-                }
-                res => {
-                    assert!(
-                        false,
-                        "Expected to get success, got {:?} instead with test case `{}` / `{}`",
-                        res, name, mtch
-                    )
-                }
-            }
+            assert!(
+                matches!(&result, Ok(EnumGetResponse::Status200_Success { body, .. }) if !body.is_empty() ),
+                "Expected to get success, got {:?} instead with test case `{}` / `{}`",
+                result,
+                name,
+                mtch
+            );
         }
         scenario.teardown().await;
     }
@@ -828,7 +795,70 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         claims: &Self::Claims,
         path_params: &models::EnumDeletePathParams,
     ) -> Result<EnumDeleteResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            return Ok(EnumDeleteResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        use models::EnumerationNames::*;
+        let mut tx = self.sqlx_db.begin().await?;
+        match path_params.name {
+            Schlagworte => {
+                sqlx::query!(
+                    "DELETE FROM schlagwort s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            Stationstypen => {
+                sqlx::query!(
+                    "DELETE FROM stationstyp s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            Vorgangstypen => {
+                sqlx::query!(
+                    "DELETE FROM vorgangstyp s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            Parlamente => {
+                sqlx::query!(
+                    "DELETE FROM parlament s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            Vgidtypen => {
+                sqlx::query!(
+                    "DELETE FROM vg_ident_typ s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            Dokumententypen => {
+                sqlx::query!(
+                    "DELETE FROM dokumententyp s WHERE s.value = $1",
+                    path_params.item
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        Ok(EnumDeleteResponse::Status204_NoContent {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 
     /// AutorenPut - PUT /api/v1/autoren
@@ -953,7 +983,8 @@ mod test_authorisiert {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{
-        AutorenDeleteByParamResponse, DataAdministrationMiscellaneous, GremienDeleteByParamResponse,
+        AutorenDeleteByParamResponse, DataAdministrationMiscellaneous, EnumDeleteResponse,
+        GremienDeleteByParamResponse,
     };
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
     use openapi::apis::miscellaneous_unauthorisiert::{
@@ -1143,12 +1174,57 @@ mod test_authorisiert {
         scenario.teardown().await;
     }
 
+    async fn enum_delete_with(
+        server: &LTZFServer,
+        pp: &models::EnumDeletePathParams,
+    ) -> crate::Result<EnumDeleteResponse> {
+        server
+            .enum_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                pp,
+            )
+            .await
+    }
     #[tokio::test]
     async fn test_enum_delete() {
         let scenario = TestSetup::new("test_enum_delete").await;
-        todo!("check permissions");
+        let r = scenario
+            .server
+            .enum_delete(
+                &Method::DELETE,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::EnumDeletePathParams {
+                    item: "absolutely".to_string(),
+                    name: models::EnumerationNames::Dokumententypen,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r,
+            EnumDeleteResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
         insert_default_vorgang(&scenario.server).await;
-        todo!("check no content response and empty enum_get response");
+
+        let r = enum_delete_with(
+            &scenario.server,
+            &models::EnumDeletePathParams {
+                item: "preparl-entwurf".to_string(),
+                name: models::EnumerationNames::Dokumententypen,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(r, EnumDeleteResponse::Status204_NoContent { .. }));
 
         scenario.teardown().await;
     }
