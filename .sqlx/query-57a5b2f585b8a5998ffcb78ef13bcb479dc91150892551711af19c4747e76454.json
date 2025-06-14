@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM vorgangstyp s WHERE s.value = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "57a5b2f585b8a5998ffcb78ef13bcb479dc91150892551711af19c4747e76454"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT v.id FROM parlament v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "847ad5ec879d30f1847722a6e33ce222ba0941a0a6175ae5804e43e3e92d8aed"
+}
