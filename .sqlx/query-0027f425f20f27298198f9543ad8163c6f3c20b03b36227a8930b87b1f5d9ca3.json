@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT $4::int4 as repl_with, g.id as origin FROM\n                UNNEST($1::text[], $2::text[], $3::int4[]) as iv(nm, pv, wp)\n                INNER JOIN parlament p ON p.value = iv.pv\n                INNER JOIN gremium g ON \n                g.name=iv.nm AND g.parl = p.id AND g.wp=iv.wp",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repl_with",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "origin",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int4Array",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "0027f425f20f27298198f9543ad8163c6f3c20b03b36227a8930b87b1f5d9ca3"
+}

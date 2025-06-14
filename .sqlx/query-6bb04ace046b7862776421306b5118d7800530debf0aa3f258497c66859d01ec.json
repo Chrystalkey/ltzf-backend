@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))\n        UPDATE sitzung \n        SET gr_id = (SELECT new FROM lookup WHERE old=gr_id)\n        WHERE gr_id = ANY($2::int4[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6bb04ace046b7862776421306b5118d7800530debf0aa3f258497c66859d01ec"
+}

@@ -202,6 +202,11 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
+        // tables referencing authors:
+        // - rel_dok_autor (aut_id)
+        // - rel_vorgang_init (in_id)
+        // - rel_sitzung_experten (eid)
+        // - lobbyregistereintrag (organisation)
         todo!("{:?}", body)
     }
 
