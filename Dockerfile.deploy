@@ -5,7 +5,7 @@ ENV OPENAPI_GENERATOR_VERSION="7.12.0"
 WORKDIR /app
 
 RUN apt update \
-    &&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 maven jq curl\
+    &&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 maven jq curl ripgrep\
     &&  rm -rf /var/lib/apt/lists/* \
     && curl "https://raw.githubusercontent.com/OpenAPITools/openapi-generator/master/bin/utils/openapi-generator-cli.sh" > ./openapi-generator-cli \
     && chmod u+x ./openapi-generator-cli
@@ -15,7 +15,7 @@ RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./rs-test \
     && rm -rf rs-test openapi.yml
 
-RUN curl "raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml" > ./openapi.yml \
+RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml" > ./openapi.yml \
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./oapicode \
     && rg '<I, A, E>' -r '<I, A, E, C>' ./oapicode/src/server/mod.rs --passthrough -N > ./oapicode/src/server/mod1.rs \
     && iconv -t UTF-8 ./oapicode/src/server/mod1.rs -o ./oapicode/src/server/mod2.rs \
