@@ -1,5 +1,5 @@
 use crate::api::auth::APIScope;
-use crate::db::retrieve::gremien_all_exist;
+use crate::db::retrieve::{authors_all_exist, gremien_all_exist};
 use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -170,12 +170,168 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
+        // if so: Bad Request
+        if let Some(replc) = &body.replacing {
+            for rpl in replc.iter() {
+                if rpl.replaced_by as usize >= body.objects.len() {
+                    return Ok(AutorenPutResponse::Status400_BadRequest {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            }
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        // check if all authors are existent in the database
+        // check if none of the replacing authors are in the database
+        // if both: NotModified
+        let (mut person, mut organisation, mut fach, mut lobby) = (vec![], vec![], vec![], vec![]);
+        for a in body.objects.iter() {
+            person.push(a.person.clone());
+            organisation.push(a.organisation.clone());
+            fach.push(a.fachgebiet.clone());
+            lobby.push(a.lobbyregister.clone());
+        }
+
+        if authors_all_exist(&mut tx, &body.objects).await? {
+            // flatten the replacement objects and check for existence
+            if let Some(repl) = &body.replacing {
+                let flattened: Vec<models::Autor> =
+                    repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
+                if authors_all_exist(&mut tx, &flattened).await? {
+                    return Ok(AutorenPutResponse::Status304_NotModified {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            } else {
+                return Ok(AutorenPutResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
+            }
+        }
+
+        // insert all authors, fetch their IDs
+        let new_ids = sqlx::query!("
+        INSERT INTO autor(person, organisation, fachgebiet, lobbyregister) 
+
+        SELECT ps, og, fc, lb FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[]) AS iv(ps, og, fc, lb)
+
+        ON CONFLICT ON CONSTRAINT unq_data 
+        DO UPDATE SET 
+        fachgebiet = EXCLUDED.fachgebiet,
+        lobbyregister = EXCLUDED.lobbyregister
+
+        RETURNING autor.id
+        ", &person[..] as &[Option<String>], &organisation[..], &fach[..] as &[Option<String>], &lobby[..] as &[Option<String>])
+        .map(|r| r.id)
+        .fetch_all(&mut *tx).await?;
+
+        if body.replacing.is_none() {
+            tx.commit().await?;
+            // if there is nothing to replace, we are done here
+            // CAREFUL: HERE DANGLING AUTHOR ENTRIES ARE CREATED
+            return Ok(AutorenPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        // for each replacing autor:
+        // for each table referencing it: Update those tables with the new id
+        let mut replacement_tuples = vec![];
+        for entry in body.replacing.as_ref().unwrap().iter() {
+            let (mut vperson, mut vorga) = (vec![], vec![]);
+            for value in entry.values.iter() {
+                vperson.push(value.person.clone());
+                vorga.push(value.organisation.clone());
+            }
+            let value_ids: Vec<_> = sqlx::query!(
+                "SELECT $3::int4 as repl_with, a.id as origin FROM
+                UNNEST($1::text[], $2::text[]) as iv(ps, og)
+                INNER JOIN autor a ON 
+                (a.person IS NULL AND iv.ps IS NULL OR a.person=iv.ps) AND 
+                a.organisation = iv.og",
+                &vperson[..] as &[Option<String>],
+                &vorga[..],
+                entry.replaced_by as i32
+            )
+            .map(|r| (new_ids[r.repl_with.unwrap() as usize], r.origin))
+            .fetch_all(&mut *tx)
+            .await?;
+            replacement_tuples.extend(value_ids);
+        }
+        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
+        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
+
         // tables referencing authors:
         // - rel_dok_autor (aut_id)
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE rel_dok_autor 
+        SET aut_id = (SELECT new FROM lookup WHERE old=aut_id)
+        WHERE aut_id = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+
         // - rel_vorgang_init (in_id)
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE rel_vorgang_init
+        SET in_id = (SELECT new FROM lookup WHERE old=in_id)
+        WHERE in_id = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
         // - rel_sitzung_experten (eid)
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE rel_sitzung_experten
+        SET eid = (SELECT new FROM lookup WHERE old=eid)
+        WHERE eid = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
         // - lobbyregistereintrag (organisation)
-        todo!("{:?}", body)
+        sqlx::query!(
+            "
+        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+        UPDATE lobbyregistereintrag
+        SET organisation = (SELECT new FROM lookup WHERE old=organisation)
+        WHERE organisation = ANY($2::int4[])",
+            &rep_new[..],
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
+            &rep_old[..]
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // return 201Created
+        tx.commit().await?;
+        Ok(AutorenPutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 
     /// GremienPut - PUT /api/v1/gremien
@@ -241,13 +397,6 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
 
         // insert all gremien, fetch their IDs
-        let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
-        for gr in body.objects.iter() {
-            names.push(gr.name.clone());
-            pvalues.push(gr.parlament.to_string());
-            wps.push(gr.wahlperiode as i32);
-            links.push(gr.link.clone());
-        }
         let new_ids = sqlx::query!("
         INSERT INTO gremium(name, parl, wp, link) 
         
@@ -446,8 +595,8 @@ mod test_authorisiert {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{
-        AutorenDeleteByParamResponse, DataAdministrationMiscellaneous, EnumDeleteResponse,
-        GremienDeleteByParamResponse, GremienPutResponse,
+        AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
+        EnumDeleteResponse, GremienDeleteByParamResponse, GremienPutResponse,
     };
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
     use openapi::apis::miscellaneous_unauthorisiert::{
@@ -830,11 +979,6 @@ mod test_authorisiert {
         let scenario = TestSetup::new("test_enum_put").await;
         scenario.teardown().await;
     }
-    #[tokio::test]
-    async fn test_autor_put() {
-        let scenario = TestSetup::new("test_autor_put").await;
-        scenario.teardown().await;
-    }
     async fn gp_with(
         server: &LTZFServer,
         gpr: &models::GremienPutRequest,
@@ -968,6 +1112,138 @@ mod test_authorisiert {
         ));
         let gremien_new = fetch_all_gremien(&scenario.server).await;
         assert_eq!(gremien.len(), gremien_new.len());
+
+        scenario.teardown().await;
+    }
+
+    async fn ap_with(
+        server: &LTZFServer,
+        apr: &models::AutorenPutRequest,
+    ) -> crate::Result<AutorenPutResponse> {
+        server
+            .autoren_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                apr,
+            )
+            .await
+    }
+    #[tokio::test]
+    async fn test_autor_put() {
+        let scenario = TestSetup::new("test_autor_put").await;
+        insert_default_vorgang(&scenario.server).await;
+
+        // check permissions
+        let response = scenario
+            .server
+            .autoren_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::AutorenPutRequest {
+                    objects: vec![],
+                    replacing: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status403_Forbidden { .. }
+        ));
+        let other_autor = models::Autor {
+            fachgebiet: Some("Blattzerfetzung".to_string()),
+            lobbyregister: Some("https://example.com/einzigartig".to_string()),
+            person: Some("Thorbjörn Alman".to_string()),
+            organisation: "Schmiedeversammlung Süd".to_string(),
+        };
+        // check insert without conflict
+        let autoren = fetch_all_authors(&scenario.server).await;
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![other_autor.clone()],
+                replacing: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status201_Created { .. }
+        ));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert!(autoren.len() < autoren_new.len());
+        assert!(autoren_new.contains(&other_autor));
+        let autoren = autoren_new;
+
+        // check insert with conflict
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![other_autor.clone()],
+                replacing: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status304_NotModified { .. }
+        ));
+        let autoren_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), autoren_new.len());
+        let autoren = autoren_new;
+
+        // check replace
+        let repl_grm = models::Autor {
+            fachgebiet: Some("Blattzusammensetzung".to_string()),
+            lobbyregister: Some("https://example.com/einzigartig/hahadochnicht".to_string()),
+            person: Some("Karla Kolumna".to_string()),
+            organisation: "Wasserstoffwirtschaftsverband der Ostgoten".to_string(),
+        };
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![repl_grm.clone()],
+                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+                    replaced_by: 0,
+                    values: vec![other_autor.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status201_Created { .. }
+        ));
+        let gremien_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), gremien_new.len());
+        assert!(gremien_new.contains(&repl_grm));
+
+        // malformed request
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![repl_grm.clone()],
+                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+                    replaced_by: 1,
+                    values: vec![other_autor.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status400_BadRequest { .. }
+        ));
+        let gremien_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), gremien_new.len());
 
         scenario.teardown().await;
     }

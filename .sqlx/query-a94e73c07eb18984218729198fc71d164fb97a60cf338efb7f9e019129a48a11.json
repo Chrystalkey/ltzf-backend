@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))\n        UPDATE rel_vorgang_init\n        SET in_id = (SELECT new FROM lookup WHERE old=in_id)\n        WHERE in_id = ANY($2::int4[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a94e73c07eb18984218729198fc71d164fb97a60cf338efb7f9e019129a48a11"
+}

@@ -575,3 +575,34 @@ pub(crate) async fn gremien_all_exist(
 
     Ok(existing_obj_cnt as usize == gremien.len())
 }
+
+pub(crate) async fn authors_all_exist(
+    tx: &mut sqlx::PgTransaction<'_>,
+    autoren: &[models::Autor],
+) -> Result<bool> {
+    let (mut person, mut organisation) = (vec![], vec![]);
+    for a in autoren.iter() {
+        person.push(a.person.clone());
+        organisation.push(a.organisation.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query!(
+        "SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[]) as iv(person, orga)
+        WHERE EXISTS (
+            SELECT 1 FROM autor a
+        WHERE 
+            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) AND
+            a.organisation = iv.orga
+        )
+        ",
+        &person[..] as &[Option<String>],
+        &organisation[..]
+    )
+    .map(|r| r.cnt)
+    .fetch_one(&mut **tx)
+    .await?
+    .unwrap();
+
+    Ok(existing_obj_cnt as usize == autoren.len())
+}

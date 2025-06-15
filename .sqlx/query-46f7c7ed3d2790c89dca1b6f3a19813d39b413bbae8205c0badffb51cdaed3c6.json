@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT $3::int4 as repl_with, a.id as origin FROM\n                UNNEST($1::text[], $2::text[]) as iv(ps, og)\n                INNER JOIN autor a ON \n                (a.person IS NULL AND iv.ps IS NULL OR a.person=iv.ps) AND \n                a.organisation = iv.og",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repl_with",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "origin",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "46f7c7ed3d2790c89dca1b6f3a19813d39b413bbae8205c0badffb51cdaed3c6"
+}

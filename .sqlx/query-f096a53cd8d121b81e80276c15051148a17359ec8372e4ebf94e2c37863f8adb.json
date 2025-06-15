@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO autor(person, organisation, fachgebiet, lobbyregister) \n\n        SELECT ps, og, fc, lb FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[]) AS iv(ps, og, fc, lb)\n\n        ON CONFLICT ON CONSTRAINT unq_data \n        DO UPDATE SET \n        fachgebiet = EXCLUDED.fachgebiet,\n        lobbyregister = EXCLUDED.lobbyregister\n\n        RETURNING autor.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f096a53cd8d121b81e80276c15051148a17359ec8372e4ebf94e2c37863f8adb"
+}
