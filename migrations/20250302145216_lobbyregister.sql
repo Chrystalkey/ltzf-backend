@@ -4,7 +4,8 @@ CREATE TABLE lobbyregistereintrag(
     organisation INTEGER NOT NULL REFERENCES autor(id) ON DELETE CASCADE,
     interne_id VARCHAR NOT NULL,
     intention VARCHAR NOT NULL,
-    link VARCHAR NOT NULL
+    link VARCHAR NOT NULL,
+    CONSTRAINT unique_dataident UNIQUE(vg_id, organisation)
 );
 
 CREATE TABLE rel_lobbyreg_drucksnr(

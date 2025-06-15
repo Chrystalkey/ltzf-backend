@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::api::auth::APIScope;
-use crate::db::retrieve::{authors_all_exist, gremien_all_exist};
+use crate::db::retrieve::{count_existing_authors, count_existing_gremien};
 use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -197,12 +197,12 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             lobby.push(a.lobbyregister.clone());
         }
 
-        if authors_all_exist(&mut tx, &body.objects).await? {
+        if count_existing_authors(&mut tx, &body.objects).await? == body.objects.len() {
             // flatten the replacement objects and check for existence
             if let Some(repl) = &body.replacing {
                 let flattened: Vec<models::Autor> =
                     repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
-                if authors_all_exist(&mut tx, &flattened).await? {
+                if count_existing_authors(&mut tx, &flattened).await? == 0 {
                     return Ok(AutorenPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -279,18 +279,22 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             ("lobbyregistereintrag", "organisation"),
         ];
         for (table, column) in tables {
-            sqlx::query(&format!(
-                "
-            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-            UPDATE {table} 
-            SET {column} = (SELECT new FROM lookup WHERE old={column})
-            WHERE {column} = ANY($2::int4[])
+            // first, delete potentially conflicting entries
+            // !!this is a TODO!!
+
+            // then insert like this:
+            let query = format!(
+                "WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+                UPDATE {table} 
+                SET {column} = (SELECT new FROM lookup WHERE old={column})
+                WHERE {column} = ANY($2::int4[])
             "
-            ))
-            .bind(&rep_new[..])
-            .bind(&rep_old[..])
-            .execute(&mut *tx)
-            .await?;
+            );
+            sqlx::query(&query)
+                .bind(&rep_new[..])
+                .bind(&rep_old[..])
+                .execute(&mut *tx)
+                .await?;
         }
         sqlx::query!(
             "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
@@ -349,12 +353,12 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             wps.push(gr.wahlperiode as i32);
             links.push(gr.link.clone());
         }
-        if gremien_all_exist(&mut tx, &body.objects).await? {
+        if count_existing_gremien(&mut tx, &body.objects).await? == body.objects.len() {
             // flatten the replacement objects and check for existence
             if let Some(repl) = &body.replacing {
                 let flattened: Vec<models::Gremium> =
                     repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
-                if gremien_all_exist(&mut tx, &flattened).await? {
+                if count_existing_gremien(&mut tx, &flattened).await? == 0 {
                     return Ok(GremienPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -428,6 +432,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // - sitzung(gr_id)
         let tables = vec![("station", "gr_id"), ("sitzung", "gr_id")];
         for (table, column) in tables {
+            // first, delete potentially conflicting entries
+            // !!this is a TODO!!
+
+            // then insert like this:
             sqlx::query(&format!(
                 "
             WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
@@ -521,7 +529,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 .map(|r| r.get::<i64, _>(0) as usize)
                 .fetch_one(&mut *tx).await?;
 
-                if present == flattened.len() {
+                if present == 0 {
                     return Ok(EnumPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -564,6 +572,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // for each table referencing it: Update those tables with the new id
         let mut replacement_tuples = vec![];
         for entry in body.replacing.as_ref().unwrap().iter() {
+            // first, delete potentially conflicting entries
+            // !!this is a TODO!!
+
+            // then insert like this:
             let vitems: Vec<String> = entry.values.clone();
             let value_ids: Vec<_> = sqlx::query(&format!(
                 "SELECT $2::int4 as repl_with, x.id as origin FROM
@@ -1403,6 +1415,44 @@ mod test_authorisiert {
         ));
         let gremien_new = fetch_all_authors(&scenario.server).await;
         assert_eq!(autoren.len(), gremien_new.len());
+
+        // test case of merging two foreign keys: currently disabled !!THIS IS A TODO!!
+        // let mod_autor = models::Autor {
+        //     person: Some("Heribert Schnakenwurst IV".to_string()),
+        //     ..generate::default_autor_person()
+        // };
+        // let mut modified_default = generate::default_vorgang();
+        // modified_default.stationen[0]
+        //     .stellungnahmen
+        //     .as_mut()
+        //     .unwrap()[0]
+        //     .autoren
+        //     .push(mod_autor.clone());
+        // run_integration(&modified_default, uuid::Uuid::nil(), &scenario.server)
+        //     .await
+        //     .unwrap(); // insert one that can be merged
+        // let all_authors = fetch_all_authors(&scenario.server).await;
+        // assert!(all_authors.contains(&mod_autor));
+
+        // let response = ap_with(
+        //     &scenario.server,
+        //     &models::AutorenPutRequest {
+        //         objects: vec![generate::default_autor_person()],
+        //         replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+        //             replaced_by: 0,
+        //             values: vec![mod_autor.clone()],
+        //         }]),
+        //     },
+        // )
+        // .await
+        // .unwrap();
+        // assert!(
+        //     matches!(&response, AutorenPutResponse::Status201_Created { .. }),
+        //     "{:?}",
+        //     response
+        // );
+        // let all_authors_new = fetch_all_authors(&scenario.server).await;
+        // assert!(all_authors_new.len() < all_authors.len());
 
         scenario.teardown().await;
     }

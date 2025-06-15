@@ -546,10 +546,10 @@ params.lower_date, params.upper_date)
     Ok((prp, vector))
 }
 
-pub(crate) async fn gremien_all_exist(
+pub(crate) async fn count_existing_gremien(
     tx: &mut sqlx::PgTransaction<'_>,
     gremien: &[models::Gremium],
-) -> Result<bool> {
+) -> Result<usize> {
     let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
     for gr in gremien.iter() {
         names.push(gr.name.clone());
@@ -573,13 +573,13 @@ pub(crate) async fn gremien_all_exist(
         .map(|r| r.cnt)
         .fetch_one(&mut **tx).await?.unwrap();
 
-    Ok(existing_obj_cnt as usize == gremien.len())
+    Ok(existing_obj_cnt as usize)
 }
 
-pub(crate) async fn authors_all_exist(
+pub(crate) async fn count_existing_authors(
     tx: &mut sqlx::PgTransaction<'_>,
     autoren: &[models::Autor],
-) -> Result<bool> {
+) -> Result<usize> {
     let (mut person, mut organisation) = (vec![], vec![]);
     for a in autoren.iter() {
         person.push(a.person.clone());
@@ -603,6 +603,5 @@ pub(crate) async fn authors_all_exist(
     .fetch_one(&mut **tx)
     .await?
     .unwrap();
-
-    Ok(existing_obj_cnt as usize == autoren.len())
+    Ok(existing_obj_cnt as usize)
 }
