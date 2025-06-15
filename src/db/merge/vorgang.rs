@@ -14,6 +14,7 @@ use crate::utils::notify::notify_ambiguous_match;
 ///     - if it is not mergeable and has no match it is added to the set.
 use crate::{LTZFServer, Result};
 use openapi::models;
+use uuid::Uuid;
 
 /// this function determines what means "matching enough".
 /// 1. wenn api_id matcht
@@ -39,7 +40,7 @@ pub async fn vorgang_merge_candidates(
         .iter()
         .map(|x| srv.guard_ts(x.typ, model.api_id, obj).unwrap())
         .collect();
-    let initds: Vec<_> = model
+    let input_vorworte: Vec<_> = model
         .stationen
         .iter()
         .filter(|&s| s.typ == models::Stationstyp::ParlInitiativ)
@@ -47,14 +48,14 @@ pub async fn vorgang_merge_candidates(
             s.dokumente
                 .iter()
                 .filter(|&d| {
-                    if let models::DokRef::Dokument(d) = d {
+                    if let models::StationDokumenteInner::Dokument(d) = d {
                         d.typ == models::Doktyp::Entwurf && d.vorwort.is_some()
                     } else {
                         false
                     }
                 })
                 .map(|d| {
-                    if let models::DokRef::Dokument(d) = d {
+                    if let models::StationDokumenteInner::Dokument(d) = d {
                         d.vorwort.clone().unwrap()
                     } else {
                         unreachable!()
@@ -84,19 +85,22 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
 	(
 	vorgang.wahlperiode = $4 AND -- wahlperiode und 
 	vt.value = $5 AND            -- typ übereinstimmen und 
-		(EXISTS (SELECT * FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE  -- eine übereinstimmende ID existiert
+		(EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) as eingabe(ident, typ), db_id_table WHERE  -- eine übereinstimmende ID existiert
 			db_id_table.vg_id = vorgang.id AND
 			eingabe.ident = db_id_table.ident AND
 			eingabe.typ = db_id_table.idt_str)
-		OR -- oder 
-		EXISTS (SELECT * FROM UNNEST($6::text[]) eingabe(vw), initds_vwtable ids
-		WHERE ids.vg_id = vorgang.id
-		AND SIMILARITY(vw, ids.vorwort) > 0.8
-		)
+
+--        OR -- oder 
+--        
+--        -- ein vorwort im Dokument einer Station vom Typ (entwurf, preparl-entwurf) existiert, das ähnlich genug ist
+--        EXISTS (SELECT 1 FROM UNNEST($6::text[]) eingabe(vw), initds_vwtable ids WHERE
+--            ids.vg_id = vorgang.id AND
+--            SIMILARITY(vw, ids.vorwort) > 0.8
+--		    )
 		)
 	);",
     model.api_id, &ident_t[..], &identt_t[..], model.wahlperiode as i32,
-    srv.guard_ts(model.typ, model.api_id, obj)?, &initds[..])
+    srv.guard_ts(model.typ, model.api_id, obj)?, /*&input_vorworte[..]*/)
     .fetch_all(executor).await?;
 
     tracing::debug!(
@@ -133,9 +137,9 @@ pub async fn station_merge_candidates(
     let dok_hash: Vec<_> = model
         .dokumente
         .iter()
-        .filter(|x| matches!(x, models::DokRef::Dokument(_)))
+        .filter(|x| matches!(x, models::StationDokumenteInner::Dokument(_)))
         .map(|x| {
-            if let models::DokRef::Dokument(d) = x {
+            if let models::StationDokumenteInner::Dokument(d) = x {
                 d.hash.clone()
             } else {
                 unreachable!()
@@ -203,13 +207,20 @@ pub async fn dokument_merge_candidates(
     srv: &LTZFServer,
 ) -> Result<MatchState<i32>> {
     let dids = sqlx::query!(
-        "SELECT d.id FROM dokument d WHERE 
-        d.hash = $1 OR
+        "SELECT d.id FROM dokument d 
+        INNER JOIN dokumententyp dt ON dt.id = d.typ 
+        WHERE 
+        (d.hash = $1 OR
         d.api_id = $2 OR
-        d.drucksnr = $3",
+        d.drucksnr = $3) AND dt.value = $4",
         model.hash,
         model.api_id,
-        model.drucksnr
+        model.drucksnr,
+        srv.guard_ts(
+            model.typ,
+            model.api_id.unwrap_or(Uuid::nil()),
+            "dok_merge_candidates"
+        )?
     )
     .map(|r| r.id)
     .fetch_all(executor)
@@ -343,7 +354,7 @@ pub async fn execute_merge_station(
         // if id & in database: add to list of associated documents
         // if document: match & integrate or insert.
         match dok {
-            models::DokRef::String(uuid) => {
+            models::StationDokumenteInner::String(uuid) => {
                 let uuid = uuid::Uuid::parse_str(uuid)?;
                 let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
                     .map(|r| r.id)
@@ -356,7 +367,7 @@ pub async fn execute_merge_station(
                 }
                 insert_ids.push(id.unwrap());
             }
-            models::DokRef::Dokument(dok) => {
+            models::StationDokumenteInner::Dokument(dok) => {
                 let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
                 match matches {
                     MatchState::NoMatch => {
@@ -443,6 +454,7 @@ pub async fn execute_merge_station(
 pub async fn execute_merge_vorgang(
     model: &models::Vorgang,
     candidate: i32,
+    scraper_id: Uuid,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<()> {
@@ -519,7 +531,7 @@ pub async fn execute_merge_vorgang(
     for stat in &model.stationen {
         match station_merge_candidates(stat, db_id, &mut **tx, srv).await? {
             MatchState::NoMatch => {
-                insert::insert_station(stat.clone(), db_id, tx, srv).await?;
+                insert::insert_station(stat.clone(), db_id, scraper_id, tx, srv).await?;
             }
             MatchState::ExactlyOne(merge_station) => {
                 execute_merge_station(stat, db_id, tx, srv).await?
@@ -536,6 +548,37 @@ pub async fn execute_merge_vorgang(
             }
         }
     }
+    // lobbyregistereinträge are just replaced as-is, no merging
+    sqlx::query!("DELETE FROM lobbyregistereintrag WHERE vg_id = $1", db_id)
+        .execute(&mut **tx)
+        .await?;
+
+    if let Some(lobbyr) = &model.lobbyregister {
+        for l in lobbyr {
+            let aid = insert_or_retrieve_autor(&l.organisation, tx, srv).await?;
+            let lrid = sqlx::query!(
+                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+                &l.intention,
+                &l.interne_id,
+                &aid,
+                db_id,
+                &l.link
+            )
+            .map(|r| r.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+                lrid,
+                &l.betroffene_drucksachen
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
 
     tracing::info!(
         "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
@@ -548,7 +591,11 @@ pub async fn execute_merge_vorgang(
     Ok(())
 }
 
-pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Result<()> {
+pub async fn run_integration(
+    model: &models::Vorgang,
+    scraper_id: Uuid,
+    server: &LTZFServer,
+) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
     tracing::debug!(
         "Looking for Merge Candidates for Vorgang with api_id: {:?}",
@@ -562,7 +609,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
                 model.api_id
             );
             let model = model.clone();
-            insert::insert_vorgang(&model, &mut tx, server).await?;
+            insert::insert_vorgang(&model, scraper_id, &mut tx, server).await?;
         }
         MatchState::ExactlyOne(one) => {
             let api_id = sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", one)
@@ -575,7 +622,7 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
                 model.api_id
             );
             let model = model.clone();
-            execute_merge_vorgang(&model, one, &mut tx, server).await?;
+            execute_merge_vorgang(&model, one, scraper_id, &mut tx, server).await?;
         }
         MatchState::Ambiguous(many) => {
             tracing::warn!(
@@ -606,98 +653,135 @@ pub async fn run_integration(model: &models::Vorgang, server: &LTZFServer) -> Re
     tx.commit().await?;
     Ok(())
 }
+
+#[cfg(test)]
 mod scenariotest {
-    #![cfg(test)]
-    use crate::{LTZFServer, db::retrieve};
-    use futures::FutureExt;
+    use crate::utils::test::generate;
+    use crate::{
+        LTZFError, LTZFServer, Result,
+        api::{
+            PaginationResponsePart,
+            compare::{compare_vorgang, oicomp},
+        },
+        db::{merge::vorgang::vorgang_merge_candidates, retrieve},
+    };
+    use openapi::models;
     use similar::ChangeTag;
-    use std::collections::HashSet;
-    use std::panic::AssertUnwindSafe;
+    use std::{collections::HashSet, str::FromStr};
+    use uuid::Uuid;
 
-    use openapi::models::{self, VorgangGetHeaderParams, VorgangGetQueryParams};
-    use serde::Deserialize;
-
-    #[allow(unused)]
-    use tracing::{debug, error, info, warn};
-
-    fn xor(one: bool, two: bool) -> bool {
-        return (one && two) || (!one && !two);
-    }
-    #[allow(unused)]
-    struct TestScenario<'obj> {
-        name: &'obj str,
+    struct Scenario {
         context: Vec<models::Vorgang>,
-        vorgang: models::Vorgang,
-        result: Vec<models::Vorgang>,
+        object: models::Vorgang,
+        expected: Vec<models::Vorgang>,
         shouldfail: bool,
-        server: LTZFServer,
-        span: tracing::Span,
+        name: &'static str,
     }
-    #[derive(Deserialize)]
-    struct PTS {
-        context: Vec<models::Vorgang>,
-        vorgang: models::Vorgang,
-        result: Vec<models::Vorgang>,
-        #[serde(default = "default_bool")]
-        shouldfail: bool,
+    fn xor(b1: bool, b2: bool) -> bool {
+        return b1 && !b2 || b2 && !b1;
     }
-    fn default_bool() -> bool {
-        false
-    }
-    impl<'obj> TestScenario<'obj> {
-        async fn new(path: &'obj std::path::Path, server: &LTZFServer) -> Self {
-            let name = path.file_stem().unwrap().to_str().unwrap();
-            info!("Creating Merge Test Scenario with name: {}", name);
-            let span = tracing::span!(tracing::Level::INFO, "Mergetest", name = name);
-            let dropquery = format!("DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);", name);
+    impl Scenario {
+        async fn run(&self) -> Result<()> {
+            let server = self.setup().await?;
+            self.build_context(&server).await?;
+            self.place_object(&server).await?;
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            self.check_result(&server).await?;
+            self.teardown(&server).await?;
+            Ok(())
+        }
+        async fn setup(&self) -> Result<LTZFServer> {
+            let dburl = std::env::var("DATABASE_URL")
+                .expect("Expected to find working DATABASE_URL for testing");
+            let config = crate::Configuration {
+                mail_server: None,
+                mail_user: None,
+                mail_password: None,
+                mail_sender: None,
+                mail_recipient: None,
+                host: "localhost".to_string(),
+                port: 80,
+                db_url: dburl.clone(),
+                config: None,
+                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
+                merge_title_similarity: 0.8,
+            };
+            let master_server = LTZFServer {
+                config: config.clone(),
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
+            };
+            let dropquery = format!(
+                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
+                self.name
+            );
             let query = format!(
                 "CREATE DATABASE \"testing_{}\" WITH OWNER 'ltzf-user';",
-                name
+                self.name
             );
             sqlx::query(&dropquery)
-                .execute(&server.sqlx_db)
-                .await
-                .unwrap();
-            sqlx::query(&query).execute(&server.sqlx_db).await.unwrap();
-            let test_db_url = std::env::var("DATABASE_URL")
-                .unwrap()
-                .replace("5432/ltzf", &format!("5432/testing_{}", name));
-            let pts: PTS = serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
-            let server = LTZFServer {
-                config: crate::Configuration {
-                    ..Default::default()
-                },
-                mailbundle: None,
-                sqlx_db: sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(5)
-                    .connect(&test_db_url)
-                    .await
-                    .unwrap(),
+                .execute(&master_server.sqlx_db)
+                .await?;
+            sqlx::query(&query).execute(&master_server.sqlx_db).await?;
+
+            let db_url = config
+                .db_url
+                .replace("5432/ltzf", &format!("5432/testing_{}", self.name));
+            let oconfig = crate::Configuration {
+                db_url: db_url.clone(),
+                ..config
             };
-            sqlx::migrate!().run(&server.sqlx_db).await.unwrap();
-            for vorgang in pts.context.iter() {
-                crate::db::merge::vorgang::run_integration(vorgang, &server)
-                    .await
-                    .unwrap()
-            }
-            Self {
-                name,
-                context: pts.context,
-                vorgang: pts.vorgang,
-                result: pts.result,
-                shouldfail: pts.shouldfail,
-                span,
-                server,
-            }
+            let out_server = LTZFServer {
+                config: oconfig,
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&db_url).await?,
+            };
+            sqlx::migrate!().run(&out_server.sqlx_db).await?;
+            Ok(out_server)
         }
-        async fn push(&self) {
-            info!("Running main Merge test");
-            crate::db::merge::vorgang::run_integration(&self.vorgang, &self.server)
-                .await
-                .unwrap();
+
+        async fn teardown(&self, server: &LTZFServer) -> Result<()> {
+            let dburl = std::env::var("DATABASE_URL")
+                .expect("Expected to find working DATABASE_URL for testing");
+            let config = crate::Configuration {
+                mail_server: None,
+                mail_user: None,
+                mail_password: None,
+                mail_sender: None,
+                mail_recipient: None,
+                host: "localhost".to_string(),
+                port: 80,
+                db_url: dburl.clone(),
+                config: None,
+                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
+                merge_title_similarity: 0.8,
+            };
+            let master_server = LTZFServer {
+                config: config.clone(),
+                mailbundle: None,
+                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
+            };
+            let dropquery = format!(
+                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
+                self.name
+            );
+            sqlx::query(&dropquery)
+                .execute(&master_server.sqlx_db)
+                .await?;
+            Ok(())
         }
-        async fn check(&self) {
-            info!("Checking for Correctness");
+
+        async fn build_context(&self, server: &LTZFServer) -> Result<()> {
+            for obj in self.context.iter() {
+                super::run_integration(obj, Uuid::nil(), server).await?;
+            }
+            Ok(())
+        }
+        async fn place_object(&self, server: &LTZFServer) -> Result<()> {
+            super::run_integration(&self.object, Uuid::nil(), server).await?;
+            Ok(())
+        }
+        async fn check_result(&self, server: &LTZFServer) -> Result<()> {
             let paramock = retrieve::VGGetParameters {
                 vgtyp: None,
                 wp: None,
@@ -707,139 +791,264 @@ mod scenariotest {
                 parlament: None,
                 lower_date: None,
                 upper_date: None,
-                limit: None,
-                offset: None,
             };
-            let mut tx = self.server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs = crate::db::retrieve::vorgang_by_parameter(paramock, &mut tx)
-                .await
-                .unwrap();
+            let mut tx = server.sqlx_db.begin().await.unwrap();
+            let db_vorgangs = retrieve::vorgang_by_parameter(
+                paramock,
+                None,
+                Some(PaginationResponsePart::MAX_PER_PAGE),
+                &mut tx,
+            )
+            .await
+            .unwrap();
+            tx.commit().await?;
 
-            tx.rollback().await.unwrap();
-            for expected in self.result.iter() {
-                let mut found = false;
-                for db_out in db_vorgangs.iter() {
-                    if db_out == expected {
-                        found = true;
-                        break;
-                    } else if xor(db_out.api_id != expected.api_id, self.shouldfail) {
-                        std::fs::write(
-                            format!("tests/{}_dumpa.json", self.name),
-                            dump_objects(&expected, &db_out),
-                        )
-                        .unwrap();
-                        assert!(
-                            false,
-                            "Differing object have the same api id: `{}`. Difference:\n{}",
-                            db_out.api_id,
-                            crate::db::merge::display_strdiff(
-                                &serde_json::to_string_pretty(expected).unwrap(),
-                                &serde_json::to_string_pretty(db_out).unwrap()
-                            )
-                        );
-                    }
-                }
-                if xor(found, self.shouldfail) {
-                    std::fs::write(
-                        format!("tests/{}_dump.json", self.name),
-                        serde_json::to_string_pretty(expected).unwrap(),
-                    )
-                    .unwrap();
-                }
+            let equality = oicomp(&self.expected, &db_vorgangs.1, &compare_vorgang);
+            if !equality && !self.shouldfail {
+                let exp_content = self
+                    .expected
+                    .iter()
+                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let dbv_content = db_vorgangs
+                    .1
+                    .iter()
+                    .map(|x| serde_json::to_string_pretty(x).unwrap())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                std::fs::write(
+                    format!("tests/{}_dump.json", self.name),
+                    format!(
+                        "{{\n\"expected\": [{}],\n\"actual\": [{}]}}",
+                        exp_content, dbv_content
+                    ),
+                )
+                .unwrap();
                 assert!(
-                    found,
-                    "({}): Expected to find Vorgang with api_id `{}`, but was not present in the output set, which contained: {:?}.\n\nDetails(Output Set):\n{:#?}",
-                    self.name,
-                    expected.api_id,
-                    self.result
-                        .iter()
-                        .map(|e| e.api_id)
-                        .collect::<Vec<uuid::Uuid>>(),
-                    db_vorgangs
-                        .iter()
-                        .map(|v| {
-                            println!("{}", serde_json::to_string_pretty(v).unwrap());
-                            ""
-                        })
-                        .collect::<Vec<_>>()
+                    false,
+                    "Expected and Actual Contents were not equal. Dump: {}",
+                    format!("tests/{}_dump.json", self.name)
                 );
             }
-
             assert!(
-                self.result.len() == db_vorgangs.len(),
-                "({}): Mismatch between the length of the expected set and the output set: {} (e) vs {} (o)\nOutput Set: {:#?}",
-                self.name,
-                self.result.len(),
-                db_vorgangs.len(),
-                db_vorgangs
+                !(equality && self.shouldfail),
+                "Expected Case to fail, but actual output was equal to expectation"
             );
-        }
-        async fn run(self) {
-            self.push().await;
-            self.check().await;
+            Ok(())
         }
     }
 
-    #[tokio::test]
-    async fn test_merge_scenarios() {
-        // set up database connection and clear it
-        info!("Setting up Test Database Connection");
-        let test_db_url = std::env::var("DATABASE_URL").unwrap();
-        let master_server = LTZFServer {
-            config: crate::Configuration {
-                ..Default::default()
-            },
-            mailbundle: None,
-            sqlx_db: sqlx::postgres::PgPoolOptions::new()
-                .max_connections(5)
-                .connect(&test_db_url)
-                .await
-                .unwrap(),
-        };
-
-        for path in std::fs::read_dir("tests/testfiles").unwrap() {
-            if let Ok(path) = path {
-                info!("Executing Scenario: {}", path.path().display());
-                let ptb = path.path();
-                let name = ptb.file_stem().unwrap().to_str().unwrap();
-
-                let mut shouldfail = false;
-                let scenario = TestScenario::new(&ptb, &master_server).await;
-                let result = AssertUnwindSafe(async {
-                    shouldfail = scenario.shouldfail;
-                    scenario.run().await
-                })
-                .catch_unwind()
-                .await;
-
-                if result.is_ok() == shouldfail {
-                    assert!(
-                        false,
-                        "The Scenario {} did not behave as expected: {}",
-                        name,
-                        if shouldfail {
-                            "Succeeded, but should fail"
-                        } else {
-                            "Failed but should succeed"
-                        }
-                    );
-                } else {
-                    let query = format!("DROP DATABASE testing_{}", name);
-                    sqlx::query(&query)
-                        .execute(&master_server.sqlx_db)
-                        .await
-                        .unwrap();
-                }
-            } else {
-                error!("Error: {:?}", path.unwrap_err())
-            }
-        }
-    }
     fn dump_objects<T: serde::Serialize, S: serde::Serialize>(expected: &T, actual: &S) -> String {
         format!(
             "{{ \"expected-object\" : {},\n\"actual-object\" : {}}}",
             serde_json::to_string_pretty(expected).unwrap(),
             serde_json::to_string_pretty(actual).unwrap()
         )
+    }
+
+    // one in, again one in, one out
+    #[tokio::test]
+    async fn test_idempotenz() {
+        let vg = generate::default_vorgang();
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg.clone(),
+            expected: vec![vg],
+            name: "idempotenz",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_merge_matching_ids() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = generate::default_vorgang();
+        vg2.api_id = Uuid::nil(); // take out api id matching
+        vg2.titel = "Anderer Titel".to_string();
+        vg2.stationen = vec![generate::alternate_station()]; // take out vorwort matching
+
+        let mut vg_exp = vg.clone();
+        vg_exp.titel = vg2.titel.clone();
+        vg_exp.stationen = vec![generate::default_station(), generate::alternate_station()];
+
+        let scenario = Scenario {
+            name: "merge_matching_ids",
+            shouldfail: false,
+            context: vec![vg],
+            object: vg2,
+            expected: vec![vg_exp],
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_merge_matching_vorwort() {
+        // let mut vg = generate::default_vorgang();
+        // vg.stationen[0].typ = models::Stationstyp::PreparlRegent;
+
+        // let mut vg2 = generate::default_vorgang();
+        // vg2.api_id = Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeeeefff").unwrap(); // take out api id matching
+        // vg2.titel = "Anderer Titel".to_string();
+        // vg2.stationen[0].typ = models::Stationstyp::ParlInitiativ;
+        // vg2.ids = None; // take out id matching
+
+        // let mut vg_exp = vg.clone();
+        // vg_exp.titel = vg2.titel.clone();
+
+        // let scenario = Scenario {
+        //     name: "merge_matching_vorwort",
+        //     shouldfail: false,
+        //     context: vec![vg],
+        //     object: vg2.clone(),
+        //     expected: vec![vg_exp],
+        // };
+        // let server = scenario.setup().await.unwrap();
+        // scenario.build_context(&server).await.unwrap();
+        // let mut tx = server.sqlx_db.begin().await.unwrap();
+        // let candidates = vorgang_merge_candidates(&vg2, &mut *tx, &server).await.unwrap();
+        // match candidates{
+        //     crate::db::merge::MatchState::ExactlyOne(_) => {},
+        //     state => assert!(false, "{:?}", state)
+        // }
+        // scenario.teardown(&server).await.unwrap();
+        // scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_link_ini_ids_merging() {
+        let vg = generate::default_vorgang();
+        let mut vg_mod = vg.clone();
+        vg_mod.links = Some(vec!["https://example.com".to_string()]);
+        vg_mod.ids = Some(vec![models::VgIdent {
+            id: "einzigartig und anders".to_string(),
+            typ: models::VgIdentTyp::Initdrucks,
+        }]);
+        vg_mod.initiatoren = vec![models::Autor {
+            person: Some("Max Mustermann".to_string()),
+            organisation: "Musterorganisation".to_string(),
+            fachgebiet: Some("Musterfachgebiet".to_string()),
+            lobbyregister: Some("Musterlobbyregister".to_string()),
+        }];
+
+        let mut vg_exp = vg.clone();
+        vg_exp.links = Some(
+            vec![]
+                .iter()
+                .chain(vg.links.as_ref().unwrap().iter())
+                .chain(vg_mod.links.as_ref().unwrap().iter())
+                .cloned()
+                .collect(),
+        ); //merged
+        vg_exp.links.as_mut().unwrap().sort();
+        vg_exp.ids = Some(
+            vec![]
+                .iter()
+                .chain(vg.ids.as_ref().unwrap().iter())
+                .chain(vg_mod.ids.as_ref().unwrap().iter())
+                .cloned()
+                .collect(),
+        ); //merged
+        vg_exp.ids.as_mut().unwrap().sort_by(|a, b| a.id.cmp(&b.id));
+        vg_exp.initiatoren = vec![]
+            .iter()
+            .chain(vg.initiatoren.iter())
+            .chain(vg_mod.initiatoren.iter())
+            .cloned()
+            .collect(); //merged
+        vg_exp
+            .initiatoren
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        let scenario = Scenario {
+            context: vec![vg],
+            object: vg_mod,
+            expected: vec![vg_exp],
+            name: "link_ini_ids_merging",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_vorgang_weak_property_change_override() {
+        let vg = generate::default_vorgang();
+        let mut vg_mod = vg.clone();
+        vg_mod.titel = "Testtitel".to_string();
+        vg_mod.kurztitel = Some("Testkurztitel".to_string());
+        vg_mod.wahlperiode = 20;
+        vg_mod.verfassungsaendernd = true;
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg_mod.clone(),
+            expected: vec![vg_mod],
+            name: "weak_prop_change_override",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_not_merged_but_separate() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = vg.clone();
+        vg2.api_id = Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef3452").unwrap();
+        vg2.ids = None;
+
+        let mut stat = generate::default_station();
+        stat.api_id = Some(Uuid::from_str("b18bee64-c0ff-eeee-ff1c-deadbeef4732").unwrap());
+        stat.typ = models::Stationstyp::PostparlGsblt;
+        stat.dokumente = vec![];
+        vg2.stationen = vec![stat];
+
+        vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();
+        let scenario = Scenario {
+            context: vec![vg.clone()],
+            object: vg2.clone(),
+            expected: vec![vg, vg2],
+            name: "not_merged_but_separate",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_schlagwort_duplicate_elimination_and_formatting() {
+        let mut vg = generate::default_vorgang();
+        vg.stationen[0].schlagworte = Some(vec![
+            "AiNz".to_string(),
+            "ainz".to_string(),
+            "AINZ".to_string(),
+        ]);
+        let vg2 = vg.clone();
+
+        let mut vg_exp = vg.clone();
+        vg_exp.stationen[0].schlagworte = Some(vec!["ainz".to_string()]);
+        let scenario = Scenario {
+            context: vec![vg],
+            object: vg2,
+            expected: vec![vg_exp],
+            shouldfail: false,
+            name: "schlagwort_duplicate_elimination_and_formatting",
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_station_merging_on_weak_property_changes() {
+        let vg = generate::default_vorgang();
+        let mut vg2 = vg.clone();
+        vg2.stationen[0].link = Some("https://other.link".to_string());
+        vg2.stationen[0].titel = Some("Weirder anderer Titel".to_string());
+        vg2.stationen[0].zp_modifiziert = Some(chrono::Utc::now());
+        vg2.stationen[0].gremium_federf = Some(true);
+        vg2.stationen[0].trojanergefahr = Some(4u8);
+        vg2.stationen[0].zp_start = chrono::Utc::now();
+
+        let scenario = Scenario {
+            context: vec![vg],
+            object: vg2.clone(),
+            expected: vec![vg2],
+            name: "station_weak_props_change",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
+    }
+    #[tokio::test]
+    async fn test_dokument_merging_on_weak_property_changes() {
+        // TODO: Dokument & Stellungnahme
     }
 }

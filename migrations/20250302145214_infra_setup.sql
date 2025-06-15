@@ -1,28 +1,33 @@
 CREATE TABLE dokument_versions(
+    time_stamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     dok_id INTEGER REFERENCES dokument(id) ON DELETE CASCADE,
     previous_id INTEGER REFERENCES dokument(id)  ON DELETE CASCADE,
     PRIMARY KEY(dok_id, previous_id)
 );
 
-CREATE TABLE collector_touched_vorgang(
+CREATE TABLE scraper_touched_vorgang(
+    time_stamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     vg_id INTEGER REFERENCES vorgang(id) ON DELETE CASCADE,
-    collector UUID UNIQUE NOT NULL
-); -- records of which vorgang was touched by a collector with what id
+    scraper UUID NOT NULL
+); -- records of which vorgang was touched by a scraper with what id
 
-CREATE TABLE collector_touched_station(
+CREATE TABLE scraper_touched_station(
+    time_stamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     stat_id INTEGER REFERENCES station(id) ON DELETE CASCADE,
-    collector UUID UNIQUE NOT NULL
-); -- records of which station was touched by a collector with what id
+    scraper UUID NOT NULL
+); -- records of which station was touched by a scraper with what id
 
-CREATE TABLE collector_touched_dokument(
+CREATE TABLE scraper_touched_dokument(
+    time_stamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     dok_id INTEGER REFERENCES dokument(id) ON DELETE CASCADE,
-    collector UUID UNIQUE NOT NULL
-); -- records of which station was touched by a collector with what id in order of first change
+    scraper UUID NOT NULL
+); -- records of which station was touched by a scraper with what id in order of first change
 
-CREATE TABLE collector_touched_sitzung(
+CREATE TABLE scraper_touched_sitzung(
+    time_stamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     sid INTEGER REFERENCES sitzung(id) ON DELETE CASCADE,
-    collector UUID UNIQUE NOT NULL
-); -- records of which vorgang was touched by a collector with what id
+    scraper UUID NOT NULL
+); -- records of which vorgang was touched by a scraper with what id
 
 CREATE TABLE api_scope(
     id INTEGER PRIMARY KEY,

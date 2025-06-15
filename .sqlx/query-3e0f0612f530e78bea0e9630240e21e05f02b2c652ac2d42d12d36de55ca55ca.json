@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM autor a WHERE \n        (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND\n        a.organisation = COALESCE($2, a.organisation) AND\n        (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e0f0612f530e78bea0e9630240e21e05f02b2c652ac2d42d12d36de55ca55ca"
+}

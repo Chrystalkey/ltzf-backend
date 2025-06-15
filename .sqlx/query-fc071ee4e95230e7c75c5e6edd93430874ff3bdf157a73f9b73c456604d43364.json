@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fc071ee4e95230e7c75c5e6edd93430874ff3bdf157a73f9b73c456604d43364"
+}

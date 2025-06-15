@@ -1,5 +1,6 @@
 pub mod vorgang;
 
+#[derive(Debug)]
 pub enum MatchState<T> {
     Ambiguous(Vec<T>),
     ExactlyOne(T),
@@ -7,6 +8,7 @@ pub enum MatchState<T> {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
     use similar::ChangeTag;
     let diff = similar::TextDiff::from_lines(expected, got);

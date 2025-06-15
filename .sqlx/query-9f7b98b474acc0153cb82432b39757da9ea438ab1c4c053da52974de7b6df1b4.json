@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(1) as cnt FROM autor WHERE\n            person = COALESCE($1, person) AND\n            organisation = COALESCE($2, organisation) AND\n            fachgebiet = COALESCE($3, fachgebiet)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cnt",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9f7b98b474acc0153cb82432b39757da9ea438ab1c4c053da52974de7b6df1b4"
+}

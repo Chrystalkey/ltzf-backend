@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(1) as cnt FROM \n        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)\n        WHERE EXISTS (\n            SELECT 1 FROM gremium g \n        INNER JOIN parlament p ON g.parl = p.id\n        WHERE \n            g.name = input_vector.name AND\n            p.value = input_vector.pvalue AND\n            g.wp = input_vector.wp AND\n            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cnt",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int4Array",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0e7db3463166da0542c7f4f8a644c2aa170cc1ab40f528ec7d1b178e2b8ee502"
+}
