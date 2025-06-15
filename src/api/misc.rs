@@ -7,6 +7,7 @@ use axum_extra::extract::CookieJar;
 use axum_extra::extract::Host;
 use openapi::apis::miscellaneous_unauthorisiert::*;
 use openapi::models;
+use sqlx::Row;
 
 use super::PaginationResponsePart;
 
@@ -154,64 +155,35 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         let contains = query_params
             .contains
             .as_ref()
-            .map(|x| x.to_lowercase())
+            .map(|x| {
+                if path_params.name == models::EnumerationNames::Parlamente {
+                    x.to_uppercase()
+                } else {
+                    x.to_lowercase()
+                }
+            })
             .unwrap_or("".to_string());
         let mut tx = self.sqlx_db.begin().await?;
-        let mut filtered_ids = match path_params.name {
-            models::EnumerationNames::Vorgangstypen => {
-                sqlx::query!(
-                    "SELECT v.id FROM vorgangstyp v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
-                    contains
-                )
-                .map(|r| r.id)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Vgidtypen => {
-                sqlx::query!(
-                    "SELECT v.id FROM vg_ident_typ v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
-                    contains
-                )
-                .map(|r| r.id)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Schlagworte => {
-                sqlx::query!(
-                    "SELECT v.id FROM schlagwort v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
-                    contains
-                )
-                .map(|r| r.id)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Dokumententypen => sqlx::query!(
-                "SELECT v.id FROM dokumententyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
-                contains
-            )
-            .map(|r| r.id)
-            .fetch_all(&mut *tx)
-            .await?,
-            models::EnumerationNames::Stationstypen => {
-                sqlx::query!(
-                    "SELECT v.id FROM stationstyp v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
-                    contains
-                )
-                .map(|r| r.id)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Parlamente => {
-                let contains = contains.to_uppercase();
-                sqlx::query!(
-                    "SELECT v.id FROM parlament v WHERE v.value LIKE CONCAT('%', $1::text, '%')",
-                    contains
-                )
-                .map(|r| r.id)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-        };
+        let enum_tables = std::collections::BTreeMap::from_iter(
+            vec![
+                (models::EnumerationNames::Schlagworte, "schlagwort"),
+                (models::EnumerationNames::Stationstypen, "stationstyp"),
+                (models::EnumerationNames::Parlamente, "parlament"),
+                (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
+                (models::EnumerationNames::Dokumententypen, "dokumententyp"),
+                (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
+            ]
+            .drain(..),
+        );
+        let mut filtered_ids = sqlx::query(&format!(
+            "SELECT v.id FROM {} v WHERE v.value LIKE CONCAT('%',$1::text,'%')",
+            enum_tables[&path_params.name]
+        ))
+        .bind::<_>(contains)
+        .map(|r| r.get(0))
+        .fetch_all(&mut *tx)
+        .await?;
+
         if filtered_ids.is_empty() {
             return Ok(EnumGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
@@ -226,62 +198,14 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             query_params.per_page,
         );
         let select_few: Vec<i32> = filtered_ids.drain(prp.start()..prp.end()).collect();
-        let values = match path_params.name {
-            models::EnumerationNames::Vorgangstypen => {
-                sqlx::query!(
-                    "SELECT v.value FROM vorgangstyp v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Vgidtypen => {
-                sqlx::query!(
-                    "SELECT v.value FROM vg_ident_typ v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Schlagworte => {
-                sqlx::query!(
-                    "SELECT v.value FROM schlagwort v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Dokumententypen => {
-                sqlx::query!(
-                    "SELECT v.value FROM dokumententyp v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Stationstypen => {
-                sqlx::query!(
-                    "SELECT v.value FROM stationstyp v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-            models::EnumerationNames::Parlamente => {
-                sqlx::query!(
-                    "SELECT v.value FROM parlament v WHERE v.id = ANY($1::int4[])",
-                    &select_few[..]
-                )
-                .map(|r| r.value)
-                .fetch_all(&mut *tx)
-                .await?
-            }
-        };
+        let values: Vec<String> = sqlx::query(&format!(
+            "SELECT v.value FROM {} v WHERE v.id = ANY($1::int4[])",
+            enum_tables[&path_params.name]
+        ))
+        .bind::<_>(select_few)
+        .map(|r| r.get(0))
+        .fetch_all(&mut *tx)
+        .await?;
 
         return Ok(EnumGetResponse::Status200_Success {
             body: values,

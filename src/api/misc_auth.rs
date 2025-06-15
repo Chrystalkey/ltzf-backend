@@ -129,56 +129,24 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         use models::EnumerationNames::*;
         let mut tx = self.sqlx_db.begin().await?;
-        match path_params.name {
-            Schlagworte => {
-                sqlx::query!(
-                    "DELETE FROM schlagwort s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            Stationstypen => {
-                sqlx::query!(
-                    "DELETE FROM stationstyp s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            Vorgangstypen => {
-                sqlx::query!(
-                    "DELETE FROM vorgangstyp s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            Parlamente => {
-                sqlx::query!(
-                    "DELETE FROM parlament s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            Vgidtypen => {
-                sqlx::query!(
-                    "DELETE FROM vg_ident_typ s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-            Dokumententypen => {
-                sqlx::query!(
-                    "DELETE FROM dokumententyp s WHERE s.value = $1",
-                    path_params.item
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
+        let enum_tables = std::collections::BTreeMap::from_iter(
+            vec![
+                (Schlagworte, "schlagwort"),
+                (Stationstypen, "stationstyp"),
+                (Parlamente, "parlament"),
+                (Vorgangstypen, "vorgangstyp"),
+                (Dokumententypen, "dokumententyp"),
+                (Vgidtypen, "vg_ident_typ"),
+            ]
+            .drain(..),
+        );
+        sqlx::query(&format!(
+            "DELETE FROM {} x WHERE x.value = $1",
+            enum_tables[&path_params.name]
+        ))
+        .bind::<_>(&path_params.item)
+        .execute(&mut *tx)
+        .await?;
         Ok(EnumDeleteResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
