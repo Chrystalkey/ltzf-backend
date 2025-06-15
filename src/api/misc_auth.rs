@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::api::auth::APIScope;
 use crate::db::retrieve::{authors_all_exist, gremien_all_exist};
 use crate::{LTZFError, LTZFServer, Result};
@@ -7,6 +9,7 @@ use axum_extra::extract::CookieJar;
 use axum_extra::extract::Host;
 use openapi::apis::data_administration_miscellaneous::*;
 use openapi::models;
+use sqlx::Row;
 
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
@@ -269,55 +272,26 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
 
         // tables referencing authors:
-        // - rel_dok_autor (aut_id)
-        sqlx::query!(
+        let tables = vec![
+            ("rel_dok_autor", "aut_id"),
+            ("rel_vorgang_init", "in_id"),
+            ("rel_sitzung_experten", "eid"),
+            ("lobbyregistereintrag", "organisation"),
+        ];
+        for (table, column) in tables {
+            sqlx::query(&format!(
+                "
+            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+            UPDATE {table} 
+            SET {column} = (SELECT new FROM lookup WHERE old={column})
+            WHERE {column} = ANY($2::int4[])
             "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE rel_dok_autor 
-        SET aut_id = (SELECT new FROM lookup WHERE old=aut_id)
-        WHERE aut_id = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // - rel_vorgang_init (in_id)
-        sqlx::query!(
-            "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE rel_vorgang_init
-        SET in_id = (SELECT new FROM lookup WHERE old=in_id)
-        WHERE in_id = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
-        // - rel_sitzung_experten (eid)
-        sqlx::query!(
-            "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE rel_sitzung_experten
-        SET eid = (SELECT new FROM lookup WHERE old=eid)
-        WHERE eid = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
-        // - lobbyregistereintrag (organisation)
-        sqlx::query!(
-            "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE lobbyregistereintrag
-        SET organisation = (SELECT new FROM lookup WHERE old=organisation)
-        WHERE organisation = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
+            ))
+            .bind(&rep_new[..])
+            .bind(&rep_old[..])
+            .execute(&mut *tx)
+            .await?;
+        }
         sqlx::query!(
             "DELETE FROM autor a WHERE a.id = ANY($1::int4[])",
             &rep_old[..]
@@ -365,7 +339,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         let mut tx = self.sqlx_db.begin().await?;
         // check if all gremien are existent in the database
-        // check if none of the replacing gremien are in the database
+        // check if none of the replacing gremien are in the database or replacing is None
         // if both: NotModified
 
         let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
@@ -423,9 +397,6 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         // for each replacing gremium:
         // for each table referencing it: Update those tables with the new id
-        // tables that reference a gremium:
-        // - station(gr_id)
-        // - sitzung(gr_id)
         let mut replacement_tuples = vec![];
         for entry in body.replacing.as_ref().unwrap().iter() {
             let (mut vnames, mut vwps, mut vpvals) = (vec![], vec![], vec![]);
@@ -452,29 +423,23 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
         let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
-
-        sqlx::query!(
-            "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE station 
-        SET gr_id = (SELECT new FROM lookup WHERE old=gr_id)
-        WHERE gr_id = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query!(
-            "
-        WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
-        UPDATE sitzung 
-        SET gr_id = (SELECT new FROM lookup WHERE old=gr_id)
-        WHERE gr_id = ANY($2::int4[])",
-            &rep_new[..],
-            &rep_old[..]
-        )
-        .execute(&mut *tx)
-        .await?;
+        // tables that reference a gremium:
+        // - station(gr_id)
+        // - sitzung(gr_id)
+        let tables = vec![("station", "gr_id"), ("sitzung", "gr_id")];
+        for (table, column) in tables {
+            sqlx::query(&format!(
+                "
+            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+            UPDATE {table} 
+            SET {column} = (SELECT new FROM lookup WHERE old={column})
+            WHERE {column} = ANY($2::int4[])"
+            ))
+            .bind(&rep_new[..])
+            .bind(&rep_old[..])
+            .execute(&mut *tx)
+            .await?;
+        }
         sqlx::query!(
             "DELETE FROM gremium g WHERE g.id = ANY($1::int4[])",
             &rep_old[..]
@@ -508,7 +473,183 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        todo!("{:?} // {:?}", path_params, body);
+        // check if replacing contain an index larger than the object list
+        // if so: Bad Request
+        if let Some(replc) = &body.replacing {
+            for rpl in replc.iter() {
+                if rpl.replaced_by as usize >= body.objects.len() {
+                    return Ok(EnumPutResponse::Status400_BadRequest {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            }
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        // check if all gremien are existent in the database
+        // check if none of the replacing gremien are in the database or replacing is None
+        // if both: NotModified
+        let enum_tables = std::collections::BTreeMap::from_iter(
+            vec![
+                (models::EnumerationNames::Schlagworte, "schlagwort"),
+                (models::EnumerationNames::Stationstypen, "stationstyp"),
+                (models::EnumerationNames::Parlamente, "parlament"),
+                (models::EnumerationNames::Vorgangstypen, "vorgangstyp"),
+                (models::EnumerationNames::Dokumententypen, "dokumententyp"),
+                (models::EnumerationNames::Vgidtypen, "vg_ident_typ"),
+            ]
+            .drain(..),
+        );
+
+        let present = sqlx::query(&format!(
+            "SELECT COUNT(1) as cnt FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
+            enum_tables[&path_params.name]
+        )).bind(&body.objects[..])
+        .map(|r| r.get::<i64, _>(0) as usize)
+        .fetch_one(&mut *tx).await?;
+
+        if present == body.objects.len() {
+            // flatten the replacement objects and check for existence
+            if let Some(repl) = &body.replacing {
+                let flattened: Vec<String> =
+                    repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
+                let present = sqlx::query(&format!(
+                    "SELECT COUNT(1) FROM UNNEST($1::text[]) as item WHERE EXISTS(SELECT 1 FROM {} x WHERE item=x.value)",
+                    enum_tables[&path_params.name]
+                )).bind(&flattened[..])
+                .map(|r| r.get::<i64, _>(0) as usize)
+                .fetch_one(&mut *tx).await?;
+
+                if present == flattened.len() {
+                    return Ok(EnumPutResponse::Status304_NotModified {
+                        x_rate_limit_limit: None,
+                        x_rate_limit_remaining: None,
+                        x_rate_limit_reset: None,
+                    });
+                }
+            } else {
+                return Ok(EnumPutResponse::Status304_NotModified {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                });
+            }
+        }
+
+        // insert all gremien, fetch their IDs
+        let new_ids = sqlx::query(&format!(
+            "INSERT INTO {} (value)
+                SELECT item FROM UNNEST($1::text[]) as item 
+                ON CONFLICT(value) DO UPDATE SET value=EXCLUDED.value
+                RETURNING id",
+            enum_tables[&path_params.name]
+        ))
+        .bind(&body.objects[..])
+        .map(|r| r.get::<i32, _>(0))
+        .fetch_all(&mut *tx)
+        .await?;
+
+        if body.replacing.is_none() {
+            tx.commit().await?;
+            // if there is nothing to replace, we are done here
+            // CAREFUL: HERE DANGLING GREMIUM ENTRIES ARE CREATED
+            return Ok(EnumPutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        // for each replacing gremium:
+        // for each table referencing it: Update those tables with the new id
+        let mut replacement_tuples = vec![];
+        for entry in body.replacing.as_ref().unwrap().iter() {
+            let vitems: Vec<String> = entry.values.clone();
+            let value_ids: Vec<_> = sqlx::query(&format!(
+                "SELECT $2::int4 as repl_with, x.id as origin FROM
+                UNNEST($1::text[]) as item
+                INNER JOIN {} x ON x.value = item",
+                enum_tables[&path_params.name]
+            ))
+            .bind(&vitems[..])
+            .bind(new_ids[entry.replaced_by as usize] as i32)
+            .map(|r| (r.get::<i32, _>(0), r.get::<i32, _>(1)))
+            .fetch_all(&mut *tx)
+            .await?;
+            replacement_tuples.extend(value_ids);
+        }
+        let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
+        let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
+        // referencing tables:
+        // parlament: gremium(parl) / station(p_id)
+        // dokumententyp: dokument(typ)
+        // stationstyp: station(typ)
+        // vg_ident_typ: rel_vorgang_ident(typ)
+        // vorgangstyp: vorgang(typ)
+        // schlagwort: rel_station_schlagwort(sw_id) / rel_dok_schlagwort(sw_id)
+        let enum_table_refs = BTreeMap::from_iter(
+            vec![
+                (
+                    models::EnumerationNames::Parlamente,
+                    BTreeMap::from_iter(vec![("gremium", "parl"), ("station", "p_id")].drain(..)),
+                ),
+                (
+                    models::EnumerationNames::Dokumententypen,
+                    BTreeMap::from_iter(vec![("dokument", "typ")].drain(..)),
+                ),
+                (
+                    models::EnumerationNames::Stationstypen,
+                    BTreeMap::from_iter(vec![("station", "typ")].drain(..)),
+                ),
+                (
+                    models::EnumerationNames::Vgidtypen,
+                    BTreeMap::from_iter(vec![("rel_vorgang_ident", "typ")].drain(..)),
+                ),
+                (
+                    models::EnumerationNames::Vorgangstypen,
+                    BTreeMap::from_iter(vec![("vorgang", "typ")].drain(..)),
+                ),
+                (
+                    models::EnumerationNames::Schlagworte,
+                    BTreeMap::from_iter(
+                        vec![
+                            ("rel_dok_schlagwort", "sw_id"),
+                            ("rel_station_schlagwort", "sw_id"),
+                        ]
+                        .drain(..),
+                    ),
+                ),
+            ]
+            .drain(..),
+        );
+        for (&table, &column) in enum_table_refs[&path_params.name].iter() {
+            sqlx::query(&format!(
+                "
+            WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
+            UPDATE {table} 
+            SET {column} = (SELECT new FROM lookup WHERE old={column})
+            WHERE {column} = ANY($2::int4[])"
+            ))
+            .bind(&rep_new[..])
+            .bind(&rep_old[..])
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(&format!(
+            "DELETE FROM {} x WHERE x.id = ANY($1::int4[])",
+            enum_tables[&path_params.name]
+        ))
+        .bind(&rep_old[..])
+        .execute(&mut *tx)
+        .await?;
+
+        // return 201Created
+        tx.commit().await?;
+        Ok(EnumPutResponse::Status201_Created {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 
     /// DokumentDeleteId - DELETE /api/v1/dokument/{api_id}
@@ -596,13 +737,13 @@ mod test_authorisiert {
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{
         AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
-        EnumDeleteResponse, GremienDeleteByParamResponse, GremienPutResponse,
+        EnumDeleteResponse, EnumPutResponse, GremienDeleteByParamResponse, GremienPutResponse,
     };
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
     use openapi::apis::miscellaneous_unauthorisiert::{
         GremienGetResponse, MiscellaneousUnauthorisiert,
     };
-    use openapi::models;
+    use openapi::models::{self, EnumerationNames};
 
     use crate::LTZFServer;
     use crate::utils::test::{TestSetup, generate};
@@ -663,6 +804,29 @@ mod test_authorisiert {
             .unwrap();
         match autoren {
             GremienGetResponse::Status200_Success { body, .. } => body,
+            _ => vec![],
+        }
+    }
+    async fn fetch_all_enumvars(server: &LTZFServer, name: EnumerationNames) -> Vec<String> {
+        let entries = server
+            .enum_get(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &models::EnumGetPathParams { name },
+                &models::EnumGetQueryParams {
+                    page: None,
+                    per_page: None,
+                    contains: None,
+                },
+            )
+            .await
+            .unwrap();
+        match entries {
+            openapi::apis::miscellaneous_unauthorisiert::EnumGetResponse::Status200_Success {
+                body,
+                ..
+            } => body,
             _ => vec![],
         }
     }
@@ -974,11 +1138,6 @@ mod test_authorisiert {
         scenario.teardown().await;
     }
 
-    #[tokio::test]
-    async fn test_enum_put() {
-        let scenario = TestSetup::new("test_enum_put").await;
-        scenario.teardown().await;
-    }
     async fn gp_with(
         server: &LTZFServer,
         gpr: &models::GremienPutRequest,
@@ -1244,6 +1403,171 @@ mod test_authorisiert {
         ));
         let gremien_new = fetch_all_authors(&scenario.server).await;
         assert_eq!(autoren.len(), gremien_new.len());
+
+        scenario.teardown().await;
+    }
+
+    async fn ep_with(
+        server: &LTZFServer,
+        tp: models::EnumerationNames,
+        body: &models::EnumPutRequest,
+    ) -> crate::Result<EnumPutResponse> {
+        server
+            .enum_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::KeyAdder, 1),
+                &models::EnumPutPathParams { name: tp },
+                body,
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_enum_put() {
+        let scenario = TestSetup::new("test_enum_put").await;
+        insert_default_vorgang(&scenario.server).await;
+
+        // check permissions
+        let response = scenario
+            .server
+            .enum_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(APIScope::Collector, 1),
+                &models::EnumPutPathParams {
+                    name: models::EnumerationNames::Dokumententypen,
+                },
+                &models::EnumPutRequest {
+                    objects: vec![],
+                    replacing: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            EnumPutResponse::Status403_Forbidden { .. }
+        ));
+        let testcases = vec![
+            (
+                models::EnumerationNames::Parlamente,
+                "EP".to_string(),
+                "ER".to_string(),
+            ),
+            (
+                models::EnumerationNames::Dokumententypen,
+                "traktat".to_string(),
+                "encyclika".to_string(),
+            ),
+            (
+                models::EnumerationNames::Vorgangstypen,
+                "Verdauung".to_string(),
+                "Rohrreinigung".to_string(),
+            ),
+            (
+                models::EnumerationNames::Schlagworte,
+                "flüssiggasterminal".to_string(),
+                "rühreihöchstmenge".to_string(),
+            ),
+            (
+                models::EnumerationNames::Vgidtypen,
+                "anschrift".to_string(),
+                "hausnummer".to_string(),
+            ),
+            (
+                models::EnumerationNames::Stationstypen,
+                "hauptbahnhof".to_string(),
+                "haltestelle".to_string(),
+            ),
+        ];
+        for (tp, new_entry, other_new_entry) in testcases.iter() {
+            let entries = fetch_all_enumvars(&scenario.server, *tp).await;
+            let response = ep_with(
+                &scenario.server,
+                *tp,
+                &models::EnumPutRequest {
+                    objects: vec![new_entry.clone()],
+                    replacing: None,
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                response,
+                EnumPutResponse::Status201_Created { .. }
+            ));
+            let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
+            assert!(entries.len() < entries_new.len());
+            assert!(entries_new.contains(&new_entry));
+            let entries = entries_new;
+
+            // with conflict
+            let response = ep_with(
+                &scenario.server,
+                *tp,
+                &models::EnumPutRequest {
+                    objects: vec![new_entry.clone()],
+                    replacing: None,
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                response,
+                EnumPutResponse::Status304_NotModified { .. }
+            ));
+            let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
+            assert_eq!(entries.len(), entries_new.len());
+            let entries = entries_new;
+
+            // check replace
+            let response = ep_with(
+                &scenario.server,
+                *tp,
+                &models::EnumPutRequest {
+                    objects: vec![other_new_entry.clone()],
+                    replacing: Some(vec![models::EnumPutRequestReplacingInner {
+                        replaced_by: 0,
+                        values: vec![new_entry.clone()],
+                    }]),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                response,
+                EnumPutResponse::Status201_Created { .. }
+            ));
+            let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
+            assert_eq!(entries.len(), entries_new.len());
+            assert!(entries_new.contains(&other_new_entry));
+            assert!(!entries_new.contains(&new_entry));
+
+            // malformed request
+
+            let response = ep_with(
+                &scenario.server,
+                *tp,
+                &models::EnumPutRequest {
+                    objects: vec![other_new_entry.clone()],
+                    replacing: Some(vec![models::EnumPutRequestReplacingInner {
+                        replaced_by: 1,
+                        values: vec![new_entry.clone()],
+                    }]),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                response,
+                EnumPutResponse::Status400_BadRequest { .. }
+            ));
+            let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
+            assert_eq!(entries.len(), entries_new.len());
+        }
 
         scenario.teardown().await;
     }
