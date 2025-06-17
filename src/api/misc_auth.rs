@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::api::WrappedAutor;
 use crate::api::auth::APIScope;
@@ -285,9 +285,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
 
         // tables referencing authors:
+        // table in question, column that references the author, query to delete conflicts _if_ the author is part of a unique identifier. can be empty if not applicable
         let tables = vec![
             ("rel_dok_autor", "aut_id",
-        "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+        Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
 
 WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
 -- assumes
@@ -332,8 +333,8 @@ deletion_select AS(-- select all but one from each class denoted by the same ide
 )
 
 DELETE FROM rel_dok_autor rda WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rda.dok_id AND ds.original_id = aut_id)"),
-            ("rel_vorgang_init", "in_id", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rda.dok_id AND ds.original_id = aut_id)")),
+            ("rel_vorgang_init", "in_id",  Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
 
 WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
 -- assumes
@@ -378,8 +379,8 @@ deletion_select AS(-- select all but one from each class denoted by the same ide
 )
 
 DELETE FROM rel_vorgang_init rvi WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.in_id)"),
-            ("rel_sitzung_experten", "eid", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.in_id)")),
+            ("rel_sitzung_experten", "eid", Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
 
 WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
 -- assumes
@@ -425,8 +426,8 @@ deletion_select AS(-- select all but one from each class denoted by the same ide
 
 DELETE FROM rel_sitzung_experten rse WHERE 
 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rse.sid AND ds.original_id = rse.eid)"),
-            ("lobbyregistereintrag", "organisation", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rse.sid AND ds.original_id = rse.eid)")),
+            ("lobbyregistereintrag", "organisation", Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
 
 WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
 -- assumes
@@ -472,16 +473,17 @@ deletion_select AS(-- select all but one from each class denoted by the same ide
 
 DELETE FROM lobbyregistereintrag lre WHERE 
 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.original_id = lre.organisation)"),
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.original_id = lre.organisation)")),
         ];
         for (table, column, conflict_res_query) in tables {
             // first, delete potentially conflicting entries
-            // !!this is a TODO!!
-            sqlx::query(conflict_res_query)
-                .bind(&rep_new[..])
-                .bind(&rep_old[..])
-                .execute(&mut *tx)
-                .await?;
+            if let Some(conflict_res_query) = conflict_res_query {
+                sqlx::query(conflict_res_query)
+                    .bind(&rep_new[..])
+                    .bind(&rep_old[..])
+                    .execute(&mut *tx)
+                    .await?;
+            }
 
             // then insert like this:
             let query = format!(
@@ -631,10 +633,17 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.or
         // tables that reference a gremium:
         // - station(gr_id)
         // - sitzung(gr_id)
-        let tables = vec![("station", "gr_id"), ("sitzung", "gr_id")];
-        for (table, column) in tables {
+        let tables = vec![("station", "gr_id", None), ("sitzung", "gr_id", None)];
+        for (table, column, conflict_resolution_query) in tables {
             // first, delete potentially conflicting entries
-            // !!this is a TODO!!
+            // currently not used because both tables are not identifying
+            if let Some(crq) = conflict_resolution_query {
+                sqlx::query(crq)
+                    .bind(&rep_new[..])
+                    .bind(&rep_old[..])
+                    .execute(&mut *tx)
+                    .await?;
+            }
 
             // then insert like this:
             sqlx::query(&format!(
@@ -804,30 +813,173 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.or
             vec![
                 (
                     models::EnumerationNames::Parlamente,
-                    BTreeMap::from_iter(vec![("gremium", "parl"), ("station", "p_id")].drain(..)),
+                    // not a key component, not a key component !! THIS IS NOW A TODO !!
+                    BTreeSet::from_iter(vec![("gremium", "parl", None), ("station", "p_id", None)].drain(..)),
                 ),
                 (
                     models::EnumerationNames::Dokumententypen,
-                    BTreeMap::from_iter(vec![("dokument", "typ")].drain(..)),
+                    BTreeSet::from_iter(vec![("dokument", "typ", None)].drain(..)), // not a key component
                 ),
                 (
                     models::EnumerationNames::Stationstypen,
-                    BTreeMap::from_iter(vec![("station", "typ")].drain(..)),
+                    BTreeSet::from_iter(vec![("station", "typ", None)].drain(..)), // not a key component
                 ),
                 (
                     models::EnumerationNames::Vgidtypen,
-                    BTreeMap::from_iter(vec![("rel_vorgang_ident", "typ")].drain(..)),
+                    BTreeSet::from_iter(vec![("rel_vorgang_ident", "typ", Some(
+                        "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	vg_id as identifier, 
+	typ as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_vorgang_ident rvi
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = rvi.typ OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = rvi.typ
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_vorgang_ident rvi WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.typ)"
+                    ))].drain(..)), // a key component
                 ),
                 (
                     models::EnumerationNames::Vorgangstypen,
-                    BTreeMap::from_iter(vec![("vorgang", "typ")].drain(..)),
+                    BTreeSet::from_iter(vec![("vorgang", "typ", Some(""))].drain(..)), // not a key component
                 ),
                 (
                     models::EnumerationNames::Schlagworte,
-                    BTreeMap::from_iter(
+                    // a key component, a key component
+                    BTreeSet::from_iter(
                         vec![
-                            ("rel_dok_schlagwort", "sw_id"),
-                            ("rel_station_schlagwort", "sw_id"),
+                            ("rel_dok_schlagwort", "sw_id", Some(
+                                "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	dok_id as identifier, 
+	sw_id as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_dok_schlagwort rds
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = rds.sw_id OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = rds.sw_id
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_dok_schlagwort rds WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rds.dok_id AND ds.original_id = rds.sw_id)"
+                            )),
+                            ("rel_station_schlagwort", "sw_id", Some(
+                                "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	stat_id as identifier, 
+	sw_id as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_station_schlagwort rss
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = rss.sw_id OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = rss.sw_id
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_station_schlagwort rss WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rss.stat_id AND ds.original_id = rss.sw_id)"
+                            )),
                         ]
                         .drain(..),
                     ),
@@ -835,7 +987,15 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.or
             ]
             .drain(..),
         );
-        for (&table, &column) in enum_table_refs[&path_params.name].iter() {
+        for (table, column, conflict_resolution_query) in enum_table_refs[&path_params.name].iter()
+        {
+            if let Some(crq) = conflict_resolution_query {
+                sqlx::query(crq)
+                    .bind(&rep_new[..])
+                    .bind(&rep_old[..])
+                    .execute(&mut *tx)
+                    .await?;
+            }
             sqlx::query(&format!(
                 "
             WITH lookup AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS la(new, old))
@@ -1810,7 +1970,9 @@ mod test_authorisiert {
                 },
             )
             .await
-            .unwrap();
+            .expect(&format!(
+                "On test case {tp} // {new_entry} // {other_new_entry}"
+            ));
             assert!(matches!(
                 response,
                 EnumPutResponse::Status201_Created { .. }
