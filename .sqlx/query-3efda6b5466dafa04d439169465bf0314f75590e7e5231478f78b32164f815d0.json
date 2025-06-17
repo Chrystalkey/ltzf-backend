@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM lobbyregistereintrag WHERE vg_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "vg_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "organisation",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "interne_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "intention",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "link",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3efda6b5466dafa04d439169465bf0314f75590e7e5231478f78b32164f815d0"
+}

@@ -1,3 +1,4 @@
+use super::*;
 use std::str::FromStr;
 
 use crate::{
@@ -6,10 +7,13 @@ use crate::{
 };
 use openapi::models;
 use sqlx::PgTransaction;
+use uuid::Uuid;
 
 /// Inserts a new Vorgang into the database.
 pub async fn insert_vorgang(
     vg: &models::Vorgang,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     server: &LTZFServer,
 ) -> Result<i32> {
@@ -81,9 +85,60 @@ pub async fn insert_vorgang(
     .await?;
 
     // insert stations
+    let mut stat_ids = vec![];
     for stat in &vg.stationen {
-        insert_station(stat.clone(), vg_id, tx, server).await?;
+        stat_ids.push(
+            insert_station(stat.clone(), vg_id, scraper_id, collector_key, tx, server).await?,
+        );
     }
+    sqlx::query!(
+        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        vg_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    // insert Lobbyregister
+    if let Some(lobbyr) = &vg.lobbyregister {
+        for l in lobbyr {
+            let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
+            let lrid = sqlx::query!(
+                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+                &l.intention,
+                &l.interne_id,
+                &aid,
+                vg_id,
+                &l.link
+            )
+            .map(|r| r.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+                lrid,
+                &l.betroffene_drucksachen
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+
+    // bookkeeping
+    sqlx::query!(
+        "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
+    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        &stat_ids[..],
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
     tracing::info!("Vorgang Insertion Successful with ID: {}", vg_id);
     Ok(vg_id)
 }
@@ -91,6 +146,8 @@ pub async fn insert_vorgang(
 pub async fn insert_station(
     stat: models::Station,
     vg_id: i32,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -148,7 +205,7 @@ pub async fn insert_station(
     // assoziierte dokumente
     let mut did = Vec::with_capacity(stat.dokumente.len());
     for dokument in stat.dokumente {
-        did.push(insert_or_retrieve_dok(&dokument, tx, srv).await?);
+        did.push(insert_or_retrieve_dok(&dokument, scraper_id, collector_key, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO rel_station_dokument(stat_id, dok_id) 
@@ -158,18 +215,36 @@ pub async fn insert_station(
     )
     .execute(&mut **tx)
     .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        &did[..],
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
 
     // stellungnahmen
     if let Some(stln) = stat.stellungnahmen {
         let mut doks = Vec::with_capacity(stln.len());
         for stln in stln {
-            doks.push(insert_dokument(stln, tx, srv).await?);
+            doks.push(insert_dokument(stln, scraper_id, collector_key, tx, srv).await?);
         }
         sqlx::query!(
             "INSERT INTO rel_station_stln (stat_id, dok_id)
         SELECT $1, did FROM UNNEST($2::int4[]) as did ON CONFLICT DO NOTHING",
             stat_id,
             &doks[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+        SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+            &doks[..],
+            collector_key,
+            scraper_id
         )
         .execute(&mut **tx)
         .await?;
@@ -182,6 +257,8 @@ pub async fn insert_station(
 
 pub async fn insert_dokument(
     dok: models::Dokument,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -226,6 +303,15 @@ pub async fn insert_dokument(
     .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+        VALUES ($1, $2, $3) ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        did,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
 
     // Schlagworte
     insert_dok_sw(did, dok.schlagworte.unwrap_or_default(), tx).await?;
@@ -248,6 +334,8 @@ pub async fn insert_dokument(
 
 pub async fn insert_sitzung(
     ass: &models::Sitzung,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -273,7 +361,7 @@ pub async fn insert_sitzung(
     .await?;
     // insert tops
     for top in &ass.tops {
-        insert_top(id, top, tx, srv).await?;
+        insert_top(id, top, scraper_id, collector_key, tx, srv).await?;
     }
 
     // insert experten
@@ -290,6 +378,15 @@ pub async fn insert_sitzung(
     )
     .execute(&mut **tx)
     .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_sitzung (sid, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(sid, scraper) 
+        DO UPDATE SET time_stamp=NOW()",
+        id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
     tracing::info!(
         "Neue Sitzung angelegt am {} im Parlament {}",
         ass.termin,
@@ -301,6 +398,8 @@ pub async fn insert_sitzung(
 pub async fn insert_top(
     sid: i32,
     top: &models::Top,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -318,7 +417,7 @@ pub async fn insert_top(
     // drucksachen
     let mut dids = vec![];
     for d in top.dokumente.as_ref().unwrap_or(&vec![]) {
-        dids.push(insert_or_retrieve_dok(d, tx, srv).await?);
+        dids.push(insert_or_retrieve_dok(d, scraper_id, collector_key, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO tops_doks(top_id, dok_id)
@@ -465,13 +564,17 @@ pub async fn insert_or_retrieve_autor(
 }
 
 pub async fn insert_or_retrieve_dok(
-    dr: &models::DokRef,
+    dr: &models::StationDokumenteInner,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
     match dr {
-        models::DokRef::Dokument(dok) => Ok(insert_dokument((**dok).clone(), tx, srv).await?),
-        models::DokRef::String(dapi_id) => {
+        models::StationDokumenteInner::Dokument(dok) => {
+            Ok(insert_dokument((**dok).clone(), scraper_id, collector_key, tx, srv).await?)
+        }
+        models::StationDokumenteInner::String(dapi_id) => {
             let api_id = uuid::Uuid::from_str(dapi_id.as_str())?;
             Ok(
                 sqlx::query!("SELECT id FROM dokument WHERE api_id = $1", api_id)

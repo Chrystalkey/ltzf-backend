@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM gremium g WHERE g.id = ANY($1::int4[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89acbad3d0e7a749c5d1776152d5c3ba93298238925c42773dab01af780d0d10"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9705e9fe7ac099bd849d2fbba9c9848cd70d451c346a558567adb4971116d83b"
+}
