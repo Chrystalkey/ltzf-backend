@@ -1,6 +1,7 @@
 use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_param};
 use crate::db::{delete, insert, retrieve};
 use crate::error::LTZFError;
+use crate::utils::as_option;
 use crate::{LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -180,6 +181,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
     #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_get(
@@ -334,6 +336,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
+        claims: &Self::Claims,
         header_params: &models::SGetByIdHeaderParams,
         path_params: &models::SGetByIdPathParams,
     ) -> Result<SGetByIdResponse> {
@@ -361,7 +364,23 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(id) = id {
-            let result = retrieve::sitzung_by_id(id, &mut tx).await?;
+            let mut result = retrieve::sitzung_by_id(id, &mut tx).await?;
+            if claims.0 == APIScope::KeyAdder || claims.0 == APIScope::Admin {
+                result.touched_by = as_option(
+                    sqlx::query!(
+                        "SELECT * FROM scraper_touched_sitzung sts
+                    INNER JOIN api_keys ON api_keys.id = sts.collector_key
+                    WHERE sid = $1",
+                        id
+                    )
+                    .map(|r| models::TouchedByInner {
+                        key: Some(r.key_hash),
+                        scraper_id: Some(r.scraper),
+                    })
+                    .fetch_all(&mut *tx)
+                    .await?,
+                );
+            }
             tx.commit().await?;
             Ok(SGetByIdResponse::Status200_Success {
                 body: result,
@@ -464,6 +483,7 @@ mod sitzung_test {
     use openapi::models;
     use uuid::Uuid;
 
+    use crate::api::auth::APIScope;
     use crate::utils::test::TestSetup;
 
     use super::super::auth;
@@ -811,6 +831,7 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -837,6 +858,7 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -864,6 +886,7 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -886,6 +909,7 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: Some(chrono::Utc::now()),
                     },
@@ -1149,6 +1173,7 @@ mod sitzung_test {
                     &Method::PUT,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None
                     },

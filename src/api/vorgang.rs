@@ -1,5 +1,6 @@
 use crate::db::{delete, insert, merge, retrieve};
 use crate::error::{DataValidationError, LTZFError};
+use crate::utils::as_option;
 use crate::{LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -147,6 +148,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
     #[doc = "VorgangGetById - GET /api/v1/vorgang/{vorgang_id}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get_by_id(
@@ -154,6 +156,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
+        claims: &Self::Claims,
         header_params: &models::VorgangGetByIdHeaderParams,
         path_params: &models::VorgangGetByIdPathParams,
     ) -> Result<VorgangGetByIdResponse> {
@@ -187,7 +190,23 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(dbid) = dbid {
-            let result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
+            let mut result = retrieve::vorgang_by_id(dbid, &mut tx).await?;
+            if claims.0 == APIScope::Admin || claims.0 == APIScope::KeyAdder {
+                result.touched_by = as_option(
+                    sqlx::query!(
+                        "SELECT * FROM scraper_touched_vorgang sts
+                INNER JOIN api_keys ON api_keys.id = sts.collector_key
+                WHERE vg_id = $1",
+                        dbid
+                    )
+                    .map(|r| models::TouchedByInner {
+                        key: Some(r.key_hash),
+                        scraper_id: Some(r.scraper),
+                    })
+                    .fetch_all(&mut *tx)
+                    .await?,
+                );
+            }
             tx.commit().await?;
             Ok(VorgangGetByIdResponse::Status200_Success {
                 body: result,
@@ -338,6 +357,7 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -364,6 +384,7 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -391,6 +412,7 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
+                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -414,6 +436,7 @@ mod test_endpoints {
                 &Method::GET,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
+                &(APIScope::Collector, 1),
                 &models::VorgangGetByIdHeaderParams {
                     if_modified_since: Some(chrono::Utc::now()),
                 },

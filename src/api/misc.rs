@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use crate::api::auth::APIScope;
+use crate::utils::as_option;
 use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -13,6 +15,7 @@ use super::PaginationResponsePart;
 
 #[async_trait]
 impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
     async fn autoren_get(
         &self,
         _method: &Method,
@@ -226,6 +229,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
+        claims: &Self::Claims,
         path_params: &models::DokumentGetByIdPathParams,
     ) -> Result<DokumentGetByIdResponse> {
         let mut tx = self.sqlx_db.begin().await?;
@@ -237,7 +241,23 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(did) = did {
-            let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+            let mut dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
+            if claims.0 == APIScope::KeyAdder || claims.0 == APIScope::Admin {
+                dok.touched_by = as_option(
+                    sqlx::query!(
+                        "SELECT * FROM scraper_touched_dokument sts
+                    INNER JOIN api_keys ON api_keys.id = sts.collector_key
+                    WHERE dok_id = $1",
+                        did
+                    )
+                    .map(|r| models::TouchedByInner {
+                        key: Some(r.key_hash),
+                        scraper_id: Some(r.scraper),
+                    })
+                    .fetch_all(&mut *tx)
+                    .await?,
+                );
+            }
             tx.commit().await?;
             return Ok(DokumentGetByIdResponse::Status200_Success {
                 body: dok,
