@@ -13,16 +13,3 @@ CREATE TABLE rel_lobbyreg_drucksnr(
     drucksnr VARCHAR NOT NULL,
     PRIMARY KEY (lob_id, drucksnr)
 );
-
-ALTER TABLE scraper_touched_vorgang ADD CONSTRAINT "unique_scraper-vg" UNIQUE (vg_id, scraper);
-ALTER TABLE scraper_touched_station ADD CONSTRAINT "unique_scraper-sn" UNIQUE (stat_id, scraper);
-ALTER TABLE scraper_touched_dokument ADD CONSTRAINT "unique_scraper-dk" UNIQUE (dok_id, scraper);
-ALTER TABLE scraper_touched_sitzung ADD CONSTRAINT "unique_scraper-sg" UNIQUE (sid, scraper);
-ALTER TABLE api_keys ADD COLUMN rotated_for INTEGER REFERENCES api_keys(id) DEFAULT NULL;
-
-ALTER TABLE vorgangstyp ADD UNIQUE(value);
-ALTER TABLE vg_ident_typ ADD UNIQUE(value);
-ALTER TABLE parlament ADD UNIQUE(value);
-ALTER TABLE dokumententyp ADD UNIQUE(value);
-ALTER TABLE schlagwort ADD UNIQUE(value);
-ALTER TABLE stationstyp ADD UNIQUE(value);

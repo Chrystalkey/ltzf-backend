@@ -1,5 +1,6 @@
 #![allow(unused)]
 use super::MatchState;
+use crate::db::KeyIndex;
 use crate::db::insert::{self, insert_or_retrieve_autor};
 use crate::error::DataValidationError;
 use crate::utils::notify::notify_ambiguous_match;
@@ -291,6 +292,8 @@ pub async fn execute_merge_dokument(
 pub async fn execute_merge_station(
     model: &models::Station,
     candidate: i32,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<()> {
@@ -371,8 +374,14 @@ pub async fn execute_merge_station(
                 let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
                 match matches {
                     MatchState::NoMatch => {
-                        let did =
-                            crate::db::insert::insert_dokument((**dok).clone(), tx, srv).await?;
+                        let did = crate::db::insert::insert_dokument(
+                            (**dok).clone(),
+                            scraper_id,
+                            collector_key,
+                            tx,
+                            srv,
+                        )
+                        .await?;
                         insert_ids.push(did);
                     }
                     MatchState::ExactlyOne(matchmod) => {
@@ -419,7 +428,8 @@ pub async fn execute_merge_station(
     for stln in model.stellungnahmen.as_ref().unwrap_or(&vec![]) {
         match dokument_merge_candidates(stln, &mut **tx, srv).await? {
             MatchState::NoMatch => {
-                let did = insert::insert_dokument(stln.clone(), tx, srv).await?;
+                let did = insert::insert_dokument(stln.clone(), scraper_id, collector_key, tx, srv)
+                    .await?;
                 sqlx::query!(
                     "INSERT INTO rel_station_stln(stat_id, dok_id) VALUES($1, $2) ON CONFLICT DO NOTHING;",
                     db_id,
@@ -455,6 +465,7 @@ pub async fn execute_merge_vorgang(
     model: &models::Vorgang,
     candidate: i32,
     scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<()> {
@@ -531,10 +542,11 @@ pub async fn execute_merge_vorgang(
     for stat in &model.stationen {
         match station_merge_candidates(stat, db_id, &mut **tx, srv).await? {
             MatchState::NoMatch => {
-                insert::insert_station(stat.clone(), db_id, scraper_id, tx, srv).await?;
+                insert::insert_station(stat.clone(), db_id, scraper_id, collector_key, tx, srv)
+                    .await?;
             }
             MatchState::ExactlyOne(merge_station) => {
-                execute_merge_station(stat, db_id, tx, srv).await?
+                execute_merge_station(stat, db_id, scraper_id, collector_key, tx, srv).await?
             }
             MatchState::Ambiguous(matches) => {
                 let mids = sqlx::query!(
@@ -594,6 +606,7 @@ pub async fn execute_merge_vorgang(
 pub async fn run_integration(
     model: &models::Vorgang,
     scraper_id: Uuid,
+    collector_key: KeyIndex,
     server: &LTZFServer,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
@@ -609,7 +622,7 @@ pub async fn run_integration(
                 model.api_id
             );
             let model = model.clone();
-            insert::insert_vorgang(&model, scraper_id, &mut tx, server).await?;
+            insert::insert_vorgang(&model, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::ExactlyOne(one) => {
             let api_id = sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", one)
@@ -622,7 +635,7 @@ pub async fn run_integration(
                 model.api_id
             );
             let model = model.clone();
-            execute_merge_vorgang(&model, one, scraper_id, &mut tx, server).await?;
+            execute_merge_vorgang(&model, one, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::Ambiguous(many) => {
             tracing::warn!(
@@ -666,6 +679,7 @@ mod scenariotest {
         db::{merge::vorgang::vorgang_merge_candidates, retrieve},
     };
     use openapi::models;
+    use sha256::digest;
     use similar::ChangeTag;
     use std::{collections::HashSet, str::FromStr};
     use uuid::Uuid;
@@ -737,6 +751,16 @@ mod scenariotest {
                 sqlx_db: sqlx::postgres::PgPool::connect(&db_url).await?,
             };
             sqlx::migrate!().run(&out_server.sqlx_db).await?;
+
+            // insert api key
+            let keyadder_hash = digest(out_server.config.keyadder_key.as_str());
+            sqlx::query!(
+                "INSERT INTO api_keys(key_hash, scope, created_by)
+                VALUES
+                ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
+                ON CONFLICT DO NOTHING;", keyadder_hash)
+            .execute(&out_server.sqlx_db).await?;
+
             Ok(out_server)
         }
 
@@ -773,12 +797,12 @@ mod scenariotest {
 
         async fn build_context(&self, server: &LTZFServer) -> Result<()> {
             for obj in self.context.iter() {
-                super::run_integration(obj, Uuid::nil(), server).await?;
+                super::run_integration(obj, Uuid::nil(), 1, server).await?;
             }
             Ok(())
         }
         async fn place_object(&self, server: &LTZFServer) -> Result<()> {
-            super::run_integration(&self.object, Uuid::nil(), server).await?;
+            super::run_integration(&self.object, Uuid::nil(), 1, server).await?;
             Ok(())
         }
         async fn check_result(&self, server: &LTZFServer) -> Result<()> {
@@ -1050,5 +1074,49 @@ mod scenariotest {
     #[tokio::test]
     async fn test_dokument_merging_on_weak_property_changes() {
         // TODO: Dokument & Stellungnahme
+        let modified_dokument = models::Dokument {
+            api_id: Some(Uuid::from_str("b18bee64-c0ff-ff0c-ff1c-deadbeef4732").unwrap()),
+            titel: "Anderer Titel".to_string(),
+            ..generate::default_dokument()
+        };
+        let modified_stellungnahme = models::Dokument {
+            api_id: Some(Uuid::from_str("b18bee64-c0ff-ff1c-ff1c-deadbeef4732").unwrap()),
+            titel: "Anderer Titel für ne Stellungnahme".to_string(),
+            ..generate::default_stellungnahme()
+        };
+        let modified_docs_vorgang = models::Vorgang {
+            stationen: vec![models::Station {
+                dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                    modified_dokument.clone(),
+                ))],
+                stellungnahmen: Some(vec![modified_stellungnahme.clone()]),
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
+        let expected_vorgang = models::Vorgang {
+            stationen: vec![models::Station {
+                dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                    models::Dokument {
+                        api_id: generate::default_dokument().api_id,
+                        ..modified_dokument.clone()
+                    },
+                ))],
+                stellungnahmen: Some(vec![models::Dokument {
+                    api_id: generate::default_stellungnahme().api_id,
+                    ..modified_stellungnahme.clone()
+                }]),
+                ..generate::default_station()
+            }],
+            ..generate::default_vorgang()
+        };
+        let scenario = Scenario {
+            context: vec![generate::default_vorgang()],
+            object: modified_docs_vorgang,
+            expected: vec![expected_vorgang],
+            name: "dokument_merging_on_weak_property_changes",
+            shouldfail: false,
+        };
+        scenario.run().await.unwrap();
     }
 }

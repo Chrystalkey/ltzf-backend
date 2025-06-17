@@ -73,14 +73,14 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             }
             match delete::delete_sitzung_by_api_id(api_id, self).await? {
                 SitzungDeleteResponse::Status204_NoContent { .. } => {
-                    insert::insert_sitzung(body, Uuid::nil(), &mut tx, self).await?;
+                    insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
                 }
                 _ => {
                     unreachable!("If this is reached, some assumptions did not hold")
                 }
             }
         } else {
-            insert::insert_sitzung(body, Uuid::nil(), &mut tx, self).await?;
+            insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
         Ok(SidPutResponse::Status201_Created {
@@ -167,7 +167,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 
         // insert all entries
         for s in &body {
-            insert::insert_sitzung(s, header_params.x_scraper_id, &mut tx, self).await?;
+            insert::insert_sitzung(s, header_params.x_scraper_id, claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
         Ok(KalDatePutResponse::Status201_Created {

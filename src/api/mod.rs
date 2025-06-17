@@ -1,7 +1,9 @@
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum_extra::extract::Host;
+use openapi::models;
 
 use crate::Configuration;
 use crate::Result;
@@ -403,6 +405,31 @@ mod test_applicable_date_range {
         let result = result.unwrap();
         assert!(result.since.is_some() && result.since.unwrap() == expected_since);
         assert!(result.until.is_some() && result.until.unwrap() == expected_until);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WrappedAutor {
+    pub autor: models::Autor,
+}
+impl PartialEq for WrappedAutor {
+    fn eq(&self, other: &Self) -> bool {
+        self.autor.organisation == other.autor.organisation
+            && self.autor.person == other.autor.person
+    }
+}
+impl Eq for WrappedAutor {}
+impl PartialOrd for WrappedAutor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(std::cmp::Ord::cmp(self, other))
+    }
+}
+impl Ord for WrappedAutor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.autor
+            .organisation
+            .cmp(&other.autor.organisation)
+            .then(self.autor.person.cmp(&other.autor.person))
     }
 }
 

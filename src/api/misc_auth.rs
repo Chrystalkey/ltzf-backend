@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::api::WrappedAutor;
 use crate::api::auth::APIScope;
 use crate::db::retrieve::{count_existing_authors, count_existing_gremien};
 use crate::{LTZFError, LTZFServer, Result};
@@ -10,6 +11,7 @@ use axum_extra::extract::Host;
 use openapi::apis::data_administration_miscellaneous::*;
 use openapi::models;
 use sqlx::Row;
+use uuid::Uuid;
 
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
@@ -173,10 +175,21 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        // if so: Bad Request
+        // if replacing contains an index larger than the object list: Bad Request
+        // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
+        let seen = std::collections::BTreeSet::from_iter(
+            body.objects
+                .iter()
+                .map(|x| WrappedAutor { autor: x.clone() }),
+        );
         if let Some(replc) = &body.replacing {
             for rpl in replc.iter() {
-                if rpl.replaced_by as usize >= body.objects.len() {
+                if rpl.replaced_by as usize >= body.objects.len()
+                    || rpl
+                        .values
+                        .iter()
+                        .any(|x| seen.contains(&WrappedAutor { autor: x.clone() }))
+                {
                     return Ok(AutorenPutResponse::Status400_BadRequest {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -273,14 +286,202 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         // tables referencing authors:
         let tables = vec![
-            ("rel_dok_autor", "aut_id"),
-            ("rel_vorgang_init", "in_id"),
-            ("rel_sitzung_experten", "eid"),
-            ("lobbyregistereintrag", "organisation"),
+            ("rel_dok_autor", "aut_id",
+        "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	dok_id as identifier, 
+	aut_id as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_dok_autor rda
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = aut_id OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = aut_id
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_dok_autor rda WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rda.dok_id AND ds.original_id = aut_id)"),
+            ("rel_vorgang_init", "in_id", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	vg_id as identifier, 
+	in_id as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_vorgang_init rvi
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = in_id OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = in_id
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_vorgang_init rvi WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.in_id)"),
+            ("rel_sitzung_experten", "eid", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	rse.sid as identifier, 
+	eid as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM rel_sitzung_experten rse
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = rse.eid OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = rse.eid
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM rel_sitzung_experten rse WHERE 
+
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rse.sid AND ds.original_id = rse.eid)"),
+            ("lobbyregistereintrag", "organisation", "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
+
+WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	lre.vg_id as identifier, 
+	lre.organisation as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM lobbyregistereintrag lre
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = lre.organisation OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = lre.organisation
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM lobbyregistereintrag lre WHERE 
+
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.original_id = lre.organisation)"),
         ];
-        for (table, column) in tables {
+        for (table, column, conflict_res_query) in tables {
             // first, delete potentially conflicting entries
             // !!this is a TODO!!
+            sqlx::query(conflict_res_query)
+                .bind(&rep_new[..])
+                .bind(&rep_old[..])
+                .execute(&mut *tx)
+                .await?;
 
             // then insert like this:
             let query = format!(
@@ -730,7 +931,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 .execute(&mut *tx)
                 .await?;
         }
-        let _ = crate::db::insert::insert_dokument(body.clone(), &mut tx, self).await?;
+        let _ =
+            crate::db::insert::insert_dokument(body.clone(), Uuid::nil(), claims.1, &mut tx, self)
+                .await?;
 
         tx.commit().await?;
         return Ok(DokumentPutIdResponse::Status201_Created {
@@ -745,6 +948,7 @@ mod test_authorisiert {
     use std::str::FromStr;
 
     use crate::api::auth::APIScope;
+    use crate::db::merge::vorgang::run_integration;
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{
@@ -1416,43 +1620,63 @@ mod test_authorisiert {
         let gremien_new = fetch_all_authors(&scenario.server).await;
         assert_eq!(autoren.len(), gremien_new.len());
 
-        // test case of merging two foreign keys: currently disabled !!THIS IS A TODO!!
-        // let mod_autor = models::Autor {
-        //     person: Some("Heribert Schnakenwurst IV".to_string()),
-        //     ..generate::default_autor_person()
-        // };
-        // let mut modified_default = generate::default_vorgang();
-        // modified_default.stationen[0]
-        //     .stellungnahmen
-        //     .as_mut()
-        //     .unwrap()[0]
-        //     .autoren
-        //     .push(mod_autor.clone());
-        // run_integration(&modified_default, uuid::Uuid::nil(), &scenario.server)
-        //     .await
-        //     .unwrap(); // insert one that can be merged
-        // let all_authors = fetch_all_authors(&scenario.server).await;
-        // assert!(all_authors.contains(&mod_autor));
+        // circular reference
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![repl_grm.clone()],
+                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+                    replaced_by: 0,
+                    values: vec![repl_grm.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            response,
+            AutorenPutResponse::Status400_BadRequest { .. }
+        ));
+        let gremien_new = fetch_all_authors(&scenario.server).await;
+        assert_eq!(autoren.len(), gremien_new.len());
 
-        // let response = ap_with(
-        //     &scenario.server,
-        //     &models::AutorenPutRequest {
-        //         objects: vec![generate::default_autor_person()],
-        //         replacing: Some(vec![models::AutorenPutRequestReplacingInner {
-        //             replaced_by: 0,
-        //             values: vec![mod_autor.clone()],
-        //         }]),
-        //     },
-        // )
-        // .await
-        // .unwrap();
-        // assert!(
-        //     matches!(&response, AutorenPutResponse::Status201_Created { .. }),
-        //     "{:?}",
-        //     response
-        // );
-        // let all_authors_new = fetch_all_authors(&scenario.server).await;
-        // assert!(all_authors_new.len() < all_authors.len());
+        // test case of merging two foreign keys: currently disabled !!THIS IS A TODO!!
+        let mod_autor = models::Autor {
+            person: Some("Heribert Schnakenwurst IV".to_string()),
+            ..generate::default_autor_person()
+        };
+        let mut modified_default = generate::default_vorgang();
+        modified_default.stationen[0]
+            .stellungnahmen
+            .as_mut()
+            .unwrap()[0]
+            .autoren
+            .push(mod_autor.clone());
+        run_integration(&modified_default, uuid::Uuid::nil(), 1, &scenario.server)
+            .await
+            .unwrap(); // insert one that can be merged
+        let all_authors = fetch_all_authors(&scenario.server).await;
+        assert!(all_authors.contains(&mod_autor));
+
+        let response = ap_with(
+            &scenario.server,
+            &models::AutorenPutRequest {
+                objects: vec![generate::default_autor_person()],
+                replacing: Some(vec![models::AutorenPutRequestReplacingInner {
+                    replaced_by: 0,
+                    values: vec![mod_autor.clone()],
+                }]),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(&response, AutorenPutResponse::Status201_Created { .. }),
+            "{:?}",
+            response
+        );
+        let all_authors_new = fetch_all_authors(&scenario.server).await;
+        assert!(all_authors_new.len() < all_authors.len());
 
         scenario.teardown().await;
     }

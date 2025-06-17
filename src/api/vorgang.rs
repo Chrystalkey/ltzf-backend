@@ -74,7 +74,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                 }
                 match delete::delete_vorgang_by_api_id(api_id, self).await? {
                     VorgangDeleteResponse::Status204_NoContent { .. } => {
-                        insert::insert_vorgang(body, Uuid::nil(), &mut tx, self).await?;
+                        insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
                     }
                     _ => {
                         unreachable!("If this is reached, some assumptions did not hold")
@@ -82,7 +82,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                 }
             }
             None => {
-                insert::insert_vorgang(body, Uuid::nil(), &mut tx, self).await?;
+                insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
             }
         }
         tx.commit().await?;
@@ -120,7 +120,8 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        let rval = merge::vorgang::run_integration(body, header_params.x_scraper_id, self).await;
+        let rval =
+            merge::vorgang::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Created {
                 x_rate_limit_limit: None,

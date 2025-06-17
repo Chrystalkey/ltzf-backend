@@ -121,6 +121,16 @@ pub async fn vorgang_by_id(
         });
     }
 
+    // let touched_by = sqlx::query!("
+    // SELECT scraper FROM scraper_touched_vorgang
+    // WHERE vg_id = $1
+    // ORDER BY time_stamp DESC",
+    // id)
+    // .map(|r| models::TouchedByInner{
+
+    // })
+    // .fetch_all(&mut **executor).await?;
+
     Ok(models::Vorgang {
         touched_by: None,
         lobbyregister: as_option(lobbyregs),
