@@ -13,6 +13,63 @@ use openapi::models;
 use sqlx::Row;
 use uuid::Uuid;
 
+// this query tries to resolve all potential unique constraint conflicts
+// on tables where the enumeration entry are part of a shared unique constraint.
+//
+// this would mean, if there is a n:m relation table for dokument to autor and values x and y for field autor
+// which are to be merged (x is to be made y) this would violate a unique constraint in the table
+// thus this query tries to find these and delete entries that are to be the same after the whole transaction
+macro_rules! conflict_resolve_query(
+    ($table_name:expr, $shorthand:expr, $ident_col:expr, $element_col:expr) => {
+        concat!(
+            "WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
+-- assumes
+-- (1) no circular replacements (to be detected in server code)
+-- (2) uniqueness of entries
+,
+potential_conflicts AS (
+-- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
+SELECT 
+	",$ident_col," as identifier, 
+	",$element_col," as original_id, 
+	lu.old as old_id,
+	lu.new as target_id 
+FROM ",$table_name, " ", $shorthand,"
+INNER JOIN lookup lu ON 
+-- (a) are to be replaced (contain an entry aut_id = old)
+lu.old = ",$shorthand,".",$element_col," OR
+-- (b) are already a new value (contain an entry aut_id=new)
+lu.new = ",$shorthand,".",$element_col,"
+),
+
+actual_conflicts AS (
+-- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
+SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
+-- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
+WHERE 
+EXISTS (
+	SELECT 1 FROM potential_conflicts pc2 
+	WHERE 
+	pc.identifier = pc2.identifier    AND
+	pc.target_id = pc2.target_id      AND
+	pc.original_id <> pc2.original_id
+	)
+),
+
+deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
+	SELECT * FROM actual_conflicts ac
+	WHERE 
+	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
+	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
+	GROUP BY (identifier, target_id))
+)
+
+DELETE FROM ",$table_name," ",$shorthand," WHERE 
+EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$ident_col," AND ds.original_id = ",$shorthand,".",$element_col,")"
+        ) // this is where concat ends
+    }
+);
+
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
@@ -287,193 +344,46 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // tables referencing authors:
         // table in question, column that references the author, query to delete conflicts _if_ the author is part of a unique identifier. can be empty if not applicable
         let tables = vec![
-            ("rel_dok_autor", "aut_id",
-        Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	dok_id as identifier, 
-	aut_id as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_dok_autor rda
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = aut_id OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = aut_id
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_dok_autor rda WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rda.dok_id AND ds.original_id = aut_id)")),
-            ("rel_vorgang_init", "in_id",  Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	vg_id as identifier, 
-	in_id as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_vorgang_init rvi
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = in_id OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = in_id
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_vorgang_init rvi WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.in_id)")),
-            ("rel_sitzung_experten", "eid", Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	rse.sid as identifier, 
-	eid as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_sitzung_experten rse
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = rse.eid OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = rse.eid
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_sitzung_experten rse WHERE 
-
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rse.sid AND ds.original_id = rse.eid)")),
-            ("lobbyregistereintrag", "organisation", Some("-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(old, new) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	lre.vg_id as identifier, 
-	lre.organisation as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM lobbyregistereintrag lre
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = lre.organisation OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = lre.organisation
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM lobbyregistereintrag lre WHERE 
-
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.original_id = lre.organisation)")),
+            (
+                "rel_dok_autor",
+                "aut_id",
+                Some(conflict_resolve_query!(
+                    "rel_dok_autor",
+                    "rda",
+                    "dok_id",
+                    "aut_id"
+                )),
+            ),
+            (
+                "rel_vorgang_init",
+                "in_id",
+                Some(conflict_resolve_query!(
+                    "rel_vorgang_init",
+                    "rvi",
+                    "vg_id",
+                    "in_id"
+                )),
+            ),
+            (
+                "rel_sitzung_experten",
+                "eid",
+                Some(conflict_resolve_query!(
+                    "rel_sitzung_experten",
+                    "rse",
+                    "sid",
+                    "eid"
+                )),
+            ),
+            (
+                "lobbyregistereintrag",
+                "organisation",
+                Some(conflict_resolve_query!(
+                    "lobbyregistereintrag",
+                    "lre",
+                    "vg_id",
+                    "organisation"
+                )),
+            ),
         ];
         for (table, column, conflict_res_query) in tables {
             // first, delete potentially conflicting entries
@@ -814,7 +724,9 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.or
                 (
                     models::EnumerationNames::Parlamente,
                     // not a key component, not a key component !! THIS IS NOW A TODO !!
-                    BTreeSet::from_iter(vec![("gremium", "parl", None), ("station", "p_id", None)].drain(..)),
+                    BTreeSet::from_iter(
+                        vec![("gremium", "parl", None), ("station", "p_id", None)].drain(..),
+                    ),
                 ),
                 (
                     models::EnumerationNames::Dokumententypen,
@@ -826,54 +738,19 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = lre.vg_id AND ds.or
                 ),
                 (
                     models::EnumerationNames::Vgidtypen,
-                    BTreeSet::from_iter(vec![("rel_vorgang_ident", "typ", Some(
-                        "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	vg_id as identifier, 
-	typ as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_vorgang_ident rvi
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = rvi.typ OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = rvi.typ
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_vorgang_ident rvi WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.original_id = rvi.typ)"
-                    ))].drain(..)), // a key component
+                    BTreeSet::from_iter(
+                        vec![(
+                            "rel_vorgang_ident",
+                            "typ",
+                            Some(conflict_resolve_query!(
+                                "rel_vorgang_ident",
+                                "rvi",
+                                "vg_id",
+                                "typ"
+                            )),
+                        )]
+                        .drain(..),
+                    ), // a key component
                 ),
                 (
                     models::EnumerationNames::Vorgangstypen,
@@ -884,102 +761,26 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rvi.vg_id AND ds.or
                     // a key component, a key component
                     BTreeSet::from_iter(
                         vec![
-                            ("rel_dok_schlagwort", "sw_id", Some(
-                                "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	dok_id as identifier, 
-	sw_id as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_dok_schlagwort rds
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = rds.sw_id OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = rds.sw_id
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_dok_schlagwort rds WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rds.dok_id AND ds.original_id = rds.sw_id)"
-                            )),
-                            ("rel_station_schlagwort", "sw_id", Some(
-                                "-- I want to delete the entry from dok_id that is to be replaced and keep the one that it is merged with
-
-WITH lookup(new,old) AS (SELECT * FROM UNNEST($1::int4[], $2::int4[]) AS iv(new, old)) -- this is the vector of all authors to be replaced
--- assumes
--- (1) no circular replacements (to be detected in server code)
--- (2) uniqueness of entries
-,
-potential_conflicts AS (
--- select from rda rows together with their target aut_id value (either already new or new where aut_id=old) that 
-SELECT 
-	stat_id as identifier, 
-	sw_id as original_id, 
-	lu.old as old_id,
-	lu.new as target_id 
-FROM rel_station_schlagwort rss
-INNER JOIN lookup lu ON 
--- (a) are to be replaced (contain an entry aut_id = old)
-lu.old = rss.sw_id OR
--- (b) are already a new value (contain an entry aut_id=new)
-lu.new = rss.sw_id
-),
-
-actual_conflicts AS (
--- select from potential conflicts rows rows are classified by the tuple (other_identifiers, target_aut_id)
-SELECT pc.identifier, pc.original_id, pc.target_id FROM potential_conflicts pc
--- and an entry in pc with the same target value and identifying rows and a differing current aut_id exists
-WHERE 
-EXISTS (
-	SELECT 1 FROM potential_conflicts pc2 
-	WHERE 
-	pc.identifier = pc2.identifier    AND
-	pc.target_id = pc2.target_id      AND
-	pc.original_id <> pc2.original_id
-	)
-),
-
-deletion_select AS(-- select all but one from each class denoted by the same identifier / target id
-	SELECT * FROM actual_conflicts ac
-	WHERE 
-	ac.original_id <> (SELECT MIN(original_id) FROM actual_conflicts ac2
-	WHERE ac2.identifier = ac.identifier AND ac2.target_id = ac.target_id
-	GROUP BY (identifier, target_id))
-)
-
-DELETE FROM rel_station_schlagwort rss WHERE 
-EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rss.stat_id AND ds.original_id = rss.sw_id)"
-                            )),
+                            (
+                                "rel_dok_schlagwort",
+                                "sw_id",
+                                Some(conflict_resolve_query!(
+                                    "rel_dok_schlagwort",
+                                    "rds",
+                                    "dok_id",
+                                    "sw_id"
+                                )),
+                            ),
+                            (
+                                "rel_station_schlagwort",
+                                "sw_id",
+                                Some(conflict_resolve_query!(
+                                    "rel_station_schlagwort",
+                                    "rss",
+                                    "stat_id",
+                                    "sw_id"
+                                )),
+                            ),
                         ]
                         .drain(..),
                     ),
@@ -1103,6 +904,7 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = rss.stat_id AND ds.
         });
     }
 }
+
 #[cfg(test)]
 mod test_authorisiert {
     use std::str::FromStr;
