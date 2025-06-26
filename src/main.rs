@@ -14,7 +14,7 @@ use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use sha256::digest;
 use tokio::net::TcpListener;
-use tower_governor::{governor::GovernorConfigBuilder, *};
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
@@ -147,8 +147,9 @@ async fn main() -> Result<()> {
     // Init Axum router
     let rl_config = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(2)
-            .burst_size(5)
+            .const_per_second(2)
+            .const_burst_size(32)
+            .key_extractor(GlobalKeyExtractor)
             .finish()
             .unwrap(),
     );
