@@ -63,6 +63,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<PingResponse> {
+        tracing::info!("Pong");
         Ok(PingResponse::Status200_Pong)
     }
     async fn status(
@@ -71,6 +72,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<StatusResponse> {
+        tracing::info!("Status Requested");
         // TODO: implement "API is not running for some reason" markers
         Ok(StatusResponse::Status200_APIIsRunning {
             x_rate_limit_limit: None,
