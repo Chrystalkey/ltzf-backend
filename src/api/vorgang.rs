@@ -122,7 +122,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
             });
         }
         let rval =
-            merge::vorgang::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
+            merge::execute::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
         match rval {
             Ok(_) => Ok(VorgangPutResponse::Status201_Created {
                 x_rate_limit_limit: None,

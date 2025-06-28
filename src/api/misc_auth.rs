@@ -66,9 +66,9 @@ deletion_select AS(-- select all but one from each class denoted by the same ide
 
 DELETE FROM ",$table_name," ",$shorthand," WHERE 
 EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$ident_col," AND ds.original_id = ",$shorthand,".",$element_col,")"
-        ) // this is where concat ends
-    }
-);
+        ) // concat
+    } // match arm of macro
+); // macro_rules
 
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
@@ -910,7 +910,7 @@ mod test_authorisiert {
     use std::str::FromStr;
 
     use crate::api::auth::APIScope;
-    use crate::db::merge::vorgang::run_integration;
+    use crate::db::merge::execute::run_integration;
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::apis::data_administration_miscellaneous::{

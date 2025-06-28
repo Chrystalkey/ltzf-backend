@@ -1,6 +1,7 @@
 use super::*;
 use std::str::FromStr;
 
+use crate::db::merge::candidates::dokument_merge_candidates;
 use crate::{
     LTZFServer, Result,
     utils::{self, notify::notify_new_enum_entry},
@@ -263,7 +264,7 @@ pub async fn insert_dokument(
     srv: &LTZFServer,
 ) -> Result<i32> {
     let dapi = dok.api_id.unwrap_or(uuid::Uuid::now_v7());
-    match crate::db::merge::vorgang::dokument_merge_candidates(&dok, &mut **tx, srv).await? {
+    match dokument_merge_candidates(&dok, &mut **tx, srv).await? {
         super::merge::MatchState::ExactlyOne(id) => return Ok(id),
         super::merge::MatchState::Ambiguous(matches) => {
             let api_ids = sqlx::query!(
