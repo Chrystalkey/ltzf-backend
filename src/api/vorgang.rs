@@ -902,4 +902,13 @@ mod test_endpoints {
         // Cleanup
         scenario.teardown().await;
     }
+    #[tokio::test]
+    async fn test_malformed_data_vorgang() {
+        // test multiple conflicting stations
+    }
+
+    #[tokio::test]
+    async fn test_malformed_data_station() {
+        // test multiple conflicting dokumente / stellungnahmen
+    }
 }

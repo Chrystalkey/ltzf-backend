@@ -642,3 +642,9 @@ pub async fn insert_dok_sw(did: i32, sw: Vec<String>, tx: &mut PgTransaction<'_>
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    #[tokio::test]
+    async fn test_vg_insert() {}
+}

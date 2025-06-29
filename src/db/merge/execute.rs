@@ -674,38 +674,6 @@ mod scenariotest {
         scenario.run().await.unwrap();
     }
     #[tokio::test]
-    async fn test_merge_matching_vorwort() {
-        // let mut vg = generate::default_vorgang();
-        // vg.stationen[0].typ = models::Stationstyp::PreparlRegent;
-
-        // let mut vg2 = generate::default_vorgang();
-        // vg2.api_id = Uuid::from_str("b18bde64-c0ff-eeee-ff0c-deadbeeeefff").unwrap(); // take out api id matching
-        // vg2.titel = "Anderer Titel".to_string();
-        // vg2.stationen[0].typ = models::Stationstyp::ParlInitiativ;
-        // vg2.ids = None; // take out id matching
-
-        // let mut vg_exp = vg.clone();
-        // vg_exp.titel = vg2.titel.clone();
-
-        // let scenario = Scenario {
-        //     name: "merge_matching_vorwort",
-        //     shouldfail: false,
-        //     context: vec![vg],
-        //     object: vg2.clone(),
-        //     expected: vec![vg_exp],
-        // };
-        // let server = scenario.setup().await.unwrap();
-        // scenario.build_context(&server).await.unwrap();
-        // let mut tx = server.sqlx_db.begin().await.unwrap();
-        // let candidates = vorgang_merge_candidates(&vg2, &mut *tx, &server).await.unwrap();
-        // match candidates{
-        //     crate::db::merge::MatchState::ExactlyOne(_) => {},
-        //     state => assert!(false, "{:?}", state)
-        // }
-        // scenario.teardown(&server).await.unwrap();
-        // scenario.run().await.unwrap();
-    }
-    #[tokio::test]
     async fn test_link_ini_ids_merging() {
         let vg = generate::default_vorgang();
         let mut vg_mod = vg.clone();

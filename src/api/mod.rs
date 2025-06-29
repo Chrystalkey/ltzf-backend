@@ -433,7 +433,7 @@ pub(crate) mod endpoint_test {
 
     // Session (Sitzung) tests
     pub(crate) fn create_test_session() -> models::Sitzung {
-        use chrono::{DateTime, Utc};
+        use chrono::Utc;
         use openapi::models::{
             Autor, Dokument, Gremium, Parlament, Sitzung, StationDokumenteInner, Top,
         };
@@ -503,7 +503,7 @@ pub(crate) mod endpoint_test {
     }
 
     pub(crate) fn create_test_vorgang() -> models::Vorgang {
-        use chrono::{DateTime, Utc};
+        use chrono::Utc;
         use openapi::models::{
             Autor, Doktyp, Dokument, Parlament, Station, StationDokumenteInner, Stationstyp,
             VgIdent, VgIdentTyp, Vorgang, Vorgangstyp,

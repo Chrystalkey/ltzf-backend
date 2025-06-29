@@ -1307,4 +1307,9 @@ mod sitzung_test {
         }
         scenario.teardown().await;
     }
+
+    #[tokio::test]
+    async fn test_malformed_req_data() {
+        // dokumente uniqueness konflikt
+    }
 }
