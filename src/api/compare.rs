@@ -380,7 +380,7 @@ mod tests {
     fn test_compare_datetime_seconds() {
         // Test identical datetimes
         let dt1 = create_test_datetime();
-        let dt2 = dt1.clone();
+        let dt2 = dt1;
         assert!(compare_datetime_millis(&dt1, &dt2));
 
         // Test datetimes with same milliseconds but different nanoseconds

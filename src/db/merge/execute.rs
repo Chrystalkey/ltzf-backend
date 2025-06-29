@@ -148,8 +148,7 @@ pub async fn execute_merge_station(
                     .await?;
                 if id.is_none() {
                     return Err(DataValidationError::IncompleteDataSupplied {
-                        input: format!("Supplied uuid `{}` as document id for station `{}`, but no such ID is in the database.",
-                        uuid, sapi) }.into());
+                        input: format!("Supplied uuid `{uuid}` as document id for station `{sapi}`, but no such ID is in the database.") }.into());
                 }
                 insert_ids.push(id.unwrap());
             }
@@ -623,16 +622,13 @@ mod scenariotest {
                     .join(",");
                 std::fs::write(
                     format!("tests/{}_dump.json", self.name),
-                    format!(
-                        "{{\n\"expected\": [{}],\n\"actual\": [{}]}}",
-                        exp_content, dbv_content
-                    ),
+                    format!("{{\n\"expected\": [{exp_content}],\n\"actual\": [{dbv_content}]}}"),
                 )
                 .unwrap();
                 assert!(
                     false,
-                    "Expected and Actual Contents were not equal. Dump: {}",
-                    format!("tests/{}_dump.json", self.name)
+                    "Expected and Actual Contents were not equal. Dump: tests/{}_dump.json",
+                    self.name
                 );
             }
             assert!(
@@ -727,8 +723,7 @@ mod scenariotest {
 
         let mut vg_exp = vg.clone();
         vg_exp.links = Some(
-            vec![]
-                .iter()
+            [].iter()
                 .chain(vg.links.as_ref().unwrap().iter())
                 .chain(vg_mod.links.as_ref().unwrap().iter())
                 .cloned()
@@ -736,15 +731,14 @@ mod scenariotest {
         ); //merged
         vg_exp.links.as_mut().unwrap().sort();
         vg_exp.ids = Some(
-            vec![]
-                .iter()
+            [].iter()
                 .chain(vg.ids.as_ref().unwrap().iter())
                 .chain(vg_mod.ids.as_ref().unwrap().iter())
                 .cloned()
                 .collect(),
         ); //merged
         vg_exp.ids.as_mut().unwrap().sort_by(|a, b| a.id.cmp(&b.id));
-        vg_exp.initiatoren = vec![]
+        vg_exp.initiatoren = []
             .iter()
             .chain(vg.initiatoren.iter())
             .chain(vg_mod.initiatoren.iter())

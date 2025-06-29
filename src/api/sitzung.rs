@@ -957,7 +957,7 @@ mod sitzung_test {
                 SGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(!body.is_empty());
                 }
-                rsp => panic!("Expected successful operation response, got {:?}", rsp),
+                rsp => panic!("Expected successful operation response, got {rsp:?}"),
             }
         }
 

@@ -18,7 +18,7 @@ pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
         .iter_all_changes()
         .filter(|x| x.tag() != ChangeTag::Equal);
     let mut current_sign = ChangeTag::Equal;
-    while let Some(el) = diffiter.next() {
+    for el in diffiter {
         let sign = match el.tag() {
             ChangeTag::Equal => continue,
             ChangeTag::Delete => "-",
@@ -38,5 +38,5 @@ pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
             s = format!("{}{}", s, el.value());
         }
     }
-    format!("{}\n-----------------------------------", s)
+    format!("{s}\n-----------------------------------")
 }

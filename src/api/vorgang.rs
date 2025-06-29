@@ -616,7 +616,7 @@ mod test_endpoints {
                 VorgangGetResponse::Status200_Successful { body, .. } => {
                     assert!(!body.is_empty());
                 }
-                response => panic!("Expected successful operation response, got {:?}", response),
+                response => panic!("Expected successful operation response, got {response:?}"),
             }
         }
 

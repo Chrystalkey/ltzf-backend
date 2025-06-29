@@ -941,7 +941,7 @@ mod test_authorisiert {
             )
             .await
             .unwrap();
-        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
     }
     async fn fetch_all_authors(server: &LTZFServer) -> Vec<models::Autor> {
         let autoren = server
@@ -1091,9 +1091,7 @@ mod test_authorisiert {
         let autoren_now = fetch_all_authors(&scenario.server).await;
         assert!(
             autoren.len() > autoren_now.len(),
-            "Expected: {:?}, Got {:?}",
-            autoren,
-            autoren_now
+            "Expected: {autoren:?}, Got {autoren_now:?}"
         );
         let autoren = autoren_now;
         let r = scenario
@@ -1634,8 +1632,7 @@ mod test_authorisiert {
         .unwrap();
         assert!(
             matches!(&response, AutorenPutResponse::Status201_Created { .. }),
-            "{:?}",
-            response
+            "{response:?}"
         );
         let all_authors_new = fetch_all_authors(&scenario.server).await;
         assert!(all_authors_new.len() < all_authors.len());
@@ -1737,7 +1734,7 @@ mod test_authorisiert {
             ));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert!(entries.len() < entries_new.len());
-            assert!(entries_new.contains(&new_entry));
+            assert!(entries_new.contains(new_entry));
             let entries = entries_new;
 
             // with conflict
@@ -1772,17 +1769,15 @@ mod test_authorisiert {
                 },
             )
             .await
-            .expect(&format!(
-                "On test case {tp} // {new_entry} // {other_new_entry}"
-            ));
+            .unwrap_or_else(|_| panic!("On test case {tp} // {new_entry} // {other_new_entry}"));
             assert!(matches!(
                 response,
                 EnumPutResponse::Status201_Created { .. }
             ));
             let entries_new = fetch_all_enumvars(&scenario.server, *tp).await;
             assert_eq!(entries.len(), entries_new.len());
-            assert!(entries_new.contains(&other_new_entry));
-            assert!(!entries_new.contains(&new_entry));
+            assert!(entries_new.contains(other_new_entry));
+            assert!(!entries_new.contains(new_entry));
 
             // malformed request
 

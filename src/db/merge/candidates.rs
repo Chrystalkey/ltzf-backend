@@ -155,6 +155,7 @@ pub async fn station_merge_candidates(
         }
     })
 }
+
 /// bei gleichem
 /// - hash oder api_id oder drucksnr (und jeweils gleichem Typ)
 pub async fn dokument_merge_candidates(
@@ -192,6 +193,35 @@ pub async fn dokument_merge_candidates(
 
 #[cfg(test)]
 mod candid_test {
+
+    use openapi::models;
+
+    use crate::db::insert;
+    use crate::utils::test::TestSetup;
+    use crate::utils::test::generate::{default_station, default_vorgang};
+
     #[tokio::test]
-    async fn station_test() {}
+    async fn station_test() {
+        let scenario = TestSetup::new("test_station_candidates_fetch").await;
+        let vorgang = models::Vorgang {
+            stationen: vec![
+                models::Station {
+                    ..default_station()
+                },
+                models::Station {
+                    ..default_station()
+                },
+                models::Station {
+                    ..default_station()
+                },
+            ],
+            ..default_vorgang()
+        };
+        let mut tx = scenario.server.sqlx_db.begin().await.unwrap();
+        insert::insert_vorgang(&vorgang, uuid::Uuid::nil(), 1, &mut tx, &scenario.server)
+            .await
+            .unwrap();
+
+        scenario.teardown().await;
+    }
 }

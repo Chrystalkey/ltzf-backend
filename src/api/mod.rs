@@ -158,7 +158,7 @@ mod prp_test {
     fn test_start_and_end() {
         let prp = PaginationResponsePart::new(0, None, None);
         assert_eq!(prp.start(), 0);
-        assert_eq!(prp.end(), 0, "{:?}", prp);
+        assert_eq!(prp.end(), 0, "{prp:?}");
 
         let prp = PaginationResponsePart::new(1, None, None);
         assert_eq!(prp.start(), 0);
@@ -312,14 +312,7 @@ mod test_applicable_date_range {
         let d = 12u32;
 
         // ymd
-        let result = find_applicable_date_range(
-            Some(y as u32),
-            Some(m as u32),
-            Some(d as u32),
-            None,
-            None,
-            None,
-        );
+        let result = find_applicable_date_range(Some(y), Some(m), Some(d), None, None, None);
         let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
             .unwrap()
             .and_hms_opt(0, 0, 0)
@@ -337,8 +330,7 @@ mod test_applicable_date_range {
             "ymd should start and end at the date range"
         );
         // ym
-        let result =
-            find_applicable_date_range(Some(y as u32), Some(m as u32), None, None, None, None);
+        let result = find_applicable_date_range(Some(y), Some(m), None, None, None, None);
         let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
@@ -356,7 +348,7 @@ mod test_applicable_date_range {
             "ymd should start and end at the date range"
         );
         // y
-        let result = find_applicable_date_range(Some(y as u32), None, None, None, None, None);
+        let result = find_applicable_date_range(Some(y), None, None, None, None, None);
         let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
@@ -459,10 +451,10 @@ pub(crate) mod endpoint_test {
             typ: openapi::models::Doktyp::Entwurf,
             link: "http://example.com/doc".to_string(),
             hash: "testhash".to_string(),
-            zp_modifiziert: DateTime::from(Utc::now()),
+            zp_modifiziert: Utc::now(),
             drucksnr: None,
-            zp_referenz: DateTime::from(Utc::now()),
-            zp_erstellt: Some(DateTime::from(Utc::now())),
+            zp_referenz: Utc::now(),
+            zp_erstellt: Some(Utc::now()),
             meinung: None,
             schlagworte: None,
             autoren: vec![Autor {
@@ -496,7 +488,7 @@ pub(crate) mod endpoint_test {
             titel: Some("Test Sitzung".to_string()),
             public: true,
             touched_by: None,
-            termin: DateTime::from(Utc::now()),
+            termin: Utc::now(),
             gremium: Gremium {
                 name: "Test Gremium".to_string(),
                 link: Some("http://example.com/gremium".to_string()),
@@ -530,10 +522,10 @@ pub(crate) mod endpoint_test {
             typ: Doktyp::Entwurf,
             link: "http://example.com/doc".to_string(),
             hash: "testhash".to_string(),
-            zp_modifiziert: DateTime::from(Utc::now()),
+            zp_modifiziert: Utc::now(),
             drucksnr: None,
-            zp_referenz: DateTime::from(Utc::now()),
-            zp_erstellt: Some(DateTime::from(Utc::now())),
+            zp_referenz: Utc::now(),
+            zp_erstellt: Some(Utc::now()),
             meinung: None,
             schlagworte: None,
             autoren: vec![models::Autor {
@@ -548,14 +540,14 @@ pub(crate) mod endpoint_test {
         let test_station = Station {
             typ: Stationstyp::ParlInitiativ,
             dokumente: vec![StationDokumenteInner::Dokument(Box::new(test_doc))],
-            zp_start: DateTime::from(Utc::now()),
+            zp_start: Utc::now(),
             api_id: Some(Uuid::now_v7()),
             touched_by: None,
             titel: Some("Test Station".to_string()),
             gremium_federf: None,
             link: Some("http://example.com".to_string()),
             trojanergefahr: None,
-            zp_modifiziert: Some(DateTime::from(Utc::now())),
+            zp_modifiziert: Some(Utc::now()),
             parlament: Parlament::Bt,
             gremium: None,
             schlagworte: None,

@@ -332,7 +332,7 @@ mod test_unauthorisiert {
             )
             .await
             .unwrap();
-        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         let r = scenario
             .server
@@ -358,8 +358,7 @@ mod test_unauthorisiert {
                 }
                 _ => false,
             },
-            "Expected Successful response, got {:?}",
-            r
+            "Expected Successful response, got {r:?}"
         );
         scenario.teardown().await;
     }
@@ -407,7 +406,7 @@ mod test_unauthorisiert {
             )
             .await
             .unwrap();
-        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+        assert!(matches!(rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         let result = scenario
             .server
@@ -447,8 +446,7 @@ mod test_unauthorisiert {
             .await;
         assert!(
             matches!(&result, Ok(GremienGetResponse::Status200_Success { body, .. }) if body.len() == 1 && body.contains(&generate::default_gremium())),
-            "Expected to find Some entries, got {:?}",
-            result
+            "Expected to find Some entries, got {result:?}"
         );
 
         let result = scenario
@@ -540,8 +538,7 @@ mod test_unauthorisiert {
                 .await;
             assert!(
                 matches!(&result, Ok(EnumGetResponse::Status204_NoContent { .. })),
-                "Expected to find no entries, got {:?} instead",
-                result
+                "Expected to find no entries, got {result:?} instead"
             );
         }
         scenario.teardown().await;
@@ -573,7 +570,7 @@ mod test_unauthorisiert {
             )
             .await
             .unwrap();
-        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {:?}", rsp);
+        assert!(matches!(&rsp, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }), "Expected succes, got {rsp:?}");
 
         for (name, mtch) in test_cases_one {
             let result = scenario
@@ -592,10 +589,7 @@ mod test_unauthorisiert {
                 .await;
             assert!(
                 matches!(&result, Ok(EnumGetResponse::Status200_Success { body, .. }) if !body.is_empty() ),
-                "Expected to get success, got {:?} instead with test case `{}` / `{}`",
-                result,
-                name,
-                mtch
+                "Expected to get success, got {result:?} instead with test case `{name}` / `{mtch}`"
             );
         }
         scenario.teardown().await;

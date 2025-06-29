@@ -30,7 +30,7 @@ impl TryFrom<&str> for APIScope {
             "collector" => Ok(APIScope::Collector),
             _ => Err(LTZFError::Validation {
                 source: Box::new(crate::error::DataValidationError::InvalidEnumValue {
-                    msg: format!("Tried to Convert {} to APIScope", value),
+                    msg: format!("Tried to Convert {value} to APIScope"),
                 }),
             }),
         }
@@ -90,14 +90,14 @@ async fn internal_extract_claims(
     match table_rec {
         Some((_, true, _, _)) => Err(LTZFError::Validation {
             source: Box::new(crate::error::DataValidationError::Unauthorized {
-                reason: format!("API Key was valid but is deleted. Hash: {}", hash),
+                reason: format!("API Key was valid but is deleted. Hash: {hash}"),
             }),
         }),
         Some((id, _, expires_at, scope)) => {
             if expires_at < chrono::Utc::now() {
                 return Err(LTZFError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
-                        reason: format!("API Key was valid but is expired. Hash: {}", hash),
+                        reason: format!("API Key was valid but is expired. Hash: {hash}"),
                     }),
                 });
             }
@@ -367,8 +367,7 @@ mod auth_test {
             .await;
         assert!(
             matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) if r.expires_at - expiry_date < chrono::Duration::milliseconds(1) && r.scope == "keyadder" && !r.is_being_rotated),
-            "Expected Successful response, got {:?}",
-            resp
+            "Expected Successful response, got {resp:?}"
         );
 
         let _rot_key = server
@@ -396,8 +395,7 @@ mod auth_test {
                 Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) if (r.expires_at - chrono::Utc::now()) - chrono::Duration::days(1)
                 < chrono::Duration::seconds(1) && r.scope == "keyadder" && r.is_being_rotated
             ),
-            "Expected Successful response, got {:?}",
-            key_status_rot
+            "Expected Successful response, got {key_status_rot:?}"
         );
 
         scenario.teardown().await;
@@ -541,12 +539,10 @@ mod auth_test {
             )
             .await
             .unwrap();
-        assert!(match resp {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(_) => {
-                true
-            }
-            _ => false,
-        });
+        matches!(
+            resp,
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(_)
+        );
         let key = match resp {
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
             _ => panic!("Expected authorized response"),

@@ -63,18 +63,14 @@ pub(crate) mod test {
     }
     async fn setup_server(dbname: &str) -> Result<LTZFServer> {
         let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", dbname))
+        sqlx::query(&format!("DROP DATABASE IF EXISTS {dbname} WITH (FORCE);"))
             .execute(&create_pool)
             .await?;
-        sqlx::query(&format!(
-            "CREATE DATABASE {} WITH OWNER 'ltzf-user'",
-            dbname
-        ))
-        .execute(&create_pool)
-        .await?;
+        sqlx::query(&format!("CREATE DATABASE {dbname} WITH OWNER 'ltzf-user'"))
+            .execute(&create_pool)
+            .await?;
         let pool = sqlx::PgPool::connect(&format!(
-            "postgres://ltzf-user:ltzf-pass@localhost:5432/{}",
-            dbname
+            "postgres://ltzf-user:ltzf-pass@localhost:5432/{dbname}"
         ))
         .await
         .unwrap();
@@ -91,7 +87,7 @@ pub(crate) mod test {
 
     async fn cleanup_server(dbname: &str) -> Result<()> {
         let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE {} WITH (FORCE);", dbname))
+        sqlx::query(&format!("DROP DATABASE {dbname} WITH (FORCE);"))
             .execute(&create_pool)
             .await?;
         Ok(())
