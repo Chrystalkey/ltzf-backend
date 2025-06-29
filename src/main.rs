@@ -84,22 +84,10 @@ impl Configuration {
         Configuration::parse()
     }
 }
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-    init_tracing();
-
-    let config = Configuration::init();
-    tracing::debug!("Configuration: {:?}", &config);
-
-    tracing::info!("Starting the Initialisation process");
-    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
-
-    tracing::debug!("Started Listener");
+async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
     let sqlx_db = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
-        .connect(&config.db_url)
+        .connect(db_url)
         .await?;
 
     let mut available = false;
@@ -111,7 +99,7 @@ async fn main() -> Result<()> {
                 break;
             }
             Err(sqlx::Error::PoolTimedOut) => {
-                tracing::warn!("Connection to Database `{}` timed out", config.db_url);
+                tracing::warn!("Connection to Database `{}` timed out", db_url);
             }
             _ => {
                 let _ = r?;
@@ -129,6 +117,22 @@ async fn main() -> Result<()> {
     tracing::debug!("Started Database Pool");
     sqlx::migrate!().run(&sqlx_db).await?;
     tracing::debug!("Executed Migrations");
+    Ok(sqlx_db)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    dotenv::dotenv().ok();
+    init_tracing();
+
+    let config = Configuration::init();
+    tracing::debug!("Configuration: {:?}", &config);
+
+    tracing::info!("Starting the Initialisation process");
+    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
+
+    tracing::debug!("Started Listener");
+    let sqlx_db = init_db_conn(&config.db_url).await?;
 
     // Run Key Administrative Functions
     let keyadder_hash = digest(config.keyadder_key.as_str());

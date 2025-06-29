@@ -156,7 +156,7 @@ pub async fn station_merge_candidates(
     })
 }
 /// bei gleichem
-/// - hash oder api_id oder drucksnr
+/// - hash oder api_id oder drucksnr (und jeweils gleichem Typ)
 pub async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
