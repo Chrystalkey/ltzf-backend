@@ -248,9 +248,9 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                 upper_date: range.until,
                 vgtyp: query_params.vgtyp,
                 wp: query_params.wp,
-                inifch: query_params.inifch.clone(),
-                iniorg: query_params.iniorg.clone(),
-                inipsn: query_params.inipsn.clone(),
+                inifch: query_params.fach.clone(),
+                iniorg: query_params.org.clone(),
+                inipsn: query_params.person.clone(),
             };
             let result = retrieve::vorgang_by_parameter(
                 parameters,
@@ -507,9 +507,9 @@ mod test_endpoints {
                         until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
                         vgtyp: None,
                         wp: None,
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
+                        fach: None,
+                        org: None,
+                        person: None,
                     },
                 )
                 .await
@@ -538,9 +538,9 @@ mod test_endpoints {
                         until: Some(Utc::now() + chrono::Duration::days(366)),
                         vgtyp: None,
                         wp: None,
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
+                        fach: None,
+                        org: None,
+                        person: None,
                     },
                 )
                 .await
@@ -605,9 +605,9 @@ mod test_endpoints {
                         until: None,
                         vgtyp: Some(test_vorgang.typ),
                         wp: Some(test_vorgang.wahlperiode as i32),
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
+                        fach: None,
+                        org: None,
+                        person: None,
                     },
                 )
                 .await

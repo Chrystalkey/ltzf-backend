@@ -90,9 +90,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             });
         }
         let empty_qp = models::AutorenDeleteByParamQueryParams {
-            inipsn: None,
-            inifch: None,
-            iniorg: None,
+            person: None,
+            fach: None,
+            org: None,
         };
         if *query_params == empty_qp {
             return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
@@ -109,9 +109,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         a.organisation = COALESCE($2, a.organisation) AND
         (a.fachgebiet IS NULL OR a.fachgebiet = COALESCE($3, a.fachgebiet))
         ",
-            query_params.inipsn,
-            query_params.iniorg,
-            query_params.inifch
+            query_params.person,
+            query_params.org,
+            query_params.fach
         )
         .execute(&mut *tx)
         .await?;
@@ -952,9 +952,9 @@ mod test_authorisiert {
                 &models::AutorenGetQueryParams {
                     page: None,
                     per_page: None,
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: None,
+                    fach: None,
+                    org: None,
+                    person: None,
                 },
             )
             .await
@@ -1019,9 +1019,9 @@ mod test_authorisiert {
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::AutorenDeleteByParamQueryParams {
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: None,
+                    fach: None,
+                    org: None,
+                    person: None,
                 },
             )
             .await
@@ -1044,9 +1044,9 @@ mod test_authorisiert {
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: None,
+                    fach: None,
+                    org: None,
+                    person: None,
                 },
             )
             .await
@@ -1073,9 +1073,9 @@ mod test_authorisiert {
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
-                    inifch: None,
-                    iniorg: Some("Mysterium der Ministerien".to_string()),
-                    inipsn: None,
+                    fach: None,
+                    org: Some("Mysterium der Ministerien".to_string()),
+                    person: None,
                 },
             )
             .await
@@ -1102,9 +1102,9 @@ mod test_authorisiert {
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: Some("Harald Maria Töpfer".to_string()),
+                    fach: None,
+                    org: None,
+                    person: Some("Harald Maria Töpfer".to_string()),
                 },
             )
             .await

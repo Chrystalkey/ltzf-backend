@@ -285,11 +285,11 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             "Rotated API Key with Scope: {:?}",
             old_key_entry.named_scope
         );
-        Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(
-            RotationResponse{
+        Ok(AuthRotateResponse::Status201_RotationSuccessful(
+            RotationResponse {
                 new_api_key: new_key,
-                rotation_complete_date: rot_expiration_date
-            }
+                rotation_complete_date: rot_expiration_date,
+            },
         ))
     }
 }
@@ -470,8 +470,9 @@ mod auth_test {
                 },
             )
             .await;
+
         assert!(matches!(&response,
-            Ok(AuthRotateResponse::Status201_NewAPIKeyWasCreatedSuccessfullyWhilePreservingTheOldOneForTheTransitionPeriod(rotrsp)) if rotrsp.new_api_key != key && rotrsp.rotation_complete_date > chrono::Utc::now()
+            Ok(AuthRotateResponse::Status201_RotationSuccessful(rotrsp)) if rotrsp.new_api_key != key && rotrsp.rotation_complete_date > chrono::Utc::now()
         ));
         scenario.teardown().await;
     }

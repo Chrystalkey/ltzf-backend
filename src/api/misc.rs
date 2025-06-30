@@ -30,9 +30,9 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             organisation = COALESCE($2, organisation) AND
             fachgebiet = COALESCE($3, fachgebiet)
             ",
-            query_params.inipsn,
-            query_params.iniorg,
-            query_params.inifch
+            query_params.person,
+            query_params.org,
+            query_params.fach,
         )
         .map(|r| r.cnt)
         .fetch_one(&mut *tx)
@@ -49,9 +49,9 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             ORDER BY organisation ASC, person ASC, fachgebiet ASC
             LIMIT $4 OFFSET $5
             ",
-            query_params.inipsn,
-            query_params.iniorg,
-            query_params.inifch,
+            query_params.person,
+            query_params.org,
+            query_params.fach,
             prp.limit(),
             prp.offset()
         )
@@ -300,9 +300,9 @@ mod test_unauthorisiert {
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: None,
+                    fach: None,
+                    org: None,
+                    person: None,
                     page: None,
                     per_page: None,
                 },
@@ -341,9 +341,9 @@ mod test_unauthorisiert {
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
-                    inifch: None,
-                    iniorg: None,
-                    inipsn: None,
+                    fach: None,
+                    org: None,
+                    person: None,
                     page: None,
                     per_page: None,
                 },
