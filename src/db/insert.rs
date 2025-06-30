@@ -204,7 +204,7 @@ pub async fn insert_station(
     .await?;
 
     // assoziierte dokumente
-    let mut did = Vec::with_capacity(stat.dokumente.len());
+    let mut did = vec![];
     for dokument in stat.dokumente {
         did.push(insert_or_retrieve_dok(&dokument, scraper_id, collector_key, tx, srv).await?);
     }
@@ -216,36 +216,27 @@ pub async fn insert_station(
     )
     .execute(&mut **tx)
     .await?;
-    sqlx::query!(
-        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
-    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
-        &did[..],
-        collector_key,
-        scraper_id
-    )
-    .execute(&mut **tx)
-    .await?;
 
     // stellungnahmen
     if let Some(stln) = stat.stellungnahmen {
         let mut doks = Vec::with_capacity(stln.len());
         for stln in stln {
-            doks.push(insert_dokument(stln, scraper_id, collector_key, tx, srv).await?);
+            doks.push(
+                insert_or_retrieve_dok(
+                    &models::StationDokumenteInner::Dokument(Box::new(stln.clone())),
+                    scraper_id,
+                    collector_key,
+                    tx,
+                    srv,
+                )
+                .await?,
+            );
         }
         sqlx::query!(
             "INSERT INTO rel_station_stln (stat_id, dok_id)
         SELECT $1, did FROM UNNEST($2::int4[]) as did ON CONFLICT DO NOTHING",
             stat_id,
             &doks[..]
-        )
-        .execute(&mut **tx)
-        .await?;
-        sqlx::query!(
-            "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
-        SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
-            &doks[..],
-            collector_key,
-            scraper_id
         )
         .execute(&mut **tx)
         .await?;
@@ -327,6 +318,17 @@ pub async fn insert_dokument(
     SELECT $1, blub FROM UNNEST($2::int4[]) as blub ON CONFLICT DO NOTHING",
         did,
         &aids[..]
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+    VALUES ($1, $2, $3) 
+    ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        did,
+        collector_key,
+        scraper_id
     )
     .execute(&mut **tx)
     .await?;

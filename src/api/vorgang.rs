@@ -904,11 +904,77 @@ mod test_endpoints {
     }
     #[tokio::test]
     async fn test_malformed_data_vorgang() {
-        // test multiple conflicting stations
+        // TODO test multiple conflicting stations
     }
 
     #[tokio::test]
     async fn test_malformed_data_station() {
-        // test multiple conflicting dokumente / stellungnahmen
+        // TODO test multiple conflicting dokumente / stellungnahmen
     }
+}
+
+#[cfg(test)]
+mod test_failed_irl_scenarios {
+    use crate::{api::auth::APIScope, utils::test::TestSetup};
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use openapi::{
+        apis::collector_schnittstellen_vorgang::{
+            CollectorSchnittstellenVorgang, VorgangPutResponse,
+        },
+        models,
+    };
+    use std::path::{Path, PathBuf};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use uuid::Uuid;
+
+    async fn read_jsonl(path: &Path) -> Vec<models::Vorgang> {
+        let file = tokio::fs::File::open(path).await.unwrap();
+        let buf_reader = BufReader::new(file);
+        let mut records = vec![];
+        let mut lines = buf_reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            records.push(serde_json::from_str(&line).unwrap())
+        }
+        return records;
+    }
+
+    macro_rules! irl_scenario {
+        ($path:expr, $name:ident) => {
+            #[tokio::test]
+            async fn $name() {
+                let path = PathBuf::from($path);
+                let test_setup =
+                    TestSetup::new(&concat!("scenario_test_", stringify!($name))).await;
+                let host = Host("localhost".to_string());
+                let cookies = CookieJar::new();
+                let objects = read_jsonl(&path).await;
+                for obj in objects.iter() {
+                    let response = test_setup
+                        .server
+                        .vorgang_put(
+                            &Method::PUT,
+                            &host,
+                            &cookies,
+                            &(APIScope::KeyAdder, 1),
+                            &models::VorgangPutHeaderParams {
+                                x_scraper_id: Uuid::nil(),
+                            },
+                            obj,
+                        )
+                        .await
+                        .unwrap();
+                    assert!(matches!(
+                        response,
+                        VorgangPutResponse::Status201_Created { .. }
+                    ));
+                }
+                test_setup.teardown().await;
+            }
+        };
+    }
+    irl_scenario!(
+        "tests/scenarios/on_onflict_upd_nodouble.jsonl",
+        test_scenario_on_onflict_upd_nodouble
+    );
 }
