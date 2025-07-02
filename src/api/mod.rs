@@ -121,7 +121,7 @@ impl PaginationResponsePart {
     }
     pub fn generate_link_header(&self, link_first_part: &str) -> String {
         let mut link_string = String::new();
-        if self.x_page != self.x_total_pages {
+        if self.x_page < self.x_total_pages {
             link_string = format!(
                 "<\"{}?page={}&per_page={}\">; rel=\"next\", ",
                 link_first_part,
@@ -129,7 +129,7 @@ impl PaginationResponsePart {
                 self.x_per_page
             );
         }
-        if self.x_page != 0 {
+        if self.x_page > 1 {
             link_string = format!(
                 "{}<\"{}?page={}&per_page={}\">; rel=\"previous\", ",
                 link_string,
@@ -140,11 +140,14 @@ impl PaginationResponsePart {
         }
         link_string = format!(
             "{}<\"{}?page={}&per_page={}\">; rel=\"first\", ",
-            link_string, link_first_part, 0, self.x_per_page
+            link_string, link_first_part, 1, self.x_per_page
         );
         link_string = format!(
             "{}<\"{}?page={}&per_page={}\">; rel=\"last\"",
-            link_string, link_first_part, self.x_total_pages, self.x_per_page
+            link_string,
+            link_first_part,
+            self.x_total_pages.max(1),
+            self.x_per_page
         );
         link_string
     }
@@ -153,6 +156,86 @@ impl PaginationResponsePart {
 #[cfg(test)]
 mod prp_test {
     use crate::api::PaginationResponsePart;
+    #[test]
+    fn test_link_header() {
+        let prp = PaginationResponsePart::new(0, None, Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 2);
+
+        let prp = PaginationResponsePart::new(100, Some(1), Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=2&per_page=16\">; rel=\"next\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 3);
+
+        let prp = PaginationResponsePart::new(100, Some(2), Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=3&per_page=16\">; rel=\"next\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"previous\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 4);
+    }
 
     #[test]
     fn test_start_and_end() {
