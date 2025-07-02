@@ -462,9 +462,9 @@ pub async fn sitzung_by_param(
 	)
 
 SELECT * FROM pre_table WHERE
-lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
+lastmod > COALESCE($3::timestamptz,'1940-01-01T20:20:20Z') AND
 lastmod < COALESCE($4, NOW()) AND
-(CAST ($6 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
+($6::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
 ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
@@ -517,14 +517,14 @@ pub async fn vorgang_by_parameter(
             AND vorgang.wahlperiode = COALESCE($1, vorgang.wahlperiode)
             AND vt.value = COALESCE($2, vt.value)
 			AND parlament.value= COALESCE($3, parlament.value)
-			AND (CAST($4 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person = $4))
-			AND (CAST($5 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation = $5))
-			AND (CAST($6 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet = $6))
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person = $4))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation = $5))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet = $6))
         GROUP BY vorgang.id
         ORDER BY lastmod
         )
 SELECT * FROM pre_table WHERE
-lastmod > COALESCE($7, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) 
+lastmod > COALESCE($7::timestamptz, '1940-01-01T20:20:20Z') 
 AND lastmod < COALESCE($8, NOW())
 ORDER BY pre_table.lastmod ASC
 ",params.wp, params.vgtyp.map(|x|x.to_string()),

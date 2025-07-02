@@ -95,7 +95,7 @@ impl PaginationResponsePart {
         let x_per_page = x_per_page
             .map(|x| x.clamp(0, Self::MAX_PER_PAGE))
             .unwrap_or(Self::DEFAULT_PER_PAGE);
-        let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil() as i32;
+        let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil().max(1.) as i32;
         let x_page = x_page.map(|x| x.clamp(1, x_total_pages)).unwrap_or(1);
 
         Self {

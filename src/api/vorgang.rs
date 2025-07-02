@@ -181,7 +181,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         }
         let dbid = sqlx::query!(
             "SELECT id FROM vorgang WHERE api_id = $1 AND EXISTS (
-                SELECT 1 FROM station s WHERE s.zp_modifiziert > COALESCE($2, CAST('1940-01-01T00:00:00Z' AS TIMESTAMPTZ)) AND s.vg_id = vorgang.id
+                SELECT 1 FROM station s WHERE s.zp_modifiziert > COALESCE($2::timestamptz, '1940-01-01T00:00:00Z') AND s.vg_id = vorgang.id
             )",
             path_params.vorgang_id,
             header_params.if_modified_since

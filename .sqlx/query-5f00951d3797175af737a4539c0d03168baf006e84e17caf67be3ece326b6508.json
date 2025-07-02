@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM autor WHERE\n            ($1::text IS NULL OR person = COALESCE($1, person)) AND\n            organisation = COALESCE($2, organisation) AND\n            ($3::text IS NULL OR fachgebiet = COALESCE($3, fachgebiet))\n            ORDER BY organisation ASC, person ASC, fachgebiet ASC\n            LIMIT $4 OFFSET $5\n            ",
+  "query": "SELECT * FROM autor WHERE id = ANY($1::int4[])",
   "describe": {
     "columns": [
       {
@@ -31,11 +31,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Varchar",
-        "Text",
-        "Int8",
-        "Int8"
+        "Int4Array"
       ]
     },
     "nullable": [
@@ -46,5 +42,5 @@
       true
     ]
   },
-  "hash": "c317b9fc24cfe6375de8a85f8c618519593dd2ec0d40a76a9940be6417d227b3"
+  "hash": "5f00951d3797175af737a4539c0d03168baf006e84e17caf67be3ece326b6508"
 }

@@ -24,45 +24,42 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        let author_count = sqlx::query!(
-            "SELECT COUNT(1) as cnt FROM autor WHERE
-            person = COALESCE($1, person) AND
-            organisation = COALESCE($2, organisation) AND
-            fachgebiet = COALESCE($3, fachgebiet)
+        tracing::info!("Autoren Get with Query Params {:?}", query_params);
+        let result = sqlx::query!(
+            "SELECT a.id FROM autor a WHERE
+            ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND
+            organisation LIKE CONCAT('%',$2::text,'%') AND
+            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet LIKE CONCAT('%', $3, '%'))
             ",
             query_params.person,
             query_params.org,
             query_params.fach,
         )
-        .map(|r| r.cnt)
-        .fetch_one(&mut *tx)
-        .await?
-        .unwrap() as i32;
+        .map(|r| r.id)
+        .fetch_all(&mut *tx)
+        .await?;
 
-        let prp =
-            PaginationResponsePart::new(author_count, query_params.page, query_params.per_page);
+        let prp = PaginationResponsePart::new(
+            result.len() as i32,
+            query_params.page,
+            query_params.per_page,
+        );
+        let result = &result[prp.start()..prp.end()];
         let output = sqlx::query!(
-            "SELECT * FROM autor WHERE
-            ($1::text IS NULL OR person = COALESCE($1, person)) AND
-            organisation = COALESCE($2, organisation) AND
-            ($3::text IS NULL OR fachgebiet = COALESCE($3, fachgebiet))
-            ORDER BY organisation ASC, person ASC, fachgebiet ASC
-            LIMIT $4 OFFSET $5
-            ",
-            query_params.person,
-            query_params.org,
-            query_params.fach,
-            prp.limit(),
-            prp.offset()
+            "SELECT * FROM autor WHERE id = ANY($1::int4[])",
+            &result[..]
         )
         .map(|r| models::Autor {
             fachgebiet: r.fachgebiet,
-            person: r.person,
             lobbyregister: r.lobbyregister,
             organisation: r.organisation,
+            person: r.person,
         })
         .fetch_all(&mut *tx)
         .await?;
+
+        tx.commit().await?;
+
         if output.is_empty() {
             return Ok(AutorenGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
@@ -70,7 +67,6 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        tx.commit().await?;
         return Ok(AutorenGetResponse::Status200_Success {
             body: output,
             x_rate_limit_limit: None,
@@ -92,13 +88,13 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::GremienGetQueryParams,
     ) -> Result<GremienGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
+        tracing::info!("Gremien Get with Query Params {:?}", query_params);
         let mut result = sqlx::query!(
             "SELECT g.id FROM gremium g
         INNER JOIN parlament p ON p.id = g.parl 
         WHERE p.value = COALESCE($1, p.value) AND
         g.wp = COALESCE($2, g.wp) AND
-        ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))
-        ",
+        ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))",
             query_params.p.map(|x| x.to_string()),
             query_params.wp,
             query_params.gr
@@ -219,7 +215,9 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             x_total_pages: Some(prp.x_total_pages),
             x_page: Some(prp.x_page),
             x_per_page: Some(prp.x_per_page),
-            link: Some(prp.generate_link_header(&format!("/api/v1/enum/{}", path_params.name))),
+            link: Some(
+                prp.generate_link_header(&format!("/api/v1/enumeration/{}", path_params.name)),
+            ),
         });
     }
 
