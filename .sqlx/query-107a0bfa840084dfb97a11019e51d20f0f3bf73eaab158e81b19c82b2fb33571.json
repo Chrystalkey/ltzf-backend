@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id FROM sitzung WHERE api_id = $1\n        AND last_update > COALESCE($2::timestamptz, '1940-01-01T00:00:00');",
+  "query": "SELECT id FROM sitzung WHERE api_id = $1\n        AND last_update > COALESCE($2::timestamptz, '1940-01-01T00:00:00');",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       false
     ]
   },
-  "hash": "0ba8010d4d13fe0966277e2966840b5e0b6bcc2fe13387a876753eaedf3f4af2"
+  "hash": "107a0bfa840084dfb97a11019e51d20f0f3bf73eaab158e81b19c82b2fb33571"
 }

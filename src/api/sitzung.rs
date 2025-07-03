@@ -354,8 +354,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         }
 
         let id = sqlx::query!(
-            "
-        SELECT id FROM sitzung WHERE api_id = $1
+            "SELECT id FROM sitzung WHERE api_id = $1
         AND last_update > COALESCE($2::timestamptz, '1940-01-01T00:00:00');",
             api_id,
             header_params.if_modified_since

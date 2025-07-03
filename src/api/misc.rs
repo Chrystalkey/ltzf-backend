@@ -29,8 +29,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             "SELECT a.id FROM autor a WHERE
             ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND
             organisation LIKE CONCAT('%',$2::text,'%') AND
-            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet LIKE CONCAT('%', $3, '%'))
-            ",
+            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet LIKE CONCAT('%', $3, '%'))",
             query_params.person,
             query_params.org,
             query_params.fach,

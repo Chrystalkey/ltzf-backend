@@ -7,7 +7,7 @@ pub(crate) mod utils;
 
 use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
+use axum::{extract::DefaultBodyLimit, http::Method};
 use clap::Parser;
 
 use error::LTZFError;
@@ -15,6 +15,7 @@ use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use sha256::digest;
 use tokio::net::TcpListener;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
+use tower_http::{cors, limit};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
@@ -168,12 +169,19 @@ async fn main() -> Result<()> {
     });
     let rate_limiter = GovernorLayer { config: rl_config };
     let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
-    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(body_size_limit);
+    let request_size_limit = limit::RequestBodyLimitLayer::new(body_size_limit);
+    let cors_layer = cors::CorsLayer::new()
+        .allow_methods(vec![Method::GET])
+        .allow_origin(cors::AllowOrigin::any())
+        .expose_headers(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
 
     let app = openapi::server::new(state.clone())
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
-        .layer(rate_limiter);
+        .layer(rate_limiter)
+        .layer(cors_layer);
+
     tracing::debug!("Constructed Router");
     tracing::info!(
         "Starting Server on {}:{}",
