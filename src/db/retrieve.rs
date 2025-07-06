@@ -447,7 +447,7 @@ pub async fn sitzung_by_param(
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
 		AND g.wp = 		COALESCE($2, g.wp)
-        AND (SIMILARITY(g.name, $5) > 0.66 OR $5 IS NULL)
+        AND ($5::text IS NULL OR g.name LIKE CONCAT('%', $5, '%'))
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -517,9 +517,9 @@ pub async fn vorgang_by_parameter(
             AND vorgang.wahlperiode = COALESCE($1, vorgang.wahlperiode)
             AND vt.value = COALESCE($2, vt.value)
 			AND parlament.value= COALESCE($3, parlament.value)
-			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person = $4))
-			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation = $5))
-			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet = $6))
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%')))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%')))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%')))
         GROUP BY vorgang.id
         ORDER BY lastmod
         )

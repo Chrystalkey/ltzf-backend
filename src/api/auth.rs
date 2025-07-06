@@ -192,12 +192,14 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         body: &models::CreateApiKey,
     ) -> Result<AuthPostResponse> {
         if claims.0 != APIScope::KeyAdder {
+            tracing::warn!("Permissions Insufficient");
             return Ok(AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
+        tracing::debug!("Key Creation Requested!");
         let key = generate_api_key().await;
         let key_digest = digest(key.clone());
 
@@ -228,6 +230,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         body: &openapi::models::AuthRotateRequest,
     ) -> Result<AuthRotateResponse> {
         if claims.0 != APIScope::KeyAdder {
+            tracing::warn!("Permissions Insufficient");
             return Ok(AuthRotateResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
