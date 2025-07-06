@@ -428,7 +428,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             });
         }
         let params = retrieve::SitzungFilterParameters {
-            gremium_like: None,
+            gremium_like: query_params.gr.clone(),
             parlament: query_params.p,
             wp: query_params.wp.map(|x| x as u32),
             since: range.as_ref().unwrap().since,
