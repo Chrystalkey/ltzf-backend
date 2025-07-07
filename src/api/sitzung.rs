@@ -941,6 +941,7 @@ mod sitzung_test {
                     },
                     &models::SGetQueryParams {
                         page: None,
+                        gr: None,
                         per_page: None,
                         p: Some(models::Parlament::Bt),
                         since: None,
@@ -973,6 +974,7 @@ mod sitzung_test {
                     &models::SGetQueryParams {
                         page: None,
                         per_page: None,
+                        gr: None,
                         p: None,
                         since: Some(Utc::now()),
                         until: Some(Utc::now() - chrono::Duration::days(365)),
@@ -1032,6 +1034,7 @@ mod sitzung_test {
                         per_page: None,
                         p: Some(models::Parlament::Bt),
                         since: None,
+                        gr: None,
                         until: None,
                         wp: Some(20),
                         vgid: None,
@@ -1061,6 +1064,7 @@ mod sitzung_test {
                         per_page: None,
                         p: Some(models::Parlament::Bt),
                         since: None,
+                        gr: None,
                         until: None,
                         wp: Some(20),
                         vgid: None,
@@ -1089,6 +1093,7 @@ mod sitzung_test {
                     },
                     &models::SGetQueryParams {
                         page: None,
+                        gr: None,
                         per_page: None,
                         p: Some(models::Parlament::Bt),
                         since: None,

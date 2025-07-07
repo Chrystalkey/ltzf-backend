@@ -153,7 +153,7 @@ async fn main() -> Result<()> {
     let rl_config = Arc::new(
         GovernorConfigBuilder::default()
             .const_per_second(2)
-            .const_burst_size(32)
+            .const_burst_size(128)
             .key_extractor(GlobalKeyExtractor)
             .finish()
             .unwrap(),
