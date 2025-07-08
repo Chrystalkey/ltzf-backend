@@ -62,10 +62,18 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         _method: &axum::http::Method,
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
+        query_params: &models::PingQueryParams,
     ) -> Result<PingResponse> {
-        tracing::debug!("Pong");
+        if let Some(t) = query_params.t {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64();
+            tracing::debug!("Ping with one-way time: {} s", current_time - t);
+        }
         Ok(PingResponse::Status200_Pong)
     }
+
     async fn status(
         &self,
         _method: &axum::http::Method,
