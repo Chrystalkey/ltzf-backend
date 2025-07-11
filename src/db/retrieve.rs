@@ -517,9 +517,9 @@ pub async fn vorgang_by_parameter(
             AND vorgang.wahlperiode = COALESCE($1, vorgang.wahlperiode)
             AND vt.value = COALESCE($2, vt.value)
 			AND parlament.value= COALESCE($3, parlament.value)
-			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%')))
-			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%')))
-			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%')))
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
         GROUP BY vorgang.id
         ORDER BY lastmod
         )

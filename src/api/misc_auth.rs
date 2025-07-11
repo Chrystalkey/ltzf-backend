@@ -209,6 +209,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         .bind::<_>(&path_params.item)
         .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(EnumDeleteResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -594,6 +595,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         path_params: &models::EnumPutPathParams,
         body: &models::EnumPutRequest,
     ) -> Result<EnumPutResponse> {
+        tracing::info!("{:?}", path_params);
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
             return Ok(EnumPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
