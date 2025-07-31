@@ -81,7 +81,7 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
 
 /// bei gleichem Vorgang => Vorraussetzung
 /// 1. wenn die api_id matcht
-/// 2. wenn typ, parlament, gremium matcht und mindestens ein Dokument gleich ist
+/// 2. wenn typ und gremium matchen und mindestens ein Dokument gleich ist
 pub async fn station_merge_candidates(
     model: &models::Station,
     vorgang: i32,
@@ -102,20 +102,16 @@ pub async fn station_merge_candidates(
             }
         })
         .collect();
-    let (gr_name, gr_wp, gr_parl) = if let Some(gremium) = &model.gremium {
-        (
-            Some(gremium.name.clone()),
-            Some(gremium.wahlperiode as i32),
-            Some(gremium.parlament.to_string()),
-        )
-    } else {
-        (None, None, None)
-    };
+    let (gr_name, gr_wp, gr_parl) = (
+        model.gremium.name.clone(),
+        model.gremium.wahlperiode as i32,
+        model.gremium.parlament.to_string(),
+    );
     let result = sqlx::query!(
         "SELECT s.id, s.api_id FROM station s
     INNER JOIN stationstyp st ON st.id=s.typ
-    LEFT JOIN gremium g ON g.id=s.gr_id
-    LEFT JOIN parlament p ON p.id = g.parl
+    INNER JOIN gremium g ON g.id=s.gr_id
+    INNER JOIN parlament p ON p.id = g.parl
     WHERE s.api_id = $1 OR
     (s.vg_id = $2 AND st.value = $3 AND  -- vorgang und stationstyp übereinstimmen
     (g.name = $4 OR $4 IS NULL) AND  -- gremiumname übereinstimmt

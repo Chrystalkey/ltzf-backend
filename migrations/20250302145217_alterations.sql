@@ -16,3 +16,10 @@ ALTER TABLE parlament ADD UNIQUE(value);
 ALTER TABLE dokumententyp ADD UNIQUE(value);
 ALTER TABLE schlagwort ADD UNIQUE(value);
 ALTER TABLE stationstyp ADD UNIQUE(value);
+
+-- make gr_id NOT NULL and remove p_id column
+ALTER TABLE station DROP COLUMN p_id;
+ALTER TABLE station DROP CONSTRAINT station_gr_id_fkey;
+UPDATE station SET gr_id = 0 WHERE gr_id IS NULL;
+ALTER TABLE station ALTER COLUMN gr_id SET NOT NULL;
+ALTER TABLE station ADD CONSTRAINT station_gr_id_fkey FOREIGN KEY (gr_id) REFERENCES gremium(id) ON DELETE CASCADE;

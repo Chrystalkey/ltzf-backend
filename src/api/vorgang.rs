@@ -600,7 +600,7 @@ mod test_endpoints {
                     &models::VorgangGetQueryParams {
                         page: Some(0),
                         per_page: Some(32),
-                        p: Some(models::Parlament::Bt),
+                        p: Some(models::Parlament::Bb),
                         since: None,
                         until: None,
                         vgtyp: Some(test_vorgang.typ),

@@ -159,7 +159,6 @@ pub(crate) mod test {
                         .to_utc(),
                 ),
                 trojanergefahr: Some(2u8),
-                parlament: models::Parlament::Bb,
                 schlagworte: Some(vec!["stationär".to_string()]),
                 touched_by: None,
                 stellungnahmen: Some(vec![default_stellungnahme()]),
@@ -169,7 +168,7 @@ pub(crate) mod test {
                 dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
                     default_dokument(),
                 ))],
-                gremium: Some(default_gremium()),
+                gremium: default_gremium(),
             }
         }
         pub(crate) fn default_gremium() -> models::Gremium {

@@ -522,6 +522,8 @@ impl Ord for WrappedAutor {
 pub(crate) mod endpoint_test {
     use openapi::models;
 
+    use crate::utils::test::generate::default_gremium;
+
     // Session (Sitzung) tests
     pub(crate) fn create_test_session() -> models::Sitzung {
         use chrono::Utc;
@@ -596,8 +598,8 @@ pub(crate) mod endpoint_test {
     pub(crate) fn create_test_vorgang() -> models::Vorgang {
         use chrono::Utc;
         use openapi::models::{
-            Autor, Doktyp, Dokument, Parlament, Station, StationDokumenteInner, Stationstyp,
-            VgIdent, VgIdentTyp, Vorgang, Vorgangstyp,
+            Autor, Doktyp, Dokument, Station, StationDokumenteInner, Stationstyp, VgIdent,
+            VgIdentTyp, Vorgang, Vorgangstyp,
         };
         use uuid::Uuid;
 
@@ -639,8 +641,7 @@ pub(crate) mod endpoint_test {
             link: Some("http://example.com".to_string()),
             trojanergefahr: None,
             zp_modifiziert: Some(Utc::now()),
-            parlament: Parlament::Bt,
-            gremium: None,
+            gremium: default_gremium(),
             schlagworte: None,
             additional_links: None,
             stellungnahmen: None,

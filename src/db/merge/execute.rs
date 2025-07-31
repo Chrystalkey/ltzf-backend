@@ -87,27 +87,20 @@ pub async fn execute_merge_station(
         .fetch_one(&mut **tx)
         .await?;
     // pre-master updates
-    let gr_id = if let Some(gremium) = &model.gremium {
-        let id = insert::insert_or_retrieve_gremium(gremium, tx, srv).await?;
-        Some(id)
-    } else {
-        None
-    };
+    let gr_id = insert::insert_or_retrieve_gremium(&model.gremium, tx, srv).await?;
     // master update
     sqlx::query!(
         "UPDATE station SET 
         gr_id = COALESCE($2, gr_id),
-        p_id = (SELECT id FROM parlament WHERE value = $3),
-        typ = (SELECT id FROM stationstyp WHERE value = $4),
-        titel = COALESCE($5, titel),
-        zp_start = $6, zp_modifiziert = COALESCE($7, NOW()),
-        trojanergefahr = COALESCE($8, trojanergefahr),
-        link = COALESCE($9, link),
-        gremium_isff = $10
+        typ = (SELECT id FROM stationstyp WHERE value = $3),
+        titel = COALESCE($4, titel),
+        zp_start = $5, zp_modifiziert = COALESCE($6, NOW()),
+        trojanergefahr = COALESCE($7, trojanergefahr),
+        link = COALESCE($8, link),
+        gremium_isff = $9
         WHERE station.id = $1",
         db_id,
         gr_id,
-        model.parlament.to_string(),
         srv.guard_ts(model.typ, sapi, obj)?,
         model.titel,
         model.zp_start,

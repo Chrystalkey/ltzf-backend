@@ -189,7 +189,8 @@ pub async fn station_by_id(
     let temp_stat = sqlx::query!(
         "SELECT s.*, p.value as parlv, st.value as stattyp
         FROM station s
-        INNER JOIN parlament p ON p.id = s.p_id
+        INNER JOIN gremium g ON g.id = s.gr_id
+        INNER JOIN parlament p ON p.id = g.parl
         INNER JOIN stationstyp st ON st.id = s.typ
         WHERE s.id=$1",
         id
@@ -210,13 +211,11 @@ pub async fn station_by_id(
         parlament: models::Parlament::from_str(&x.value).unwrap(),
         link: x.link,
     })
-    .fetch_optional(&mut **executor)
+    .fetch_one(&mut **executor)
     .await?;
 
     Ok(models::Station {
         touched_by: None,
-        parlament: models::Parlament::from_str(temp_stat.parlv.as_str())
-            .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         dokumente: doks,
@@ -509,14 +508,15 @@ pub async fn vorgang_by_parameter(
 ) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
     let mut vg_list = sqlx::query!(
         "WITH pre_table AS (
-        SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang
+        SELECT vorgang.id, MAX(ext_stat.zp_start) as lastmod FROM vorgang
             INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
-            LEFT JOIN station ON station.vg_id = vorgang.id
-			INNER JOIN parlament on parlament.id = station.p_id
+            LEFT JOIN (SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
+            INNER JOIN gremium g ON g.id = s.gr_id
+			INNER JOIN parlament on parlament.id = g.parl) AS ext_stat ON ext_stat.vg_id = vorgang.id
             WHERE TRUE
-            AND vorgang.wahlperiode = COALESCE($1, vorgang.wahlperiode)
-            AND vt.value = COALESCE($2, vt.value)
-			AND parlament.value= COALESCE($3, parlament.value)
+            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
+            AND ($2::text IS NULL OR $2 = vt.value)
+            AND ($3::text IS NULL OR $3 = ext_stat.parl)
 			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
 			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
 			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))

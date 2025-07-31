@@ -161,26 +161,19 @@ pub async fn insert_station(
     {
         return Ok(id.id);
     }
-    let gr_id = if let Some(gremium) = stat.gremium {
-        let gr_id = insert_or_retrieve_gremium(&gremium, tx, srv).await?;
-        Some(gr_id)
-    } else {
-        None
-    };
+    let gr_id = insert_or_retrieve_gremium(&stat.gremium, tx, srv).await?;
     let stat_id = sqlx::query!(
         "INSERT INTO station 
-        (api_id, gr_id, link, p_id, titel, trojanergefahr, typ, 
+        (api_id, gr_id, link, titel, trojanergefahr, typ, 
         zp_start, vg_id, zp_modifiziert, gremium_isff)
         VALUES
-        ($1, $2, $3,
-        (SELECT id FROM parlament   WHERE value = $4), $5, $6,
-        (SELECT id FROM stationstyp WHERE value = $7), $8, $9, 
-        COALESCE($10, NOW()), $11)
+        ($1, $2, $3, $4, $5,
+        (SELECT id FROM stationstyp WHERE value = $6), $7, $8, 
+        COALESCE($9, NOW()), $10)
         RETURNING station.id",
         sapi,
         gr_id,
         stat.link,
-        stat.parlament.to_string(),
         stat.titel,
         stat.trojanergefahr.map(|x| x as i32),
         srv.guard_ts(stat.typ, sapi, obj)?,

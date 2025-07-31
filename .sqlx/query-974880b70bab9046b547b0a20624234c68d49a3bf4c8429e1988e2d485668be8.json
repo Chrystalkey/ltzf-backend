@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH pre_table AS (\n        SELECT vorgang.id, MAX(ext_stat.zp_start) as lastmod FROM vorgang\n            INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ\n            LEFT JOIN (SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s\n            INNER JOIN gremium g ON g.id = s.gr_id\n\t\t\tINNER JOIN parlament on parlament.id = g.parl) AS ext_stat ON ext_stat.vg_id = vorgang.id\n            WHERE TRUE\n            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)\n            AND ($2::text IS NULL OR $2 = vt.value)\n            AND ($3::text IS NULL OR $3 = ext_stat.parl)\n\t\t\tAND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))\n\t\t\tAND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))\n\t\t\tAND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))\n        GROUP BY vorgang.id\n        ORDER BY lastmod\n        )\nSELECT * FROM pre_table WHERE\nlastmod > COALESCE($7::timestamptz, '1940-01-01T20:20:20Z') \nAND lastmod < COALESCE($8, NOW())\nORDER BY pre_table.lastmod ASC\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "lastmod",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "974880b70bab9046b547b0a20624234c68d49a3bf4c8429e1988e2d485668be8"
+}

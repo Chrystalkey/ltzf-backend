@@ -302,7 +302,6 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
             || s1.gremium != s2.gremium
             || s1.gremium_federf != s2.gremium_federf
             || s1.link != s2.link
-            || s1.parlament != s2.parlament
             || s1.typ != s2.typ
             || s1.trojanergefahr != s2.trojanergefahr
             || s1.schlagworte != s2.schlagworte
@@ -1122,59 +1121,6 @@ mod tests {
     }
 
     #[test]
-    fn test_compare_station_all_fields() {
-        // Test comprehensive station field comparison
-        let station1 = create_test_station("00000000-0000-0000-0000-000000000001");
-        let mut station2 = station1.clone();
-
-        // Test all station fields individually
-
-        // api_id
-        station2.api_id =
-            Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap());
-        // Can't test this directly since compare_station is not public, but it's tested via compare_vorgang
-
-        // titel
-        station2 = station1.clone();
-        station2.titel = Some("Different Station Title".to_string());
-        // Test via vorgang comparison
-
-        // gremium
-        station2 = station1.clone();
-        if let Some(ref mut gremium) = station2.gremium {
-            gremium.name = "Different Gremium".to_string();
-        }
-
-        // gremium_federf
-        station2 = station1.clone();
-        station2.gremium_federf = Some(false);
-
-        // link
-        station2 = station1.clone();
-        station2.link = Some("https://different-station.com".to_string());
-
-        // parlament
-        station2 = station1.clone();
-        station2.parlament = models::Parlament::Br;
-
-        // typ
-        station2 = station1.clone();
-        station2.typ = models::Stationstyp::ParlVollvlsgn;
-
-        // trojanergefahr
-        station2 = station1.clone();
-        station2.trojanergefahr = Some(8);
-
-        // schlagworte
-        station2 = station1.clone();
-        station2.schlagworte = Some(vec!["Different1".to_string(), "Different2".to_string()]);
-
-        // additional_links
-        station2 = station1.clone();
-        station2.additional_links = Some(vec!["https://additional-different.com".to_string()]);
-    }
-
-    #[test]
     fn test_compare_autor_comprehensive() {
         // Test autor comparison comprehensively via dokument comparison
         let doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
@@ -1460,15 +1406,14 @@ mod tests {
             zp_start: create_test_datetime(),
             touched_by: None,
             zp_modifiziert: Some(create_test_datetime()),
-            gremium: Some(models::Gremium {
+            gremium: models::Gremium {
                 parlament: models::Parlament::Bt,
                 wahlperiode: 19,
                 name: "Test Station Gremium".to_string(),
                 link: Some("https://station-gremium.com".to_string()),
-            }),
+            },
             gremium_federf: Some(true),
             link: Some("https://test.com".to_string()),
-            parlament: models::Parlament::Bt,
             typ: models::Stationstyp::ParlInitiativ,
             trojanergefahr: Some(5),
             schlagworte: Some(vec!["Test1".to_string(), "Test2".to_string()]),

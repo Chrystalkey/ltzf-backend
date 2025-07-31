@@ -715,7 +715,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         let rep_new: Vec<_> = replacement_tuples.iter().map(|x| x.0).collect();
         let rep_old: Vec<_> = replacement_tuples.iter().map(|x| x.1).collect();
         // referencing tables:
-        // parlament: gremium(parl) / station(p_id)
+        // parlament: gremium(parl)
         // dokumententyp: dokument(typ)
         // stationstyp: station(typ)
         // vg_ident_typ: rel_vorgang_ident(typ)
@@ -725,10 +725,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             vec![
                 (
                     models::EnumerationNames::Parlamente,
-                    // not a key component, not a key component !! THIS IS NOW A TODO !!
-                    BTreeSet::from_iter(
-                        vec![("gremium", "parl", None), ("station", "p_id", None)].drain(..),
-                    ),
+                    // not a key component
+                    BTreeSet::from_iter(vec![("gremium", "parl", None)].drain(..)),
                 ),
                 (
                     models::EnumerationNames::Dokumententypen,
@@ -1207,22 +1205,22 @@ mod test_authorisiert {
         let std_station = generate::default_station();
         vorgang.stationen.push(models::Station {
             api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-aaaa-deadbeef106e").unwrap()),
-            gremium: Some(models::Gremium {
+            gremium: models::Gremium {
                 link: None,
                 name: "abc123".to_string(),
                 parlament: models::Parlament::Br,
                 wahlperiode: 17,
-            }),
+            },
             ..std_station.clone()
         });
         vorgang.stationen.push(models::Station {
             api_id: Some(uuid::Uuid::from_str("b18bde64-c0ff-eeee-bbbb-deadbeef106e").unwrap()),
-            gremium: Some(models::Gremium {
+            gremium: models::Gremium {
                 link: None,
                 name: "rrrrrr".to_string(),
                 parlament: models::Parlament::Bt,
                 wahlperiode: 12,
-            }),
+            },
             ..std_station.clone()
         });
 
@@ -1771,7 +1769,9 @@ mod test_authorisiert {
                 },
             )
             .await
-            .unwrap_or_else(|_| panic!("On test case {tp} // {new_entry} // {other_new_entry}"));
+            .unwrap_or_else(|x| {
+                panic!("On test case {tp} // {new_entry} // {other_new_entry} with error {x}")
+            });
             assert!(matches!(
                 response,
                 EnumPutResponse::Status201_Created { .. }

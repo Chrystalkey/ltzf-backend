@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE station SET \n        gr_id = COALESCE($2, gr_id),\n        typ = (SELECT id FROM stationstyp WHERE value = $3),\n        titel = COALESCE($4, titel),\n        zp_start = $5, zp_modifiziert = COALESCE($6, NOW()),\n        trojanergefahr = COALESCE($7, trojanergefahr),\n        link = COALESCE($8, link),\n        gremium_isff = $9\n        WHERE station.id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Varchar",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6379fae7b05c97aca98a6755fd1980d205bfe82134060e68e1b5e2459820e6cd"
+}
