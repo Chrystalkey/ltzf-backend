@@ -160,17 +160,8 @@ pub fn compare_sitzung(s1: &Sitzung, s2: &Sitzung) -> bool {
         return false;
     }
     if let (Some(docs1), Some(docs2)) = (&s1.dokumente, &s2.dokumente) {
-        if docs1.len() != docs2.len() {
+        if !comp_dokvec(docs1, docs2) {
             return false;
-        }
-        let mut sorted_docs1 = docs1.clone();
-        let mut sorted_docs2 = docs2.clone();
-        sorted_docs1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-        sorted_docs2.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-        for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
-            if !compare_dokument(d1, d2) {
-                return false;
-            }
         }
     }
 
@@ -199,7 +190,56 @@ pub fn compare_sitzung(s1: &Sitzung, s2: &Sitzung) -> bool {
 
     true
 }
-
+pub fn comp_dokvec(dv1: &[StationDokumenteInner], dv2: &[StationDokumenteInner]) -> bool {
+    if dv1.len() != dv2.len() {
+        return false;
+    }
+    let mut sorted_docs1 = dv1.to_owned();
+    let mut sorted_docs2 = dv2.to_owned();
+    sorted_docs1.sort_by(|a, b| match (a, b) {
+        (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+            a.api_id.cmp(&b.api_id)
+        }
+        (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => a.cmp(b),
+        (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+            std::cmp::Ordering::Less
+        }
+        (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_)) => {
+            std::cmp::Ordering::Greater
+        }
+    });
+    sorted_docs2.sort_by(|a, b| match (a, b) {
+        (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+            a.api_id.cmp(&b.api_id)
+        }
+        (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => a.cmp(b),
+        (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+            std::cmp::Ordering::Less
+        }
+        (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_)) => {
+            std::cmp::Ordering::Greater
+        }
+    });
+    for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
+        match (d1, d2) {
+            (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => {
+                if *a != *b {
+                    return false;
+                }
+            }
+            (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_))
+            | (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+                return false;
+            }
+            (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+                if !compare_dokument(a, b) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
 pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
     // Compare basic fields
     if vg1.api_id != vg2.api_id
@@ -314,55 +354,21 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
         if s1.dokumente.len() != s2.dokumente.len() {
             return false;
         }
-        let mut docs1 = s1.dokumente.clone();
-        let mut docs2 = s2.dokumente.clone();
-        docs1.sort_by(|a, b| match (a, b) {
-            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
-                d1.api_id.cmp(&d2.api_id)
-            }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
-            _ => std::cmp::Ordering::Equal,
-        });
-        docs2.sort_by(|a, b| match (a, b) {
-            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
-                d1.api_id.cmp(&d2.api_id)
-            }
-            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
-            _ => std::cmp::Ordering::Equal,
-        });
-        for (d1, d2) in docs1.iter().zip(docs2.iter()) {
-            match (d1, d2) {
-                (StationDokumenteInner::Dokument(doc1), StationDokumenteInner::Dokument(doc2)) => {
-                    if !compare_dokument(doc1, doc2) {
-                        return false;
-                    }
-                }
-                (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => {
-                    if s1 != s2 {
-                        return false;
-                    }
-                }
-                _ => return false, // Different variants
-            }
+        if !comp_dokvec(&s1.dokumente, &s2.dokumente) {
+            return false;
         }
 
         // Compare stellungnahmen - order independent
         if s1.stellungnahmen.is_some() != s2.stellungnahmen.is_some() {
             return false;
         }
-        if let (Some(st1), Some(st2)) = (&s1.stellungnahmen, &s2.stellungnahmen) {
-            if st1.len() != st2.len() {
-                return false;
-            }
-            let mut sorted_st1 = st1.clone();
-            let mut sorted_st2 = st2.clone();
-            sorted_st1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            sorted_st2.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            for (d1, d2) in sorted_st1.iter().zip(sorted_st2.iter()) {
-                if !compare_dokument(d1, d2) {
-                    return false;
-                }
-            }
+        if s1.stellungnahmen.is_some()
+            && !comp_dokvec(
+                s1.stellungnahmen.as_ref().unwrap(),
+                s2.stellungnahmen.as_ref().unwrap(),
+            )
+        {
+            return false;
         }
     }
 
@@ -809,7 +815,9 @@ mod tests {
 
         // Different dokument content
         if let Some(docs) = &mut sitz2.dokumente {
-            docs[0] = create_test_dokument("00000000-0000-0000-0000-000000000005");
+            docs[0] = StationDokumenteInner::Dokument(Box::new(create_test_dokument(
+                "00000000-0000-0000-0000-000000000005",
+            )));
         }
         assert!(!compare_sitzung(&sitz1, &sitz2));
 
@@ -1103,7 +1111,9 @@ mod tests {
             &mut vg1.stationen[0].stellungnahmen,
             &mut vg2.stationen[0].stellungnahmen,
         ) {
-            st2[0] = create_test_dokument("00000000-0000-0000-0000-000000000007");
+            st2[0] = StationDokumenteInner::Dokument(Box::new(create_test_dokument(
+                "00000000-0000-0000-0000-000000000007",
+            )));
         }
         assert!(!compare_vorgang(&vg1, &vg2));
 
@@ -1389,8 +1399,8 @@ mod tests {
             link: Some("https://test.com".to_string()),
             tops: vec![create_test_top(1), create_test_top(2)],
             dokumente: Some(vec![
-                create_test_dokument("00000000-0000-0000-0000-000000000003"),
-                create_test_dokument("00000000-0000-0000-0000-000000000004"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000003"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000004"),
             ]),
             experten: Some(vec![
                 create_test_autor("Experte 1"),
@@ -1426,8 +1436,8 @@ mod tests {
                 create_test_dokref_dokument("00000000-0000-0000-0000-000000000002"),
             ],
             stellungnahmen: Some(vec![
-                create_test_dokument("00000000-0000-0000-0000-000000000005"),
-                create_test_dokument("00000000-0000-0000-0000-000000000006"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000005"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000006"),
             ]),
         }
     }

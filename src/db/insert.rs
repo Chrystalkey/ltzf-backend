@@ -214,16 +214,7 @@ pub async fn insert_station(
     if let Some(stln) = stat.stellungnahmen {
         let mut doks = Vec::with_capacity(stln.len());
         for stln in stln {
-            doks.push(
-                insert_or_retrieve_dok(
-                    &models::StationDokumenteInner::Dokument(Box::new(stln.clone())),
-                    scraper_id,
-                    collector_key,
-                    tx,
-                    srv,
-                )
-                .await?,
-            );
+            doks.push(insert_or_retrieve_dok(&stln, scraper_id, collector_key, tx, srv).await?);
         }
         sqlx::query!(
             "INSERT INTO rel_station_stln (stat_id, dok_id)

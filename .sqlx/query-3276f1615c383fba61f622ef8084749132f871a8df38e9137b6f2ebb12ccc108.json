@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT api_id FROM rel_station_stln rss \n        INNER JOIN dokument d ON d.id = rss.dok_id \n        WHERE rss.stat_id = $1\n        ORDER BY d.link ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3276f1615c383fba61f622ef8084749132f871a8df38e9137b6f2ebb12ccc108"
+}

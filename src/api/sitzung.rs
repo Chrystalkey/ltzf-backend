@@ -16,6 +16,31 @@ use uuid::Uuid;
 use super::auth::{self, APIScope};
 use super::{compare::*, find_applicable_date_range};
 
+fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
+    let mut st = st.clone();
+    for t in &mut st.tops {
+        if t.dokumente.is_none() {
+            continue;
+        }
+        for d in t.dokumente.as_mut().unwrap() {
+            if let models::StationDokumenteInner::Dokument(dok) = d {
+                *d = models::StationDokumenteInner::String(Box::new(
+                    dok.api_id.unwrap().to_string(),
+                ));
+            }
+        }
+    }
+    if st.dokumente.is_none() {
+        return st;
+    }
+    for d in st.dokumente.as_mut().unwrap() {
+        if let models::StationDokumenteInner::Dokument(dok) = d {
+            *d = models::StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+        }
+    }
+    st
+}
+
 #[async_trait]
 impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
@@ -65,7 +90,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             .await?;
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
-            if compare_sitzung(&db_cmpvg, body) {
+            if compare_sitzung(&db_cmpvg, &st_to_uuiddoks(body)) {
                 return Ok(SidPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,

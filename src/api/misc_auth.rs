@@ -921,7 +921,7 @@ mod test_authorisiert {
     use openapi::apis::miscellaneous_unauthorisiert::{
         GremienGetResponse, MiscellaneousUnauthorisiert,
     };
-    use openapi::models::{self, EnumerationNames};
+    use openapi::models::{self, EnumerationNames, StationDokumenteInner};
 
     use crate::LTZFServer;
     use crate::utils::test::{TestSetup, generate};
@@ -1605,13 +1605,15 @@ mod test_authorisiert {
             person: Some("Heribert Schnakenwurst IV".to_string()),
             ..generate::default_autor_person()
         };
+        let mut mod_stln = generate::default_dokument();
+        mod_stln.autoren.push(mod_autor.clone());
+
         let mut modified_default = generate::default_vorgang();
         modified_default.stationen[0]
             .stellungnahmen
             .as_mut()
-            .unwrap()[0]
-            .autoren
-            .push(mod_autor.clone());
+            .unwrap()[0] = StationDokumenteInner::Dokument(Box::new(mod_stln));
+
         run_integration(&modified_default, uuid::Uuid::nil(), 1, &scenario.server)
             .await
             .unwrap(); // insert one that can be merged

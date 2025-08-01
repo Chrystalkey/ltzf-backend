@@ -71,6 +71,72 @@ pub async fn execute_merge_dokument(
     tracing::info!("Merging Dokument into Database successful");
     Ok(())
 }
+pub async fn insert_or_merge_dok(
+    dok: &models::StationDokumenteInner,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
+    tx: &mut sqlx::PgTransaction<'_>,
+    srv: &LTZFServer,
+) -> Result<Option<i32>> {
+    match dok {
+        models::StationDokumenteInner::String(uuid) => {
+            let uuid = uuid::Uuid::parse_str(uuid)?;
+            let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
+                .map(|r| r.id)
+                .fetch_optional(&mut **tx)
+                .await?;
+            if let Some(id) = id {
+                Ok(Some(id))
+            } else {
+                Err(DataValidationError::IncompleteDataSupplied {
+                    input: format!("Supplied uuid `{uuid}` as document id without a body, but no such ID is in the database.") }.into())
+            }
+        }
+        models::StationDokumenteInner::Dokument(dok) => {
+            let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
+            match matches {
+                MatchState::NoMatch => {
+                    let did = crate::db::insert::insert_dokument(
+                        (**dok).clone(),
+                        scraper_id,
+                        collector_key,
+                        tx,
+                        srv,
+                    )
+                    .await?;
+                    Ok(Some(did))
+                }
+                MatchState::ExactlyOne(matchmod) => {
+                    tracing::debug!(
+                        "Found exactly one match with db id: {}. Merging...",
+                        matchmod
+                    );
+                    execute_merge_dokument(dok, matchmod, tx, srv).await?;
+                    Ok(None)
+                }
+                MatchState::Ambiguous(matches) => {
+                    let api_ids = sqlx::query!(
+                        "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
+                        &matches[..]
+                    )
+                    .map(|r| r.api_id)
+                    .fetch_all(&mut **tx)
+                    .await?;
+                    notify_ambiguous_match(
+                        api_ids,
+                        &**dok,
+                        "execute merge station.dokumente",
+                        srv,
+                    )?;
+                    Err(DataValidationError::AmbiguousMatch {
+                        message: "Ambiguous document match(station), see notification".to_string(),
+                    }
+                    .into())
+                }
+            }
+        }
+    }
+}
 
 pub async fn execute_merge_station(
     model: &models::Station,
@@ -128,66 +194,13 @@ pub async fn execute_merge_station(
 
     // dokumente::UNION
     let mut insert_ids = vec![];
+
     for dok in model.dokumente.iter() {
         // if id & not in database: fail.
         // if id & in database: add to list of associated documents
         // if document: match & integrate or insert.
-        match dok {
-            models::StationDokumenteInner::String(uuid) => {
-                let uuid = uuid::Uuid::parse_str(uuid)?;
-                let id = sqlx::query!("SELECT id FROM dokument d WHERE d.api_id = $1", uuid)
-                    .map(|r| r.id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-                if id.is_none() {
-                    return Err(DataValidationError::IncompleteDataSupplied {
-                        input: format!("Supplied uuid `{uuid}` as document id for station `{sapi}`, but no such ID is in the database.") }.into());
-                }
-                insert_ids.push(id.unwrap());
-            }
-            models::StationDokumenteInner::Dokument(dok) => {
-                let matches = dokument_merge_candidates(dok, &mut **tx, srv).await?;
-                match matches {
-                    MatchState::NoMatch => {
-                        let did = crate::db::insert::insert_dokument(
-                            (**dok).clone(),
-                            scraper_id,
-                            collector_key,
-                            tx,
-                            srv,
-                        )
-                        .await?;
-                        insert_ids.push(did);
-                    }
-                    MatchState::ExactlyOne(matchmod) => {
-                        tracing::debug!(
-                            "Found exactly one match with db id: {}. Merging...",
-                            matchmod
-                        );
-                        execute_merge_dokument(dok, matchmod, tx, srv).await?;
-                    }
-                    MatchState::Ambiguous(matches) => {
-                        let api_ids = sqlx::query!(
-                            "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
-                            &matches[..]
-                        )
-                        .map(|r| r.api_id)
-                        .fetch_all(&mut **tx)
-                        .await?;
-                        notify_ambiguous_match(
-                            api_ids,
-                            &**dok,
-                            "execute merge station.dokumente",
-                            srv,
-                        )?;
-                        return Err(DataValidationError::AmbiguousMatch {
-                            message: "Ambiguous document match(station), see notification"
-                                .to_string(),
-                        }
-                        .into());
-                    }
-                }
-            }
+        if let Some(id) = insert_or_merge_dok(dok, scraper_id, collector_key, tx, srv).await? {
+            insert_ids.push(id);
         }
         sqlx::query!(
             "INSERT INTO rel_station_dokument(stat_id, dok_id) 
@@ -200,37 +213,19 @@ pub async fn execute_merge_station(
     }
 
     // stellungnahmen
+    let mut insert_ids = vec![];
     for stln in model.stellungnahmen.as_ref().unwrap_or(&vec![]) {
-        match dokument_merge_candidates(stln, &mut **tx, srv).await? {
-            MatchState::NoMatch => {
-                let did = insert::insert_dokument(stln.clone(), scraper_id, collector_key, tx, srv)
-                    .await?;
-                sqlx::query!(
-                    "INSERT INTO rel_station_stln(stat_id, dok_id) VALUES($1, $2) ON CONFLICT DO NOTHING;",
-                    db_id,
-                    did
-                )
-                .execute(&mut **tx)
-                .await?;
-            }
-            MatchState::ExactlyOne(did) => {
-                execute_merge_dokument(stln, did, tx, srv).await?;
-            }
-            MatchState::Ambiguous(matches) => {
-                let api_ids = sqlx::query!(
-                    "SELECT api_id FROM dokument WHERE id = ANY($1::int4[])",
-                    &matches[..]
-                )
-                .map(|r| r.api_id)
-                .fetch_all(&mut **tx)
-                .await?;
-                notify_ambiguous_match(api_ids, stln, "execute merge station.stellungnahmen", srv)?;
-                return Err(DataValidationError::AmbiguousMatch {
-                    message: "Ambiguous document match(Stln), see notification".to_string(),
-                }
-                .into());
-            }
-        };
+        if let Some(id) = insert_or_merge_dok(stln, scraper_id, collector_key, tx, srv).await? {
+            insert_ids.push(id);
+        }
+        sqlx::query!(
+            "INSERT INTO rel_station_stln(stat_id, dok_id) 
+            SELECT $1, did FROM UNNEST($2::int4[]) as did",
+            db_id,
+            &insert_ids[..]
+        )
+        .execute(&mut **tx)
+        .await?;
     }
     tracing::info!("Merging Station into Database successful");
     Ok(())
@@ -454,7 +449,7 @@ mod scenariotest {
         },
         db::retrieve,
     };
-    use openapi::models;
+    use openapi::models::{self, StationDokumenteInner};
     use sha256::digest;
     use std::str::FromStr;
     use uuid::Uuid;
@@ -631,7 +626,25 @@ mod scenariotest {
             Ok(())
         }
     }
-
+    fn vg_to_expected(vg: &models::Vorgang) -> models::Vorgang {
+        let mut vg = vg.clone();
+        for s in &mut vg.stationen {
+            for d in &mut s.dokumente {
+                if let StationDokumenteInner::Dokument(dok) = d {
+                    *d = StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+                }
+            }
+            if s.stellungnahmen.is_none() {
+                continue;
+            }
+            for d in s.stellungnahmen.as_mut().unwrap() {
+                if let StationDokumenteInner::Dokument(dok) = d {
+                    *d = StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+                }
+            }
+        }
+        return vg;
+    }
     // one in, again one in, one out
     #[tokio::test]
     async fn test_idempotenz() {
@@ -639,7 +652,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg.clone()],
             object: vg.clone(),
-            expected: vec![vg],
+            expected: vec![vg_to_expected(&vg)],
             name: "idempotenz",
             shouldfail: false,
         };
@@ -662,7 +675,7 @@ mod scenariotest {
             shouldfail: false,
             context: vec![vg],
             object: vg2,
-            expected: vec![vg_exp],
+            expected: vec![vg_to_expected(&vg_exp)],
         };
         scenario.run().await.unwrap();
     }
@@ -711,7 +724,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg],
             object: vg_mod,
-            expected: vec![vg_exp],
+            expected: vec![vg_to_expected(&vg_exp)],
             name: "link_ini_ids_merging",
             shouldfail: false,
         };
@@ -728,7 +741,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg.clone()],
             object: vg_mod.clone(),
-            expected: vec![vg_mod],
+            expected: vec![vg_to_expected(&vg_mod)],
             name: "weak_prop_change_override",
             shouldfail: false,
         };
@@ -751,7 +764,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg.clone()],
             object: vg2.clone(),
-            expected: vec![vg, vg2],
+            expected: vec![vg_to_expected(&vg), vg_to_expected(&vg2)],
             name: "not_merged_but_separate",
             shouldfail: false,
         };
@@ -772,7 +785,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg],
             object: vg2,
-            expected: vec![vg_exp],
+            expected: vec![vg_to_expected(&vg_exp)],
             shouldfail: false,
             name: "schlagwort_duplicate_elimination_and_formatting",
         };
@@ -792,7 +805,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![vg],
             object: vg2.clone(),
-            expected: vec![vg2],
+            expected: vec![vg_to_expected(&vg2)],
             name: "station_weak_props_change",
             shouldfail: false,
         };
@@ -816,7 +829,9 @@ mod scenariotest {
                 dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
                     modified_dokument.clone(),
                 ))],
-                stellungnahmen: Some(vec![modified_stellungnahme.clone()]),
+                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    modified_stellungnahme.clone(),
+                ))]),
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()
@@ -829,10 +844,12 @@ mod scenariotest {
                         ..modified_dokument.clone()
                     },
                 ))],
-                stellungnahmen: Some(vec![models::Dokument {
-                    api_id: generate::default_stellungnahme().api_id,
-                    ..modified_stellungnahme.clone()
-                }]),
+                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    models::Dokument {
+                        api_id: generate::default_stellungnahme().api_id,
+                        ..modified_stellungnahme.clone()
+                    },
+                ))]),
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()
@@ -840,7 +857,7 @@ mod scenariotest {
         let scenario = Scenario {
             context: vec![generate::default_vorgang()],
             object: modified_docs_vorgang,
-            expected: vec![expected_vorgang],
+            expected: vec![vg_to_expected(&expected_vorgang)],
             name: "dokument_merging_on_weak_property_changes",
             shouldfail: false,
         };

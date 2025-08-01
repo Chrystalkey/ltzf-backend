@@ -142,35 +142,26 @@ pub async fn station_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Station> {
-    let dokids = sqlx::query!(
-        "SELECT dok_id FROM rel_station_dokument WHERE stat_id = $1",
+    let doks = sqlx::query!(
+        "SELECT d.api_id FROM rel_station_dokument rsd
+        INNER JOIN dokument d ON d.id = rsd.dok_id
+        WHERE rsd.stat_id = $1
+        ORDER BY d.link ASC",
         id
     )
-    .map(|r| r.dok_id)
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
     .fetch_all(&mut **executor)
     .await?;
-    let mut doks = Vec::with_capacity(dokids.len());
-    for did in dokids {
-        doks.push(dokument_by_id(did, executor).await?.into());
-    }
-    doks.sort_by(|a, b| match (a, b) {
-        (
-            models::StationDokumenteInner::Dokument(a),
-            models::StationDokumenteInner::Dokument(b),
-        ) => a.link.cmp(&b.link),
-        _ => {
-            unreachable!("If this is the case document extraction failed")
-        }
-    });
-    let stlid = sqlx::query!("SELECT dok_id FROM rel_station_stln WHERE stat_id = $1", id)
-        .map(|r| r.dok_id)
-        .fetch_all(&mut **executor)
-        .await?;
-    let mut stellungnahmen = Vec::with_capacity(stlid.len());
-    for sid in stlid {
-        stellungnahmen.push(dokument_by_id(sid, executor).await?);
-    }
-    stellungnahmen.sort_by(|a, b| a.link.cmp(&b.link));
+    let stellungnahmen = sqlx::query!(
+        "SELECT api_id FROM rel_station_stln rss 
+        INNER JOIN dokument d ON d.id = rss.dok_id 
+        WHERE rss.stat_id = $1
+        ORDER BY d.link ASC",
+        id
+    )
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .fetch_all(&mut **executor)
+    .await?;
     let sw = sqlx::query!(
         "SELECT DISTINCT(value) FROM rel_station_schlagwort r
         LEFT JOIN schlagwort sw ON sw.id = r.sw_id
@@ -305,23 +296,18 @@ pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<mode
         .fetch_one(&mut **tx)
         .await?;
     // ds
-    let dids = sqlx::query!("SELECT dok_id FROM tops_doks td WHERE top_id = $1", id)
-        .map(|r| r.dok_id)
-        .fetch_all(&mut **tx)
-        .await?;
-    let mut doks = vec![];
-    for did in dids {
-        doks.push(dokument_by_id(did, tx).await?.into());
-    }
-    doks.sort_by(|a, b| match (a, b) {
-        (
-            models::StationDokumenteInner::Dokument(a),
-            models::StationDokumenteInner::Dokument(b),
-        ) => a.link.cmp(&b.link),
-        _ => {
-            unreachable!("If this is the case document extraction failed")
-        }
-    });
+    let doks = sqlx::query!(
+        "
+    SELECT d.api_id
+    FROM tops_doks td 
+    INNER JOIN dokument d ON td.dok_id = d.id
+    WHERE td.top_id = $1
+    ORDER BY d.link ASC",
+        id
+    )
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .fetch_all(&mut **tx)
+    .await?;
     // vgs
     let vgs = sqlx::query!(
         "
@@ -393,16 +379,13 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     .await?;
 
     let dids = sqlx::query!(
-        "SELECT dok_id from reL_station_dokument WHERE stat_id = $1",
+        "SELECT api_id from rel_station_dokument rsd
+        INNER JOIN dokument d ON d.id = rsd.dok_id WHERE rsd.stat_id = $1",
         id
     )
-    .map(|r| r.dok_id)
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
     .fetch_all(&mut **tx)
     .await?;
-    let mut doks = vec![];
-    for d in dids {
-        doks.push(dokument_by_id(d, tx).await?);
-    }
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
         touched_by: None,
@@ -419,7 +402,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         tops,
         link: scaffold.as_link,
         experten: as_option(experten),
-        dokumente: as_option(doks),
+        dokumente: as_option(dids),
     })
 }
 

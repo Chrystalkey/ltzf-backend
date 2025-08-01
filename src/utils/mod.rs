@@ -161,7 +161,9 @@ pub(crate) mod test {
                 trojanergefahr: Some(2u8),
                 schlagworte: Some(vec!["stationär".to_string()]),
                 touched_by: None,
-                stellungnahmen: Some(vec![default_stellungnahme()]),
+                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    default_stellungnahme(),
+                ))]),
                 additional_links: Some(vec![
                     "https://example.com/videos/aus/der/hoelle".to_string(),
                 ]),
@@ -272,7 +274,9 @@ pub(crate) mod test {
                 public: true,
                 link: Some("https://klogefueh.le".to_string()),
                 tops: vec![default_top()],
-                dokumente: Some(vec![default_dokument()]),
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    default_dokument(),
+                ))]),
                 experten: Some(vec![default_autor_experte()]),
             }
         }
