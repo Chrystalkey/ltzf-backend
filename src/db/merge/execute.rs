@@ -450,7 +450,6 @@ mod scenariotest {
         db::retrieve,
     };
     use openapi::models::{self, StationDokumenteInner};
-    use sha256::digest;
     use std::str::FromStr;
     use uuid::Uuid;
 
@@ -472,63 +471,7 @@ mod scenariotest {
             Ok(())
         }
         async fn setup(&self) -> Result<LTZFServer> {
-            let dburl = std::env::var("DATABASE_URL")
-                .expect("Expected to find working DATABASE_URL for testing");
-            let config = crate::Configuration {
-                mail_server: None,
-                mail_user: None,
-                mail_password: None,
-                mail_sender: None,
-                mail_recipient: None,
-                host: "localhost".to_string(),
-                port: 80,
-                db_url: dburl.clone(),
-                config: None,
-                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
-                merge_title_similarity: 0.8,
-            };
-            let master_server = LTZFServer {
-                config: config.clone(),
-                mailbundle: None,
-                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
-            };
-            let dropquery = format!(
-                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
-                self.name
-            );
-            let query = format!(
-                "CREATE DATABASE \"testing_{}\" WITH OWNER 'ltzf-user';",
-                self.name
-            );
-            sqlx::query(&dropquery)
-                .execute(&master_server.sqlx_db)
-                .await?;
-            sqlx::query(&query).execute(&master_server.sqlx_db).await?;
-
-            let db_url = config
-                .db_url
-                .replace("5432/ltzf", &format!("5432/testing_{}", self.name));
-            let oconfig = crate::Configuration {
-                db_url: db_url.clone(),
-                ..config
-            };
-            let out_server = LTZFServer {
-                config: oconfig,
-                mailbundle: None,
-                sqlx_db: sqlx::postgres::PgPool::connect(&db_url).await?,
-            };
-            sqlx::migrate!().run(&out_server.sqlx_db).await?;
-
-            // insert api key
-            let keyadder_hash = digest(out_server.config.keyadder_key.as_str());
-            sqlx::query!(
-                "INSERT INTO api_keys(key_hash, scope, created_by)
-                VALUES
-                ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-                ON CONFLICT DO NOTHING;", keyadder_hash)
-            .execute(&out_server.sqlx_db).await?;
-
-            Ok(out_server)
+            generate::setup_server(self.name).await
         }
 
         async fn teardown(&self) -> Result<()> {
@@ -813,7 +756,6 @@ mod scenariotest {
     }
     #[tokio::test]
     async fn test_dokument_merging_on_weak_property_changes() {
-        // TODO: Dokument & Stellungnahme
         let modified_dokument = models::Dokument {
             api_id: Some(Uuid::from_str("b18bee64-c0ff-ff0c-ff1c-deadbeef4732").unwrap()),
             titel: "Anderer Titel".to_string(),

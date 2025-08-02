@@ -189,12 +189,59 @@ pub async fn dokument_merge_candidates(
 
 #[cfg(test)]
 mod candid_test {
+    use crate::api::auth;
+    use crate::{db::merge::MatchState, utils::test::generate};
+    use axum::http::Method;
+    use axum_extra::extract::{CookieJar, Host};
+    use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
+    use openapi::models;
 
     #[tokio::test]
     async fn vorgang_test() {
+        let vgs = vec![
+            generate::vorgang_with_seed(0),
+            generate::vorgang_with_seed(1),
+            generate::vorgang_with_seed(2),
+            generate::vorgang_with_seed(3),
+            generate::vorgang_with_seed(4),
+            generate::vorgang_with_seed(5),
+            generate::vorgang_with_seed(6),
+        ];
+        let srv = generate::setup_server("test_vorgang_candidates")
+            .await
+            .unwrap();
         // insert vorgang 1,2,3, ...
+        for vg in vgs.iter() {
+            let r = srv
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::VorgangIdPutPathParams {
+                        vorgang_id: vg.api_id,
+                    },
+                    vg,
+                )
+                .await
+                .unwrap();
+            assert!(matches!(r, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }));
+        }
+        let mut tx = srv.sqlx_db.begin().await.unwrap();
         // check wether all conditions are "enough" to find a specific station
-        // check wether insufficient uniqueness conditions yield appropriate results
+
+        for vg in vgs.iter() {
+            let candidate =
+                super::vorgang_merge_candidates(&models::Vorgang { ..vg.clone() }, &mut *tx, &srv)
+                    .await
+                    .unwrap();
+            assert!(matches!(candidate, MatchState::ExactlyOne(_)));
+        }
+        // check wether insufficient uniqueness conditions yield appropriate results:
+        // no match for something not in the db
+        // TODO!
+        // ambiguous match for ambiguous conditions
+        // TODO!
     }
     #[tokio::test]
     async fn station_test() {
