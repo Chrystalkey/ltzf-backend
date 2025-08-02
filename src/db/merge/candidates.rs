@@ -190,6 +190,7 @@ pub async fn dokument_merge_candidates(
 #[cfg(test)]
 mod candid_test {
     use crate::api::auth;
+    use crate::utils::test::generate::default_vorgang;
     use crate::{db::merge::MatchState, utils::test::generate};
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
@@ -229,19 +230,23 @@ mod candid_test {
         }
         let mut tx = srv.sqlx_db.begin().await.unwrap();
         // check wether all conditions are "enough" to find a specific station
-
-        for vg in vgs.iter() {
-            let candidate =
-                super::vorgang_merge_candidates(&models::Vorgang { ..vg.clone() }, &mut *tx, &srv)
-                    .await
-                    .unwrap();
-            assert!(matches!(candidate, MatchState::ExactlyOne(_)));
-        }
+        let mod_v0 = models::Vorgang {
+            api_id: uuid::Uuid::nil(),
+            ..vgs[0].clone()
+        };
+        // matching on exactly one if only differing el is the api_id
+        let candidate = super::vorgang_merge_candidates(&mod_v0, &mut *tx, &srv)
+            .await
+            .unwrap();
+        assert!(matches!(candidate, MatchState::ExactlyOne(_)));
         // check wether insufficient uniqueness conditions yield appropriate results:
         // no match for something not in the db
-        // TODO!
+        let candidate = super::vorgang_merge_candidates(&default_vorgang(), &mut *tx, &srv)
+            .await
+            .unwrap();
+        assert!(matches!(candidate, MatchState::NoMatch));
         // ambiguous match for ambiguous conditions
-        // TODO!
+        // TODO
     }
     #[tokio::test]
     async fn station_test() {

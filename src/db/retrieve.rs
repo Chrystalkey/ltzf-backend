@@ -190,9 +190,8 @@ pub async fn station_by_id(
     .await?;
 
     let gremium = sqlx::query!(
-        "
-    SELECT p.value, g.name, g.wp, 
-    g.link FROM gremium g INNER JOIN parlament p on p.id = g.parl
+        "SELECT p.value, g.name, g.wp, g.link 
+        FROM gremium g INNER JOIN parlament p on p.id = g.parl
         WHERE g.id = $1",
         temp_stat.gr_id
     )
@@ -428,7 +427,7 @@ pub async fn sitzung_by_param(
 		INNER JOIN gremium g ON g.id = a.gr_id
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
-		AND g.wp = 		COALESCE($2, g.wp)
+		AND g.wp      = COALESCE($2, g.wp)
         AND ($5::text IS NULL OR g.name LIKE CONCAT('%', $5, '%'))
         GROUP BY a.id
         ORDER BY lastmod
@@ -572,12 +571,9 @@ pub(crate) async fn count_existing_authors(
         "SELECT COUNT(1) as cnt FROM 
         UNNEST($1::text[], $2::text[]) as iv(person, orga)
         WHERE EXISTS (
-            SELECT 1 FROM autor a
-        WHERE 
-            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) AND
-            a.organisation = iv.orga
-        )
-        ",
+            SELECT 1 FROM autor a WHERE 
+            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) 
+            AND a.organisation = iv.orga)",
         &person[..] as &[Option<String>],
         &organisation[..]
     )
