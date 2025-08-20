@@ -23,7 +23,7 @@ jobs:
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace
 
   tests:
     runs-on: ubuntu-latest

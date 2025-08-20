@@ -320,11 +320,11 @@ pub fn find_applicable_date_range(
 
     let mut since_min = ifmodsince;
     let mut until_min = until;
-    if since.is_some() {
+    if let Some(since) = since {
         if since_min.is_some() {
-            since_min = Some(since_min.unwrap().min(since.unwrap()));
+            since_min = Some(since_min.unwrap().min(since));
         } else {
-            since_min = since;
+            since_min = Some(since);
         }
     }
     if let Some((ymd_s, ymd_u)) = ymd_date_range {
