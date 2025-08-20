@@ -28,10 +28,6 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 #[derive(Parser, Clone, Debug, Default)]
 #[command(author, version, about)]
 pub struct Configuration {
-    #[arg(long, env="REQUEST_LIMIT_COUNT", help="global request count that is per interval", default_value="4096")]
-    pub req_limit_count: u32,
-    #[arg(long, env="REQUEST_LIMIT_INTERVAL", help="(whole) number of seconds", default_value="2")]
-    pub req_limit_interval: u32,
     #[arg(long, env = "MAIL_SERVER")]
     pub mail_server: Option<String>,
     #[arg(long, env = "MAIL_USER")]
@@ -60,6 +56,27 @@ pub struct Configuration {
 
     #[arg(long, env = "MERGE_TITLE_SIMILARITY", default_value = "0.8")]
     pub merge_title_similarity: f32,
+    #[arg(
+        long,
+        env = "REQUEST_LIMIT_COUNT",
+        help = "global request count that is per interval",
+        default_value = "4096"
+    )]
+    pub req_limit_count: u32,
+    #[arg(
+        long,
+        env = "REQUEST_LIMIT_INTERVAL",
+        help = "(whole) number of seconds",
+        default_value = "2"
+    )]
+    pub req_limit_interval: u32,
+    #[arg(
+        long,
+        env = "PER_OBJECT_SCRAPER_LOG_SIZE",
+        help = "Size of the queue keeping track of which scraper touched an object",
+        default_value = "5"
+    )]
+    pub per_object_scraper_log_size: u32,
 }
 
 impl Configuration {
@@ -154,7 +171,10 @@ async fn main() -> Result<()> {
     tracing::debug!("Constructed Server State");
 
     // Init Axum router
-    let (iv, cnt) = (state.config.req_limit_interval as u64, state.config.req_limit_count);
+    let (iv, cnt) = (
+        state.config.req_limit_interval as u64,
+        state.config.req_limit_count,
+    );
     let rl_config = Arc::new(
         GovernorConfigBuilder::default()
             .const_per_second(iv)

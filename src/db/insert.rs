@@ -101,6 +101,25 @@ pub async fn insert_vorgang(
     .execute(&mut **tx)
     .await?;
 
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT vg_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY vg_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_vorgang
+        )
+        DELETE FROM scraper_touched_vorgang stv
+        USING ranked_objects ro
+        WHERE stv.vg_id=ro.vg_id AND
+        stv.scraper=ro.scraper AND
+        ro.rn > $1",
+        server.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
+
     // insert Lobbyregister
     if let Some(lobbyr) = &vg.lobbyregister {
         for l in lobbyr {
@@ -136,6 +155,24 @@ pub async fn insert_vorgang(
         &stat_ids[..],
         collector_key,
         scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT stat_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY stat_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_station
+        )
+        DELETE FROM scraper_touched_station st
+        USING ranked_objects ro
+        WHERE st.stat_id=ro.stat_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        server.config.per_object_scraper_log_size as i64
     )
     .execute(&mut **tx)
     .await?;
@@ -279,16 +316,6 @@ pub async fn insert_dokument(
     .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
-    sqlx::query!(
-        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
-        VALUES ($1, $2, $3) ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
-        did,
-        collector_key,
-        scraper_id
-    )
-    .execute(&mut **tx)
-    .await?;
-
     // Schlagworte
     insert_dok_sw(did, dok.schlagworte.unwrap_or_default(), tx).await?;
 
@@ -313,6 +340,24 @@ pub async fn insert_dokument(
         did,
         collector_key,
         scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT dok_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY dok_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_dokument
+        )
+        DELETE FROM scraper_touched_dokument st
+        USING ranked_objects ro
+        WHERE st.dok_id=ro.dok_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
     )
     .execute(&mut **tx)
     .await?;
@@ -371,6 +416,24 @@ pub async fn insert_sitzung(
         id,
         collector_key,
         scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT sid, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY sid
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_sitzung
+        )
+        DELETE FROM scraper_touched_sitzung st
+        USING ranked_objects ro
+        WHERE st.sid=ro.sid AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
     )
     .execute(&mut **tx)
     .await?;

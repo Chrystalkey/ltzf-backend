@@ -24,6 +24,8 @@ use super::candidates::*;
 pub async fn execute_merge_dokument(
     model: &models::Dokument,
     candidate: i32,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<()> {
@@ -68,6 +70,34 @@ pub async fn execute_merge_dokument(
     .execute(&mut **tx)
     .await?;
 
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+    VALUES ($1, $2, $3) 
+    ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        db_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT dok_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY dok_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_dokument
+        )
+        DELETE FROM scraper_touched_dokument st
+        USING ranked_objects ro
+        WHERE st.dok_id=ro.dok_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
     tracing::info!("Merging Dokument into Database successful");
     Ok(())
 }
@@ -111,7 +141,8 @@ pub async fn insert_or_merge_dok(
                         "Found exactly one match with db id: {}. Merging...",
                         matchmod
                     );
-                    execute_merge_dokument(dok, matchmod, tx, srv).await?;
+                    execute_merge_dokument(dok, matchmod, scraper_id, collector_key, tx, srv)
+                        .await?;
                     Ok(None)
                 }
                 MatchState::Ambiguous(matches) => {
@@ -227,6 +258,33 @@ pub async fn execute_merge_station(
         .execute(&mut **tx)
         .await?;
     }
+    sqlx::query!(
+        "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
+        VALUES ($1, $2, $3) ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        db_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT stat_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY stat_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_station
+        )
+        DELETE FROM scraper_touched_station st
+        USING ranked_objects ro
+        WHERE st.stat_id=ro.stat_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
     tracing::info!("Merging Station into Database successful");
     Ok(())
 }
@@ -363,6 +421,34 @@ pub async fn execute_merge_vorgang(
         }
     }
 
+    sqlx::query!(
+        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        db_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT vg_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY vg_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_vorgang
+        )
+        DELETE FROM scraper_touched_vorgang stv
+        USING ranked_objects ro
+        WHERE stv.vg_id=ro.vg_id AND
+        stv.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
+
     tracing::info!(
         "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
         model.api_id,
@@ -483,6 +569,9 @@ mod scenariotest {
                 mail_password: None,
                 mail_sender: None,
                 mail_recipient: None,
+                per_object_scraper_log_size: 200,
+                req_limit_count: 4096,
+                req_limit_interval: 2,
                 host: "localhost".to_string(),
                 port: 80,
                 db_url: dburl.clone(),
