@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id FROM autor a WHERE\n            ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND\n            organisation LIKE CONCAT('%',$2::text,'%') AND\n            ($3::text IS NULL AND fachgebiet IS NULL OR fachgebiet LIKE CONCAT('%', $3, '%'))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "09f6f97d8760eb3f88d81f3a8ad7e61d52a9a2c0afa9f66f0a02ad0948ddca93"
+}

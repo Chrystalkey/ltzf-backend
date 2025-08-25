@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rel_station_stln(stat_id, dok_id) \n            SELECT $1, did FROM UNNEST($2::int4[]) as did",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d93339ea97703bb21922ce7d98f4f5519e721771d92e689d6f5c2014ef827fa9"
+}

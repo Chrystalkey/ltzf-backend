@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    SELECT d.api_id\n    FROM tops_doks td \n    INNER JOIN dokument d ON td.dok_id = d.id\n    WHERE td.top_id = $1\n    ORDER BY d.link ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7c19cfbceb7d1e83b39e07d40ee9ce4ea681a1f9ea2a5cff1b9387be3a5b6348"
+}

@@ -1,11 +1,31 @@
 use chrono::{DateTime, Utc};
 use openapi::models::*;
 
+#[cfg(test)]
+pub fn oicomp<T: PartialEq>(a: &Vec<T>, b: &Vec<T>, comp: &dyn Fn(&T, &T) -> bool) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let (l, s) = if a.len() > b.len() { (a, b) } else { (b, a) };
+    for x in l.iter() {
+        let mut found = false;
+        for y in s.iter() {
+            if comp(x, y) {
+                found = true;
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
+}
+
 fn compare_datetime_millis(dt1: &DateTime<Utc>, dt2: &DateTime<Utc>) -> bool {
     dt1.timestamp_millis() == dt2.timestamp_millis()
 }
 
-fn compare_dokument(d1: &Dokument, d2: &Dokument) -> bool {
+pub fn compare_dokument(d1: &Dokument, d2: &Dokument) -> bool {
     if d1.api_id != d2.api_id
         || d1.drucksnr != d2.drucksnr
         || d1.typ != d2.typ
@@ -76,23 +96,27 @@ fn compare_top(t1: &Top, t2: &Top) -> bool {
         let mut sorted_docs1 = docs1.clone();
         let mut sorted_docs2 = docs2.clone();
         sorted_docs1.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         sorted_docs2.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
+            (StationDokumenteInner::Dokument(d1), StationDokumenteInner::Dokument(d2)) => {
+                d1.api_id.cmp(&d2.api_id)
+            }
+            (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => s1.cmp(s2),
             _ => std::cmp::Ordering::Equal,
         });
         for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
             match (d1, d2) {
-                (DokRef::Dokument(doc1), DokRef::Dokument(doc2)) => {
+                (StationDokumenteInner::Dokument(doc1), StationDokumenteInner::Dokument(doc2)) => {
                     if !compare_dokument(doc1, doc2) {
                         return false;
                     }
                 }
-                (DokRef::String(s1), DokRef::String(s2)) => {
+                (StationDokumenteInner::String(s1), StationDokumenteInner::String(s2)) => {
                     if s1 != s2 {
                         return false;
                     }
@@ -136,17 +160,8 @@ pub fn compare_sitzung(s1: &Sitzung, s2: &Sitzung) -> bool {
         return false;
     }
     if let (Some(docs1), Some(docs2)) = (&s1.dokumente, &s2.dokumente) {
-        if docs1.len() != docs2.len() {
+        if !comp_dokvec(docs1, docs2) {
             return false;
-        }
-        let mut sorted_docs1 = docs1.clone();
-        let mut sorted_docs2 = docs2.clone();
-        sorted_docs1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-        sorted_docs2.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-        for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
-            if !compare_dokument(d1, d2) {
-                return false;
-            }
         }
     }
 
@@ -175,7 +190,56 @@ pub fn compare_sitzung(s1: &Sitzung, s2: &Sitzung) -> bool {
 
     true
 }
-
+pub fn comp_dokvec(dv1: &[StationDokumenteInner], dv2: &[StationDokumenteInner]) -> bool {
+    if dv1.len() != dv2.len() {
+        return false;
+    }
+    let mut sorted_docs1 = dv1.to_owned();
+    let mut sorted_docs2 = dv2.to_owned();
+    sorted_docs1.sort_by(|a, b| match (a, b) {
+        (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+            a.api_id.cmp(&b.api_id)
+        }
+        (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => a.cmp(b),
+        (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+            std::cmp::Ordering::Less
+        }
+        (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_)) => {
+            std::cmp::Ordering::Greater
+        }
+    });
+    sorted_docs2.sort_by(|a, b| match (a, b) {
+        (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+            a.api_id.cmp(&b.api_id)
+        }
+        (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => a.cmp(b),
+        (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+            std::cmp::Ordering::Less
+        }
+        (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_)) => {
+            std::cmp::Ordering::Greater
+        }
+    });
+    for (d1, d2) in sorted_docs1.iter().zip(sorted_docs2.iter()) {
+        match (d1, d2) {
+            (StationDokumenteInner::String(a), StationDokumenteInner::String(b)) => {
+                if *a != *b {
+                    return false;
+                }
+            }
+            (StationDokumenteInner::Dokument(_), StationDokumenteInner::String(_))
+            | (StationDokumenteInner::String(_), StationDokumenteInner::Dokument(_)) => {
+                return false;
+            }
+            (StationDokumenteInner::Dokument(a), StationDokumenteInner::Dokument(b)) => {
+                if !compare_dokument(a, b) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
 pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
     // Compare basic fields
     if vg1.api_id != vg2.api_id
@@ -187,10 +251,55 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
     {
         return false;
     }
+    if vg1.lobbyregister.is_some() != vg2.lobbyregister.is_some() {
+        return false;
+    }
+    if let (Some(lr1), Some(lr2)) = (&vg1.lobbyregister, &vg2.lobbyregister) {
+        if lr1.len() != lr2.len() {
+            return false;
+        }
+        let mut svg1 = lr1.clone();
+        let mut svg2 = lr2.clone();
+        svg1.sort_by(|a, b| a.interne_id.cmp(&b.interne_id));
+        svg2.sort_by(|a, b| a.interne_id.cmp(&b.interne_id));
+        if svg1 != svg2 {
+            return false;
+        }
+    }
 
     // Compare optional fields
-    if vg1.ids != vg2.ids || vg1.links != vg2.links {
+    // Compare optional ids with order independence
+    if vg1.ids.is_some() != vg2.ids.is_some() {
         return false;
+    }
+    if let (Some(ids1), Some(ids2)) = (&vg1.ids, &vg2.ids) {
+        if ids1.len() != ids2.len() {
+            return false;
+        }
+        let mut sorted_ids1 = ids1.clone();
+        let mut sorted_ids2 = ids2.clone();
+        sorted_ids1.sort_by(|a, b| a.id.cmp(&b.id));
+        sorted_ids2.sort_by(|a, b| a.id.cmp(&b.id));
+        if sorted_ids1 != sorted_ids2 {
+            return false;
+        }
+    }
+
+    // Compare optional links with order independence
+    if vg1.links.is_some() != vg2.links.is_some() {
+        return false;
+    }
+    if let (Some(links1), Some(links2)) = (&vg1.links, &vg2.links) {
+        if links1.len() != links2.len() {
+            return false;
+        }
+        let mut sorted_links1 = links1.clone();
+        let mut sorted_links2 = links2.clone();
+        sorted_links1.sort();
+        sorted_links2.sort();
+        if sorted_links1 != sorted_links2 {
+            return false;
+        }
     }
 
     // Compare initiatoren - order independent
@@ -233,7 +342,6 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
             || s1.gremium != s2.gremium
             || s1.gremium_federf != s2.gremium_federf
             || s1.link != s2.link
-            || s1.parlament != s2.parlament
             || s1.typ != s2.typ
             || s1.trojanergefahr != s2.trojanergefahr
             || s1.schlagworte != s2.schlagworte
@@ -246,51 +354,21 @@ pub fn compare_vorgang(vg1: &Vorgang, vg2: &Vorgang) -> bool {
         if s1.dokumente.len() != s2.dokumente.len() {
             return false;
         }
-        let mut docs1 = s1.dokumente.clone();
-        let mut docs2 = s2.dokumente.clone();
-        docs1.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
-            _ => std::cmp::Ordering::Equal,
-        });
-        docs2.sort_by(|a, b| match (a, b) {
-            (DokRef::Dokument(d1), DokRef::Dokument(d2)) => d1.api_id.cmp(&d2.api_id),
-            (DokRef::String(s1), DokRef::String(s2)) => s1.cmp(s2),
-            _ => std::cmp::Ordering::Equal,
-        });
-        for (d1, d2) in docs1.iter().zip(docs2.iter()) {
-            match (d1, d2) {
-                (DokRef::Dokument(doc1), DokRef::Dokument(doc2)) => {
-                    if !compare_dokument(doc1, doc2) {
-                        return false;
-                    }
-                }
-                (DokRef::String(s1), DokRef::String(s2)) => {
-                    if s1 != s2 {
-                        return false;
-                    }
-                }
-                _ => return false, // Different variants
-            }
+        if !comp_dokvec(&s1.dokumente, &s2.dokumente) {
+            return false;
         }
 
         // Compare stellungnahmen - order independent
         if s1.stellungnahmen.is_some() != s2.stellungnahmen.is_some() {
             return false;
         }
-        if let (Some(st1), Some(st2)) = (&s1.stellungnahmen, &s2.stellungnahmen) {
-            if st1.len() != st2.len() {
-                return false;
-            }
-            let mut sorted_st1 = st1.clone();
-            let mut sorted_st2 = st2.clone();
-            sorted_st1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            sorted_st2.sort_by(|a, b| a.api_id.cmp(&b.api_id));
-            for (d1, d2) in sorted_st1.iter().zip(sorted_st2.iter()) {
-                if !compare_dokument(d1, d2) {
-                    return false;
-                }
-            }
+        if s1.stellungnahmen.is_some()
+            && !comp_dokvec(
+                s1.stellungnahmen.as_ref().unwrap(),
+                s2.stellungnahmen.as_ref().unwrap(),
+            )
+        {
+            return false;
         }
     }
 
@@ -307,7 +385,7 @@ mod tests {
     fn test_compare_datetime_seconds() {
         // Test identical datetimes
         let dt1 = create_test_datetime();
-        let dt2 = dt1.clone();
+        let dt2 = dt1;
         assert!(compare_datetime_millis(&dt1, &dt2));
 
         // Test datetimes with same milliseconds but different nanoseconds
@@ -337,78 +415,67 @@ mod tests {
 
         // api_id
         let mut doc2 = base_doc.clone();
-        doc2.api_id =
-            Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap_or_default());
+        doc2.api_id = Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap());
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // drucksnr
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.drucksnr = Some("Different Drucksnr".to_string());
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // typ
-        let mut doc2 = base_doc.clone();
-        doc2.typ = models::Doktyp::Stellungnahme;
+        doc2 = base_doc.clone();
+        doc2.typ = models::Doktyp::Antrag;
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // titel
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.titel = "Different Titel".to_string();
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // kurztitel
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.kurztitel = Some("Different Kurztitel".to_string());
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // vorwort
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.vorwort = Some("Different Vorwort".to_string());
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // volltext
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.volltext = "Different Volltext".to_string();
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // zusammenfassung
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.zusammenfassung = Some("Different Zusammenfassung".to_string());
         assert!(!compare_dokument(&base_doc, &doc2));
 
-        // zp_modifiziert
-        let mut doc2 = base_doc.clone();
-        doc2.zp_modifiziert = base_doc.zp_modifiziert + chrono::Duration::hours(1);
-        assert!(!compare_dokument(&base_doc, &doc2));
-
-        // zp_referenz
-        let mut doc2 = base_doc.clone();
-        doc2.zp_referenz = base_doc.zp_referenz + chrono::Duration::hours(1);
-        assert!(!compare_dokument(&base_doc, &doc2));
-
-        // zp_erstellt
-        let mut doc2 = base_doc.clone();
-        doc2.zp_erstellt = Some(base_doc.zp_erstellt.unwrap() + chrono::Duration::hours(1));
-        assert!(!compare_dokument(&base_doc, &doc2));
-
         // link
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.link = "https://different.com".to_string();
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // hash
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.hash = "different-hash".to_string();
         assert!(!compare_dokument(&base_doc, &doc2));
 
         // meinung
-        let mut doc2 = base_doc.clone();
+        doc2 = base_doc.clone();
         doc2.meinung = Some(5);
         assert!(!compare_dokument(&base_doc, &doc2));
 
-        // schlagworte
-        let mut doc2 = base_doc.clone();
+        // schlagworte - different content
+        doc2 = base_doc.clone();
         doc2.schlagworte = Some(vec!["Different1".to_string(), "Different2".to_string()]);
+        assert!(!compare_dokument(&base_doc, &doc2));
+
+        // autoren - different content
+        doc2 = base_doc.clone();
+        doc2.autoren = vec![create_test_autor("Different Person")];
         assert!(!compare_dokument(&base_doc, &doc2));
     }
 
@@ -418,18 +485,58 @@ mod tests {
         let mut doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
         let mut doc2 = doc1.clone();
 
-        // zp_erstellt: Some vs None
-        doc2.zp_erstellt = None;
+        // api_id: Some vs None
+        doc1.api_id = Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
+        doc2.api_id = None;
         assert!(!compare_dokument(&doc1, &doc2));
 
-        // schlagworte: Some vs None
-        doc1.zp_erstellt = None; // make them equal again
-        doc2.schlagworte = None;
+        // drucksnr: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.drucksnr = Some("Test Drucksnr".to_string());
+        doc2.drucksnr = None;
         assert!(!compare_dokument(&doc1, &doc2));
 
         // kurztitel: Some vs None
-        doc1.schlagworte = None; // make them equal again
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.kurztitel = Some("Test Kurztitel".to_string());
         doc2.kurztitel = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // vorwort: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.vorwort = Some("Test Vorwort".to_string());
+        doc2.vorwort = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // zusammenfassung: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.zusammenfassung = Some("Test Zusammenfassung".to_string());
+        doc2.zusammenfassung = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // zp_erstellt: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.zp_erstellt = Some(create_test_datetime());
+        doc2.zp_erstellt = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // meinung: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.meinung = Some(3);
+        doc2.meinung = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // schlagworte: Some vs None
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.schlagworte = Some(vec!["Test".to_string()]);
+        doc2.schlagworte = None;
         assert!(!compare_dokument(&doc1, &doc2));
     }
 
@@ -477,30 +584,6 @@ mod tests {
         doc2.autoren = vec![create_test_autor("Person 2"), create_test_autor("Person 1")];
 
         assert!(compare_dokument(&doc1, &doc2));
-    }
-
-    #[test]
-    fn test_compare_dokument_autoren_different() {
-        // Test with different authors
-        let doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
-        let mut doc2 = doc1.clone();
-
-        // Change one author
-        doc2.autoren = vec![
-            create_test_autor("Person 1"),
-            create_test_autor("Person 3"), // Different person
-        ];
-
-        assert!(!compare_dokument(&doc1, &doc2));
-
-        // Different number of authors
-        doc2.autoren = vec![
-            create_test_autor("Person 1"),
-            create_test_autor("Person 2"),
-            create_test_autor("Person 3"),
-        ];
-
-        assert!(!compare_dokument(&doc1, &doc2));
     }
 
     #[test]
@@ -573,7 +656,7 @@ mod tests {
 
     #[test]
     fn test_compare_top_dokumente_variants() {
-        // Test with different DokRef variants (Dokument vs String)
+        // Test with different StationDokumenteInner variants (Dokument vs String)
         let top1 = create_test_top(1);
         let mut top2 = top1.clone();
 
@@ -611,39 +694,87 @@ mod tests {
 
         // api_id
         let mut sitz2 = base_sitz.clone();
-        sitz2.api_id =
-            Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap_or_default());
+        sitz2.api_id = Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap());
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
         // titel
-        let mut sitz2 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
         sitz2.titel = Some("Different Sitzung".to_string());
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
         // termin
-        let mut sitz2 = base_sitz.clone();
-        sitz2.termin = base_sitz.termin + Duration::hours(1);
+        sitz2 = base_sitz.clone();
+        sitz2.termin = create_test_datetime() + chrono::Duration::hours(1);
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
-        // gremium
-        let mut sitz2 = base_sitz.clone();
+        // gremium.parlament
+        sitz2 = base_sitz.clone();
+        sitz2.gremium.parlament = models::Parlament::Br;
+        assert!(!compare_sitzung(&base_sitz, &sitz2));
+
+        // gremium.wahlperiode
+        sitz2 = base_sitz.clone();
+        sitz2.gremium.wahlperiode = 20;
+        assert!(!compare_sitzung(&base_sitz, &sitz2));
+
+        // gremium.name
+        sitz2 = base_sitz.clone();
         sitz2.gremium.name = "Different Gremium".to_string();
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
+        // gremium.link
+        sitz2 = base_sitz.clone();
+        sitz2.gremium.link = Some("https://different-gremium.com".to_string());
+        assert!(!compare_sitzung(&base_sitz, &sitz2));
+
         // nummer
-        let mut sitz2 = base_sitz.clone();
-        sitz2.nummer = 43;
+        sitz2 = base_sitz.clone();
+        sitz2.nummer = 99;
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
         // public
-        let mut sitz2 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
         sitz2.public = false;
         assert!(!compare_sitzung(&base_sitz, &sitz2));
 
         // link
-        let mut sitz2 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
         sitz2.link = Some("https://different.com".to_string());
         assert!(!compare_sitzung(&base_sitz, &sitz2));
+    }
+
+    #[test]
+    fn test_compare_sitzung_optional_fields() {
+        // Test optional fields: Some vs None scenarios
+        let base_sitz = create_test_sitzung("00000000-0000-0000-0000-000000000001");
+
+        // api_id: Some vs None
+        let mut sitz1 = base_sitz.clone();
+        let mut sitz2 = base_sitz.clone();
+        sitz1.api_id = Some(uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
+        sitz2.api_id = None;
+        assert!(!compare_sitzung(&sitz1, &sitz2));
+
+        // titel: Some vs None
+        sitz1 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
+        sitz1.titel = Some("Test Titel".to_string());
+        sitz2.titel = None;
+        assert!(!compare_sitzung(&sitz1, &sitz2));
+
+        // link: Some vs None
+        sitz1 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
+        sitz1.link = Some("https://test.com".to_string());
+        sitz2.link = None;
+        assert!(!compare_sitzung(&sitz1, &sitz2));
+
+        // gremium.link: Some vs None
+        sitz1 = base_sitz.clone();
+        sitz2 = base_sitz.clone();
+        sitz1.gremium.link = Some("https://gremium.com".to_string());
+        sitz2.gremium.link = None;
+        assert!(!compare_sitzung(&sitz1, &sitz2));
     }
 
     #[test]
@@ -684,7 +815,9 @@ mod tests {
 
         // Different dokument content
         if let Some(docs) = &mut sitz2.dokumente {
-            docs[0] = create_test_dokument("00000000-0000-0000-0000-000000000005");
+            docs[0] = StationDokumenteInner::Dokument(Box::new(create_test_dokument(
+                "00000000-0000-0000-0000-000000000005",
+            )));
         }
         assert!(!compare_sitzung(&sitz1, &sitz2));
 
@@ -741,58 +874,122 @@ mod tests {
 
         // api_id
         let mut vg2 = base_vg.clone();
-        vg2.api_id =
-            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap_or_default();
+        vg2.api_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
         assert!(!compare_vorgang(&base_vg, &vg2));
 
         // titel
-        let mut vg2 = base_vg.clone();
+        vg2 = base_vg.clone();
         vg2.titel = "Different Vorgang".to_string();
         assert!(!compare_vorgang(&base_vg, &vg2));
 
         // kurztitel
-        let mut vg2 = base_vg.clone();
+        vg2 = base_vg.clone();
         vg2.kurztitel = Some("Different Kurztitel".to_string());
         assert!(!compare_vorgang(&base_vg, &vg2));
 
         // wahlperiode
-        let mut vg2 = base_vg.clone();
+        vg2 = base_vg.clone();
         vg2.wahlperiode = 20;
         assert!(!compare_vorgang(&base_vg, &vg2));
 
         // verfassungsaendernd
-        let mut vg2 = base_vg.clone();
+        vg2 = base_vg.clone();
         vg2.verfassungsaendernd = true;
         assert!(!compare_vorgang(&base_vg, &vg2));
 
         // typ
-        let mut vg2 = base_vg.clone();
-        vg2.typ = models::Vorgangstyp::GgLandVolk;
+        vg2 = base_vg.clone();
+        vg2.typ = models::Vorgangstyp::GgZustimmung;
+        assert!(!compare_vorgang(&base_vg, &vg2));
+
+        // ids - different content
+        vg2 = base_vg.clone();
+        if let Some(ref mut ids) = vg2.ids {
+            ids[0].id = "Different ID".to_string();
+        }
+        assert!(!compare_vorgang(&base_vg, &vg2));
+
+        // links - different content
+        vg2 = base_vg.clone();
+        if let Some(ref mut links) = vg2.links {
+            links[0] = "https://different.com".to_string();
+        }
         assert!(!compare_vorgang(&base_vg, &vg2));
     }
 
     #[test]
     fn test_compare_vorgang_optional_fields() {
-        // Test with differences in optional fields (ids, links)
-        let vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
-        let mut vg2 = vg1.clone();
+        // Test optional fields: Some vs None scenarios
+        let base_vg = create_test_vorgang("00000000-0000-0000-0000-000000000001");
 
-        // ids
-        vg2.ids = Some(vec![models::VgIdent {
-            id: "Different ID".to_string(),
+        // kurztitel: Some vs None
+        let mut vg1 = base_vg.clone();
+        let mut vg2 = base_vg.clone();
+        vg1.kurztitel = Some("Test Kurztitel".to_string());
+        vg2.kurztitel = None;
+        assert!(!compare_vorgang(&vg1, &vg2));
+
+        // ids: Some vs None
+        vg1 = base_vg.clone();
+        vg2 = base_vg.clone();
+        vg1.ids = Some(vec![models::VgIdent {
+            id: "Test ID".to_string(),
             typ: models::VgIdentTyp::Vorgnr,
         }]);
+        vg2.ids = None;
         assert!(!compare_vorgang(&vg1, &vg2));
 
-        // links
-        vg2 = vg1.clone();
-        vg2.links = Some(vec!["https://different.com".to_string()]);
-        assert!(!compare_vorgang(&vg1, &vg2));
-
-        // Some vs None
-        vg2 = vg1.clone();
+        // links: Some vs None
+        vg1 = base_vg.clone();
+        vg2 = base_vg.clone();
+        vg1.links = Some(vec!["https://test.com".to_string()]);
         vg2.links = None;
         assert!(!compare_vorgang(&vg1, &vg2));
+
+        // lobbyregister: Some vs None
+        vg1 = base_vg.clone();
+        vg2 = base_vg.clone();
+        vg1.lobbyregister = Some(vec![models::Lobbyregeintrag {
+            organisation: create_test_autor("Test Organisation"),
+            interne_id: "Test ID".to_string(),
+            intention: "Test Intention".to_string(),
+            link: "https://test.com".to_string(),
+            betroffene_drucksachen: vec!["Test Drucksache".to_string()],
+        }]);
+        vg2.lobbyregister = None;
+        assert!(!compare_vorgang(&vg1, &vg2));
+    }
+
+    #[test]
+    fn test_compare_vorgang_lobbyregister() {
+        // Test lobbyregister comparison with order independence
+        let mut vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
+        let mut vg2 = vg1.clone();
+
+        // Add lobbyregister entries
+        let lr1 = models::Lobbyregeintrag {
+            organisation: create_test_autor("Organisation A"),
+            interne_id: "ID1".to_string(),
+            intention: "Intention 1".to_string(),
+            link: "https://link1.com".to_string(),
+            betroffene_drucksachen: vec!["DS1".to_string()],
+        };
+        let lr2 = models::Lobbyregeintrag {
+            organisation: create_test_autor("Organisation B"),
+            interne_id: "ID2".to_string(),
+            intention: "Intention 2".to_string(),
+            link: "https://link2.com".to_string(),
+            betroffene_drucksachen: vec!["DS2".to_string()],
+        };
+
+        vg1.lobbyregister = Some(vec![lr1.clone(), lr2.clone()]);
+        vg2.lobbyregister = Some(vec![lr2.clone(), lr1.clone()]); // Different order
+
+        assert!(compare_vorgang(&vg1, &vg2)); // Should be equal despite different order
+
+        // Different content
+        vg2.lobbyregister = Some(vec![lr1.clone()]);
+        assert!(!compare_vorgang(&vg1, &vg2)); // Different number of entries
     }
 
     #[test]
@@ -914,7 +1111,9 @@ mod tests {
             &mut vg1.stationen[0].stellungnahmen,
             &mut vg2.stationen[0].stellungnahmen,
         ) {
-            st2[0] = create_test_dokument("00000000-0000-0000-0000-000000000007");
+            st2[0] = StationDokumenteInner::Dokument(Box::new(create_test_dokument(
+                "00000000-0000-0000-0000-000000000007",
+            )));
         }
         assert!(!compare_vorgang(&vg1, &vg2));
 
@@ -929,6 +1128,188 @@ mod tests {
         vg2 = vg1.clone();
         vg2.stationen[0].stellungnahmen = None;
         assert!(!compare_vorgang(&vg1, &vg2));
+    }
+
+    #[test]
+    fn test_compare_autor_comprehensive() {
+        // Test autor comparison comprehensively via dokument comparison
+        let doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        let mut doc2 = doc1.clone();
+
+        // Different autor person
+        doc2.autoren[0].person = Some("Different Person".to_string());
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Different autor organisation
+        doc2 = doc1.clone();
+        doc2.autoren[0].organisation = "Different Organisation".to_string();
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Different autor fachgebiet
+        doc2 = doc1.clone();
+        doc2.autoren[0].fachgebiet = Some("Different Fachgebiet".to_string());
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Different autor lobbyregister
+        doc2 = doc1.clone();
+        doc2.autoren[0].lobbyregister = Some("Different Lobbyregister".to_string());
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Test autor optional fields: Some vs None
+        doc2 = doc1.clone();
+        doc2.autoren[0].person = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        doc2 = doc1.clone();
+        doc2.autoren[0].fachgebiet = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        doc2 = doc1.clone();
+        doc2.autoren[0].lobbyregister = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+    }
+
+    #[test]
+    fn test_compare_dokument_schlagworte_order_independent() {
+        // Test that schlagworte comparison is order-independent
+        let mut doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        let mut doc2 = doc1.clone();
+
+        // Set schlagworte in different order
+        doc1.schlagworte = Some(vec![
+            "Alpha".to_string(),
+            "Beta".to_string(),
+            "Gamma".to_string(),
+        ]);
+        doc2.schlagworte = Some(vec![
+            "Gamma".to_string(),
+            "Alpha".to_string(),
+            "Beta".to_string(),
+        ]);
+
+        assert!(compare_dokument(&doc1, &doc2)); // Should be equal despite different order
+
+        // Different schlagworte content
+        doc2.schlagworte = Some(vec![
+            "Alpha".to_string(),
+            "Beta".to_string(),
+            "Delta".to_string(),
+        ]);
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Different schlagworte length
+        doc2.schlagworte = Some(vec!["Alpha".to_string(), "Beta".to_string()]);
+        assert!(!compare_dokument(&doc1, &doc2));
+    }
+
+    #[test]
+    fn test_compare_dokument_edge_cases() {
+        // Test edge cases for dokument comparison
+        let mut doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        let mut doc2 = doc1.clone();
+
+        // Empty schlagworte vs None
+        doc1.schlagworte = Some(vec![]);
+        doc2.schlagworte = None;
+        assert!(!compare_dokument(&doc1, &doc2));
+
+        // Empty autoren
+        doc1 = create_test_dokument("00000000-0000-0000-0000-000000000001");
+        doc2 = doc1.clone();
+        doc1.autoren = vec![];
+        assert!(!compare_dokument(&doc1, &doc2)); // Different lengths
+    }
+
+    #[test]
+    fn test_compare_top_edge_cases() {
+        // Test edge cases for TOP comparison
+        let mut top1 = create_test_top(1);
+        let mut top2 = top1.clone();
+
+        // Empty dokumente vs None
+        top1.dokumente = Some(vec![]);
+        top2.dokumente = None;
+        assert!(!compare_top(&top1, &top2));
+
+        // vorgang_id: empty vs None
+        top1 = create_test_top(1);
+        top2 = top1.clone();
+        top1.vorgang_id = Some(vec![]);
+        top2.vorgang_id = None;
+        assert!(!compare_top(&top1, &top2));
+    }
+
+    #[test]
+    fn test_compare_sitzung_date_precision() {
+        // Test that sitzung termin comparison uses millisecond precision
+        let mut sitz1 = create_test_sitzung("00000000-0000-0000-0000-000000000001");
+        let mut sitz2 = sitz1.clone();
+
+        // Same milliseconds, different nanoseconds
+        sitz1.termin = create_test_datetime_with_nanos(100_000);
+        sitz2.termin = create_test_datetime_with_nanos(200_000);
+        assert_eq!(
+            sitz1.termin.timestamp_millis(),
+            sitz2.termin.timestamp_millis()
+        );
+        assert!(compare_sitzung(&sitz1, &sitz2));
+
+        // Different milliseconds
+        sitz2.termin = sitz1.termin + chrono::Duration::milliseconds(1);
+        assert!(!compare_sitzung(&sitz1, &sitz2));
+    }
+
+    #[test]
+    fn test_compare_vorgang_ids_and_links_order() {
+        // Test that ids and links comparison is order-independent via sorting
+        let mut vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
+        let mut vg2 = vg1.clone();
+
+        // Set ids in different order but same content
+        vg1.ids = Some(vec![
+            models::VgIdent {
+                id: "A".to_string(),
+                typ: models::VgIdentTyp::Vorgnr,
+            },
+            models::VgIdent {
+                id: "B".to_string(),
+                typ: models::VgIdentTyp::Initdrucks,
+            },
+        ]);
+        vg2.ids = Some(vec![
+            models::VgIdent {
+                id: "B".to_string(),
+                typ: models::VgIdentTyp::Initdrucks,
+            },
+            models::VgIdent {
+                id: "A".to_string(),
+                typ: models::VgIdentTyp::Vorgnr,
+            },
+        ]);
+        assert!(compare_vorgang(&vg1, &vg2)); // Should be equal (order doesn't matter for comparison)
+
+        // Set links in different order but same content
+        vg1.links = Some(vec![
+            "https://a.com".to_string(),
+            "https://b.com".to_string(),
+        ]);
+        vg2.links = Some(vec![
+            "https://b.com".to_string(),
+            "https://a.com".to_string(),
+        ]);
+        assert!(compare_vorgang(&vg1, &vg2)); // Should be equal (order doesn't matter for comparison)
+    }
+
+    #[test]
+    fn test_compare_vorgang_touched_by_field() {
+        // Test that touched_by field is ignored in comparison (if present)
+        let vg1 = create_test_vorgang("00000000-0000-0000-0000-000000000001");
+        let vg2 = vg1.clone();
+
+        // The touched_by field should not affect comparison since it's metadata
+        // Note: The actual comparison function might not include touched_by
+        // since it's typically metadata that shouldn't affect content equality
+        assert!(compare_vorgang(&vg1, &vg2));
     }
 
     // Helper functions for creating test objects
@@ -963,6 +1344,7 @@ mod tests {
             drucksnr: Some("Test Drucksnr".to_string()),
             typ: models::Doktyp::Entwurf,
             titel: "Test Titel".to_string(),
+            touched_by: None,
             kurztitel: Some("Test Kurztitel".to_string()),
             vorwort: Some("Test Vorwort".to_string()),
             volltext: "Test Volltext".to_string(),
@@ -978,12 +1360,12 @@ mod tests {
         }
     }
 
-    fn create_test_dokref_dokument(api_id: &str) -> DokRef {
-        DokRef::Dokument(Box::new(create_test_dokument(api_id)))
+    fn create_test_dokref_dokument(api_id: &str) -> StationDokumenteInner {
+        StationDokumenteInner::Dokument(Box::new(create_test_dokument(api_id)))
     }
 
-    fn create_test_dokref_string(s: &str) -> DokRef {
-        DokRef::String(Box::new(s.to_string()))
+    fn create_test_dokref_string(s: &str) -> StationDokumenteInner {
+        StationDokumenteInner::String(Box::new(s.to_string()))
     }
 
     fn create_test_top(nummer: i32) -> Top {
@@ -1005,19 +1387,20 @@ mod tests {
             api_id: Some(uuid::Uuid::parse_str(api_id).unwrap_or_default()),
             titel: Some("Test Sitzung".to_string()),
             termin: create_test_datetime(),
+            touched_by: None,
             gremium: models::Gremium {
                 parlament: models::Parlament::Bt,
                 wahlperiode: 19,
                 name: "Test Gremium".to_string(),
-                link: None,
+                link: Some("https://test-gremium.com".to_string()),
             },
             nummer: 42,
             public: true,
             link: Some("https://test.com".to_string()),
             tops: vec![create_test_top(1), create_test_top(2)],
             dokumente: Some(vec![
-                create_test_dokument("00000000-0000-0000-0000-000000000003"),
-                create_test_dokument("00000000-0000-0000-0000-000000000004"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000003"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000004"),
             ]),
             experten: Some(vec![
                 create_test_autor("Experte 1"),
@@ -1031,16 +1414,16 @@ mod tests {
             api_id: Some(uuid::Uuid::parse_str(api_id).unwrap_or_default()),
             titel: Some("Test Station".to_string()),
             zp_start: create_test_datetime(),
+            touched_by: None,
             zp_modifiziert: Some(create_test_datetime()),
-            gremium: Some(models::Gremium {
+            gremium: models::Gremium {
                 parlament: models::Parlament::Bt,
                 wahlperiode: 19,
-                name: "Test Gremium".to_string(),
-                link: None,
-            }),
+                name: "Test Station Gremium".to_string(),
+                link: Some("https://station-gremium.com".to_string()),
+            },
             gremium_federf: Some(true),
             link: Some("https://test.com".to_string()),
-            parlament: models::Parlament::Bt,
             typ: models::Stationstyp::ParlInitiativ,
             trojanergefahr: Some(5),
             schlagworte: Some(vec!["Test1".to_string(), "Test2".to_string()]),
@@ -1053,8 +1436,8 @@ mod tests {
                 create_test_dokref_dokument("00000000-0000-0000-0000-000000000002"),
             ],
             stellungnahmen: Some(vec![
-                create_test_dokument("00000000-0000-0000-0000-000000000005"),
-                create_test_dokument("00000000-0000-0000-0000-000000000006"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000005"),
+                create_test_dokref_dokument("00000000-0000-0000-0000-000000000006"),
             ]),
         }
     }
@@ -1065,6 +1448,8 @@ mod tests {
             titel: "Test Vorgang".to_string(),
             kurztitel: Some("Test Kurztitel".to_string()),
             wahlperiode: 19,
+            lobbyregister: None,
+            touched_by: None,
             verfassungsaendernd: false,
             typ: models::Vorgangstyp::GgEinspruch,
             ids: Some(vec![

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) \n        VALUES ($1, $2, $3) ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "502756ebc928e20d47ca1e8eb10fd5e0758b90b5b39e7127635bf895fa8c2d80"
+}

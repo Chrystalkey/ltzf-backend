@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::api::PaginationResponsePart;
 use crate::error::*;
 use crate::utils::as_option;
 use openapi::models;
@@ -73,7 +74,56 @@ pub async fn vorgang_by_id(
     }
     stationen.sort_by(|a, b| a.zp_start.cmp(&b.zp_start));
 
+    // lobbyregistereinträge
+    let mut lobbyreg_records =
+        sqlx::query!("SELECT * FROM lobbyregistereintrag WHERE vg_id = $1", id)
+            .map(|r| {
+                (
+                    r.id,
+                    models::Lobbyregeintrag {
+                        intention: r.intention,
+                        organisation: models::Autor {
+                            fachgebiet: None,
+                            lobbyregister: None,
+                            organisation: "".to_string(),
+                            person: None,
+                        },
+                        link: r.link,
+                        interne_id: r.interne_id,
+                        betroffene_drucksachen: vec![],
+                    },
+                    r.organisation,
+                )
+            })
+            .fetch_all(&mut **executor)
+            .await?;
+    let mut lobbyregs = vec![];
+    for (id, object, org_id) in lobbyreg_records.drain(..) {
+        let drucks = sqlx::query!(
+            "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
+            id
+        )
+        .map(|r| r.drucksnr)
+        .fetch_all(&mut **executor)
+        .await?;
+        lobbyregs.push(models::Lobbyregeintrag {
+            organisation: sqlx::query!("SELECT * FROM autor WHERE id = $1", org_id)
+                .map(|r| models::Autor {
+                    fachgebiet: r.fachgebiet,
+                    lobbyregister: r.lobbyregister,
+                    organisation: r.organisation,
+                    person: r.person,
+                })
+                .fetch_one(&mut **executor)
+                .await?,
+            betroffene_drucksachen: drucks,
+            ..object
+        });
+    }
+
     Ok(models::Vorgang {
+        touched_by: None,
+        lobbyregister: as_option(lobbyregs),
         api_id: pre_vg.api_id,
         titel: pre_vg.titel,
         kurztitel: pre_vg.kurztitel,
@@ -82,7 +132,7 @@ pub async fn vorgang_by_id(
         typ: models::Vorgangstyp::from_str(pre_vg.value.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         initiatoren: init_inst,
-        ids: Some(ids),
+        ids: as_option(ids),
         links: Some(links),
         stationen,
     })
@@ -92,32 +142,26 @@ pub async fn station_by_id(
     id: i32,
     executor: &mut sqlx::PgTransaction<'_>,
 ) -> Result<models::Station> {
-    let dokids = sqlx::query!(
-        "SELECT dok_id FROM rel_station_dokument WHERE stat_id = $1",
+    let doks = sqlx::query!(
+        "SELECT d.api_id FROM rel_station_dokument rsd
+        INNER JOIN dokument d ON d.id = rsd.dok_id
+        WHERE rsd.stat_id = $1
+        ORDER BY d.link ASC",
         id
     )
-    .map(|r| r.dok_id)
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
     .fetch_all(&mut **executor)
     .await?;
-    let mut doks = Vec::with_capacity(dokids.len());
-    for did in dokids {
-        doks.push(dokument_by_id(did, executor).await?.into());
-    }
-    doks.sort_by(|a, b| match (a, b) {
-        (models::DokRef::Dokument(a), models::DokRef::Dokument(b)) => a.link.cmp(&b.link),
-        _ => {
-            unreachable!("If this is the case document extraction failed")
-        }
-    });
-    let stlid = sqlx::query!("SELECT dok_id FROM rel_station_stln WHERE stat_id = $1", id)
-        .map(|r| r.dok_id)
-        .fetch_all(&mut **executor)
-        .await?;
-    let mut stellungnahmen = Vec::with_capacity(stlid.len());
-    for sid in stlid {
-        stellungnahmen.push(dokument_by_id(sid, executor).await?);
-    }
-    stellungnahmen.sort_by(|a, b| a.link.cmp(&b.link));
+    let stellungnahmen = sqlx::query!(
+        "SELECT api_id FROM rel_station_stln rss 
+        INNER JOIN dokument d ON d.id = rss.dok_id 
+        WHERE rss.stat_id = $1
+        ORDER BY d.link ASC",
+        id
+    )
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .fetch_all(&mut **executor)
+    .await?;
     let sw = sqlx::query!(
         "SELECT DISTINCT(value) FROM rel_station_schlagwort r
         LEFT JOIN schlagwort sw ON sw.id = r.sw_id
@@ -136,7 +180,8 @@ pub async fn station_by_id(
     let temp_stat = sqlx::query!(
         "SELECT s.*, p.value as parlv, st.value as stattyp
         FROM station s
-        INNER JOIN parlament p ON p.id = s.p_id
+        INNER JOIN gremium g ON g.id = s.gr_id
+        INNER JOIN parlament p ON p.id = g.parl
         INNER JOIN stationstyp st ON st.id = s.typ
         WHERE s.id=$1",
         id
@@ -145,9 +190,8 @@ pub async fn station_by_id(
     .await?;
 
     let gremium = sqlx::query!(
-        "
-    SELECT p.value, g.name, g.wp, 
-    g.link FROM gremium g INNER JOIN parlament p on p.id = g.parl
+        "SELECT p.value, g.name, g.wp, g.link 
+        FROM gremium g INNER JOIN parlament p on p.id = g.parl
         WHERE g.id = $1",
         temp_stat.gr_id
     )
@@ -157,12 +201,11 @@ pub async fn station_by_id(
         parlament: models::Parlament::from_str(&x.value).unwrap(),
         link: x.link,
     })
-    .fetch_optional(&mut **executor)
+    .fetch_one(&mut **executor)
     .await?;
 
     Ok(models::Station {
-        parlament: models::Parlament::from_str(temp_stat.parlv.as_str())
-            .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
+        touched_by: None,
         typ: models::Stationstyp::from_str(temp_stat.stattyp.as_str())
             .map_err(|e| DataValidationError::InvalidEnumValue { msg: e })?,
         dokumente: doks,
@@ -223,6 +266,7 @@ pub async fn dokument_by_id(
 
     Ok(models::Dokument {
         api_id: Some(rec.api_id),
+        touched_by: None,
         titel: rec.titel,
         kurztitel: rec.kurztitel,
         vorwort: rec.vorwort,
@@ -251,20 +295,18 @@ pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<mode
         .fetch_one(&mut **tx)
         .await?;
     // ds
-    let dids = sqlx::query!("SELECT dok_id FROM tops_doks td WHERE top_id = $1", id)
-        .map(|r| r.dok_id)
-        .fetch_all(&mut **tx)
-        .await?;
-    let mut doks = vec![];
-    for did in dids {
-        doks.push(dokument_by_id(did, tx).await?.into());
-    }
-    doks.sort_by(|a, b| match (a, b) {
-        (models::DokRef::Dokument(a), models::DokRef::Dokument(b)) => a.link.cmp(&b.link),
-        _ => {
-            unreachable!("If this is the case document extraction failed")
-        }
-    });
+    let doks = sqlx::query!(
+        "
+    SELECT d.api_id
+    FROM tops_doks td 
+    INNER JOIN dokument d ON td.dok_id = d.id
+    WHERE td.top_id = $1
+    ORDER BY d.link ASC",
+        id
+    )
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .fetch_all(&mut **tx)
+    .await?;
     // vgs
     let vgs = sqlx::query!(
         "
@@ -336,19 +378,16 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     .await?;
 
     let dids = sqlx::query!(
-        "SELECT dok_id from reL_station_dokument WHERE stat_id = $1",
+        "SELECT api_id from rel_station_dokument rsd
+        INNER JOIN dokument d ON d.id = rsd.dok_id WHERE rsd.stat_id = $1",
         id
     )
-    .map(|r| r.dok_id)
+    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
     .fetch_all(&mut **tx)
     .await?;
-    let mut doks = vec![];
-    for d in dids {
-        doks.push(dokument_by_id(d, tx).await?);
-    }
-
     Ok(models::Sitzung {
         api_id: Some(scaffold.api_id),
+        touched_by: None,
         nummer: scaffold.nummer as u32,
         titel: scaffold.titel,
         public: scaffold.public,
@@ -362,7 +401,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         tops,
         link: scaffold.as_link,
         experten: as_option(experten),
-        dokumente: as_option(doks),
+        dokumente: as_option(dids),
     })
 }
 
@@ -371,24 +410,25 @@ pub struct SitzungFilterParameters {
     pub until: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
     pub wp: Option<u32>,
-    pub limit: Option<u32>,
-    pub offset: Option<u32>,
     pub vgid: Option<Uuid>,
     pub gremium_like: Option<String>,
 }
+/// returns a tuple made up of: (total_count, retrieved_items)
 pub async fn sitzung_by_param(
     params: &SitzungFilterParameters,
+    page: Option<i32>,
+    per_page: Option<i32>,
     tx: &mut sqlx::PgTransaction<'_>,
-) -> Result<Vec<models::Sitzung>> {
-    let as_list = sqlx::query!(
+) -> Result<(PaginationResponsePart, Vec<models::Sitzung>)> {
+    let mut as_list = sqlx::query!(
         "
       WITH pre_table AS (
         SELECT a.id, MAX(a.termin) as lastmod FROM  sitzung a
 		INNER JOIN gremium g ON g.id = a.gr_id
 		INNER JOIN parlament p ON p.id = g.parl
 		WHERE p.value = COALESCE($1, p.value)
-		AND g.wp = 		COALESCE($2, g.wp)
-        AND (SIMILARITY(g.name, $7) > 0.66 OR $7 IS NULL)
+		AND g.wp      = COALESCE($2, g.wp)
+        AND ($5::text IS NULL OR g.name LIKE CONCAT('%', $5, '%'))
         GROUP BY a.id
         ORDER BY lastmod
         ),
@@ -403,35 +443,35 @@ pub async fn sitzung_by_param(
 	)
 
 SELECT * FROM pre_table WHERE
-lastmod > COALESCE($3, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) AND
+lastmod > COALESCE($3::timestamptz,'1940-01-01T20:20:20Z') AND
 lastmod < COALESCE($4, NOW()) AND
-(CAST ($8 AS UUID) IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($8, vgref.api_id)))
-ORDER BY pre_table.lastmod ASC
-OFFSET COALESCE($5, 0) 
-LIMIT COALESCE($6, 64)",
+($6::uuid IS NULL OR EXISTS (SELECT 1 FROM vgref WHERE pre_table.id = vgref.id AND vgref.api_id = COALESCE($6, vgref.api_id)))
+ORDER BY pre_table.lastmod ASC",
         params.parlament.map(|p| p.to_string()),
         params.wp.map(|x|x as i32),
         params.since,
         params.until,
-        params.offset.map(|x|x as i32),
-        params.limit.map(|x|x as i32),
         params.gremium_like,
         params.vgid
     )
     .map(|r| r.id)
     .fetch_all(&mut **tx)
     .await?;
+    let prp = PaginationResponsePart::new(as_list.len() as i32, page, per_page);
+    if as_list.is_empty() {
+        return Ok((prp, vec![]));
+    }
+
+    let as_list = as_list.drain(prp.start()..prp.end());
     let mut vector = Vec::with_capacity(as_list.len());
     for id in as_list {
         vector.push(super::retrieve::sitzung_by_id(id, tx).await?);
     }
-    Ok(vector)
+    Ok((prp, vector))
 }
 
 #[derive(Debug)]
 pub struct VGGetParameters {
-    pub limit: Option<i32>,
-    pub offset: Option<i32>,
     pub lower_date: Option<chrono::DateTime<chrono::Utc>>,
     pub upper_date: Option<chrono::DateTime<chrono::Utc>>,
     pub parlament: Option<models::Parlament>,
@@ -441,41 +481,105 @@ pub struct VGGetParameters {
     pub inifch: Option<String>,
     pub vgtyp: Option<models::Vorgangstyp>,
 }
+/// returns (total number of available elements, chosen elements)
 pub async fn vorgang_by_parameter(
     params: VGGetParameters,
+    page: Option<i32>,
+    per_page: Option<i32>,
     executor: &mut sqlx::PgTransaction<'_>,
-) -> Result<Vec<models::Vorgang>> {
-    let vg_list = sqlx::query!(
+) -> Result<(PaginationResponsePart, Vec<models::Vorgang>)> {
+    let mut vg_list = sqlx::query!(
         "WITH pre_table AS (
-        SELECT vorgang.id, MAX(station.zp_start) as lastmod FROM vorgang
+        SELECT vorgang.id, MAX(ext_stat.zp_start) as lastmod FROM vorgang
             INNER JOIN vorgangstyp vt ON vt.id = vorgang.typ
-            LEFT JOIN station ON station.vg_id = vorgang.id
-			INNER JOIN parlament on parlament.id = station.p_id
+            LEFT JOIN (SELECT s.vg_id, parlament.value as parl, s.zp_start FROM station s
+            INNER JOIN gremium g ON g.id = s.gr_id
+			INNER JOIN parlament on parlament.id = g.parl) AS ext_stat ON ext_stat.vg_id = vorgang.id
             WHERE TRUE
-            AND vorgang.wahlperiode = COALESCE($1, vorgang.wahlperiode)
-            AND vt.value = COALESCE($2, vt.value)
-			AND parlament.value= COALESCE($3, parlament.value)
-			AND (CAST($4 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person = $4))
-			AND (CAST($5 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation = $5))
-			AND (CAST($6 as text) IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet = $6))
+            AND ($1::int4 IS NULL OR $1 = vorgang.wahlperiode)
+            AND ($2::text IS NULL OR $2 = vt.value)
+            AND ($3::text IS NULL OR $3 = ext_stat.parl)
+			AND ($4::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.person LIKE CONCAT('%',$4::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($5::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.organisation  LIKE CONCAT('%',$5::text,'%') AND rvi.vg_id = vorgang.id))
+			AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM rel_vorgang_init rvi INNER JOIN autor a ON a.id = rvi.in_id WHERE a.fachgebiet  LIKE CONCAT('%',$6::text,'%') AND rvi.vg_id = vorgang.id))
         GROUP BY vorgang.id
         ORDER BY lastmod
         )
 SELECT * FROM pre_table WHERE
-lastmod > COALESCE($7, CAST('1940-01-01T20:20:20Z' as TIMESTAMPTZ)) 
+lastmod > COALESCE($7::timestamptz, '1940-01-01T20:20:20Z') 
 AND lastmod < COALESCE($8, NOW())
 ORDER BY pre_table.lastmod ASC
-OFFSET COALESCE($9, 0) LIMIT COALESCE($10, 64)
 ",params.wp, params.vgtyp.map(|x|x.to_string()),
 params.parlament.map(|p|p.to_string()),
-params.inipsn, params.iniorg, params.inifch, params.lower_date, params.upper_date, params.offset,
-    params.limit)
+params.inipsn, params.iniorg, params.inifch,
+params.lower_date, params.upper_date)
     .map(|r|r.id)
     .fetch_all(&mut **executor).await?;
+    let prp = PaginationResponsePart::new(vg_list.len() as i32, page, per_page);
+    if vg_list.is_empty() {
+        return Ok((prp, vec![]));
+    }
 
     let mut vector = Vec::with_capacity(vg_list.len());
-    for id in vg_list {
+    for id in vg_list.drain(prp.start()..prp.end()) {
         vector.push(super::retrieve::vorgang_by_id(id, executor).await?);
     }
-    Ok(vector)
+    Ok((prp, vector))
+}
+
+pub(crate) async fn count_existing_gremien(
+    tx: &mut sqlx::PgTransaction<'_>,
+    gremien: &[models::Gremium],
+) -> Result<usize> {
+    let (mut names, mut pvalues, mut wps, mut links) = (vec![], vec![], vec![], vec![]);
+    for gr in gremien.iter() {
+        names.push(gr.name.clone());
+        pvalues.push(gr.parlament.to_string());
+        wps.push(gr.wahlperiode as i32);
+        links.push(gr.link.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query!("SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[], $3::int4[], $4::text[]) as input_vector(name, pvalue, wp, link)
+        WHERE EXISTS (
+            SELECT 1 FROM gremium g 
+        INNER JOIN parlament p ON g.parl = p.id
+        WHERE 
+            g.name = input_vector.name AND
+            p.value = input_vector.pvalue AND
+            g.wp = input_vector.wp AND
+            (g.link IS NULL AND input_vector.link IS NULL OR g.link = input_vector.link)
+        )
+        ", &names[..], &pvalues[..], &wps[..], &links[..] as &[Option<String>])
+        .map(|r| r.cnt)
+        .fetch_one(&mut **tx).await?.unwrap();
+
+    Ok(existing_obj_cnt as usize)
+}
+
+pub(crate) async fn count_existing_authors(
+    tx: &mut sqlx::PgTransaction<'_>,
+    autoren: &[models::Autor],
+) -> Result<usize> {
+    let (mut person, mut organisation) = (vec![], vec![]);
+    for a in autoren.iter() {
+        person.push(a.person.clone());
+        organisation.push(a.organisation.clone());
+    }
+
+    let existing_obj_cnt = sqlx::query!(
+        "SELECT COUNT(1) as cnt FROM 
+        UNNEST($1::text[], $2::text[]) as iv(person, orga)
+        WHERE EXISTS (
+            SELECT 1 FROM autor a WHERE 
+            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) 
+            AND a.organisation = iv.orga)",
+        &person[..] as &[Option<String>],
+        &organisation[..]
+    )
+    .map(|r| r.cnt)
+    .fetch_one(&mut **tx)
+    .await?
+    .unwrap();
+    Ok(existing_obj_cnt as usize)
 }

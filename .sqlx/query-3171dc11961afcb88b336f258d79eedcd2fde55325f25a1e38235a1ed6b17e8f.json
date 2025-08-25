@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) \n            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3171dc11961afcb88b336f258d79eedcd2fde55325f25a1e38235a1ed6b17e8f"
+}

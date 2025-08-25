@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM autor WHERE id = ANY($1::int4[])",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "person",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "organisation",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "fachgebiet",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "lobbyregister",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "5f00951d3797175af737a4539c0d03168baf006e84e17caf67be3ece326b6508"
+}

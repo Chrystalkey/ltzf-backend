@@ -1,18 +1,21 @@
 #![forbid(unsafe_code)]
+
 pub(crate) mod api;
 pub(crate) mod db;
 pub(crate) mod error;
 pub(crate) mod utils;
 
-use std::{num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
+use axum::{extract::DefaultBodyLimit, http::Method};
 use clap::Parser;
 
 use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use sha256::digest;
 use tokio::net::TcpListener;
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
+use tower_http::{cors, limit};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
@@ -53,6 +56,27 @@ pub struct Configuration {
 
     #[arg(long, env = "MERGE_TITLE_SIMILARITY", default_value = "0.8")]
     pub merge_title_similarity: f32,
+    #[arg(
+        long,
+        env = "REQUEST_LIMIT_COUNT",
+        help = "global request count that is per interval",
+        default_value = "4096"
+    )]
+    pub req_limit_count: u32,
+    #[arg(
+        long,
+        env = "REQUEST_LIMIT_INTERVAL",
+        help = "(whole) number of seconds",
+        default_value = "2"
+    )]
+    pub req_limit_interval: u32,
+    #[arg(
+        long,
+        env = "PER_OBJECT_SCRAPER_LOG_SIZE",
+        help = "Size of the queue keeping track of which scraper touched an object",
+        default_value = "5"
+    )]
+    pub per_object_scraper_log_size: u32,
 }
 
 impl Configuration {
@@ -82,22 +106,10 @@ impl Configuration {
         Configuration::parse()
     }
 }
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-    init_tracing();
-
-    let config = Configuration::init();
-    tracing::debug!("Configuration: {:?}", &config);
-
-    tracing::info!("Starting the Initialisation process");
-    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
-
-    tracing::debug!("Started Listener");
+async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
     let sqlx_db = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
-        .connect(&config.db_url)
+        .connect(db_url)
         .await?;
 
     let mut available = false;
@@ -109,7 +121,7 @@ async fn main() -> Result<()> {
                 break;
             }
             Err(sqlx::Error::PoolTimedOut) => {
-                tracing::warn!("Connection to Database `{}` timed out", config.db_url);
+                tracing::warn!("Connection to Database `{}` timed out", db_url);
             }
             _ => {
                 let _ = r?;
@@ -127,6 +139,22 @@ async fn main() -> Result<()> {
     tracing::debug!("Started Database Pool");
     sqlx::migrate!().run(&sqlx_db).await?;
     tracing::debug!("Executed Migrations");
+    Ok(sqlx_db)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    dotenv::dotenv().ok();
+    init_tracing();
+
+    let config = Configuration::init();
+    tracing::debug!("Configuration: {:?}", &config);
+
+    tracing::info!("Starting the Initialisation process");
+    let listener = TcpListener::bind(format!("{}:{}", config.host, config.port)).await?;
+
+    tracing::debug!("Started Listener");
+    let sqlx_db = init_db_conn(&config.db_url).await?;
 
     // Run Key Administrative Functions
     let keyadder_hash = digest(config.keyadder_key.as_str());
@@ -143,20 +171,42 @@ async fn main() -> Result<()> {
     tracing::debug!("Constructed Server State");
 
     // Init Axum router
-    let rate_limiter = axum_gcra::RateLimitLayer::<()>::builder()
-        .with_default_quota(axum_gcra::gcra::Quota::new(
-            std::time::Duration::from_secs(1),
-            NonZeroU64::new(256).unwrap(),
-        ))
-        .with_global_fallback(true)
-        .with_extension(true)
-        .default_handle_error();
+    let (iv, cnt) = (
+        state.config.req_limit_interval as u64,
+        state.config.req_limit_count,
+    );
+    let rl_config = Arc::new(
+        GovernorConfigBuilder::default()
+            .const_per_second(iv)
+            .const_burst_size(cnt)
+            .key_extractor(GlobalKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
+    let limiter = rl_config.limiter().clone();
+    let interval = std::time::Duration::from_secs(60);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(interval);
+            tracing::info!("rate limiting storage size: {}", limiter.len());
+            limiter.retain_recent();
+        }
+    });
+    let rate_limiter = GovernorLayer { config: rl_config };
     let body_size_limit = 1024 * 1024 * 1024 * 16; // 16 GB
-    let request_size_limit = tower_http::limit::RequestBodyLimitLayer::new(body_size_limit);
+    let request_size_limit = limit::RequestBodyLimitLayer::new(body_size_limit);
+    let cors_layer = cors::CorsLayer::new()
+        .allow_methods(vec![Method::GET])
+        .allow_origin(cors::AllowOrigin::any())
+        .expose_headers(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any);
+
     let app = openapi::server::new(state.clone())
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
-        .layer(rate_limiter);
+        .layer(rate_limiter)
+        .layer(cors_layer);
+
     tracing::debug!("Constructed Router");
     tracing::info!(
         "Starting Server on {}:{}",

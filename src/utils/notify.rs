@@ -47,7 +47,7 @@ impl MailBundle {
         .parse()
         .map_err(|e| DataValidationError::InvalidFormat {
             field: "mail address".to_string(),
-            message: format!("{}", e),
+            message: format!("{e}"),
         })?;
         let recipient: lettre::message::Mailbox =
             config
@@ -57,7 +57,7 @@ impl MailBundle {
                 .parse()
                 .map_err(|e| DataValidationError::InvalidFormat {
                     field: "mail address".to_string(),
-                    message: format!("{}", e),
+                    message: format!("{e}"),
                 })?;
 
         let thread = tokio::spawn(async move {
@@ -102,7 +102,7 @@ impl MailBundle {
                     let email = Message::builder()
                         .from(sender.clone())
                         .to(recipient.clone())
-                        .subject(format!("Found {} ambiguous matches since last check", s_am))
+                        .subject(format!("Found {s_am} ambiguous matches since last check"))
                         .header(ContentType::TEXT_PLAIN)
                         .body(ambiguous_match_body)
                         .unwrap();
@@ -116,7 +116,7 @@ impl MailBundle {
                     let email = Message::builder()
                         .from(sender.clone())
                         .to(recipient.clone())
-                        .subject(format!("Added {} new variants since last check", s_va))
+                        .subject(format!("Added {s_va} new variants since last check"))
                         .header(ContentType::TEXT_PLAIN)
                         .body(variant_added_body)
                         .unwrap();
@@ -131,12 +131,12 @@ impl MailBundle {
                     let email = Message::builder()
                         .from(sender.clone())
                         .to(recipient.clone())
-                        .subject(format!("{} sonstig's unwrapped since last check", s_su))
+                        .subject(format!("{s_su} sonstig's unwrapped since last check"))
                         .header(ContentType::TEXT_PLAIN)
                         .body(sonstig_unwrapped_body)
                         .unwrap();
                     mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {} new sonstig variants", s_su);
+                    tracing::info!("Sent Mail about {s_su} new sonstig variants");
                 }
                 if s_ot != 0 {
                     let other_body = other.iter().fold("".to_string(), |a, n| {
@@ -145,12 +145,12 @@ impl MailBundle {
                     let email = Message::builder()
                         .from(sender.clone())
                         .to(recipient.clone())
-                        .subject(format!("{} Other messages since last check", s_ot))
+                        .subject(format!("{s_ot} Other messages since last check"))
                         .header(ContentType::TEXT_PLAIN)
                         .body(other_body)
                         .unwrap();
                     mailer.send(&email).unwrap();
-                    tracing::info!("Sent Mail about {} new other messages", s_ot);
+                    tracing::info!("Sent Mail about {s_ot} new other messages");
                 }
             }
         });
@@ -202,11 +202,11 @@ pub fn notify_new_enum_entry<T: std::fmt::Debug + Display>(
 
     let simstr = similarity
         .iter()
-        .map(|(p, t)| format!("{}: {}", p, t))
+        .map(|(p, t)| format!("{p}: {t}"))
         .fold("".to_string(), |a, n| format!("{a}\n{n}"));
 
     let body = format!("Es gibt {} ähnliche Einträge: {simstr}", similarity.len());
-    tracing::warn!("Notify: New Enum Entry: {}\n{}!", subject, body);
+    tracing::warn!("Notify: New Enum Entry: {subject}\n{body}!");
     server.mailbundle.as_ref().unwrap().send(Mail {
         subject,
         body,
@@ -224,11 +224,10 @@ pub fn notify_ambiguous_match<T: std::fmt::Debug + serde::Serialize>(
     if server.mailbundle.is_none() {
         return Ok(());
     }
-    let subject = format!("Ambiguous Match: Während {}", during_operation);
+    let subject = format!("Ambiguous Match: Während {during_operation}");
     let body = format!(
-        "Während: `{}` wurde folgendes Objekt wurde hochgeladen: {}.
+        "Während: `{during_operation}` wurde folgendes Objekt wurde hochgeladen: {}.
         Folgende Objekte in der Datenbank sind ähnlich: {:#?}",
-        during_operation,
         serde_json::to_string_pretty(object).map_err(|e| DataValidationError::InvalidFormat {
             field: "passed obj for ambiguous match".to_string(),
             message: e.to_string()
@@ -249,9 +248,7 @@ pub fn notify_unknown_variant<T>(api_id: Uuid, object: &str, server: &LTZFServer
         return Ok(());
     }
     let subject = format!(
-        "Für {} `{}` wurde `sonstig` angegeben als Wert für `{}`",
-        object,
-        api_id,
+        "Für {object} `{api_id}` wurde `sonstig` angegeben als Wert für `{}`",
         std::any::type_name::<T>()
     );
     tracing::warn!("Notify: Unknown Variant in Guarded Enumeration Field");

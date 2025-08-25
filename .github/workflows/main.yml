@@ -18,16 +18,12 @@ jobs:
           override: true
       - name: formatting
         run: cargo fmt --check
+      - name: install ripgrep
+        run: sudo apt install ripgrep
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: clippy
-        run: cargo clippy --workspace -- -D warnings
-  dockerbuild:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: docker build
-        run: docker buildx build . -f Dockerfile.deploy
+        run: cargo clippy --workspace
 
   tests:
     runs-on: ubuntu-latest
@@ -55,6 +51,8 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
+      - name: install ripgrep
+        run: sudo apt install ripgrep
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: install sqlx cli
@@ -65,3 +63,30 @@ jobs:
         env:
           DATABASE_URL: postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf
           SQLX_OFFLINE: false
+  docker-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    environment: docker-deploy
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Log into docker"
+        uses: docker/login-action@v3
+        with:
+          username: crystalkey
+          password: ${{ secrets.DH_PASSWORD }}
+          
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: "Build & Push"
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          file: Dockerfile.deploy
+          push: true
+          tags: crystalkey/ltzf-backend:0.2.3

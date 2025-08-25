@@ -1,23 +1,24 @@
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use auth::APIScope;
-use axum::http::Method;
-use axum_extra::extract::{Host, cookie::CookieJar};
-
-use crate::Result;
-use crate::db::delete::delete_sitzung_by_api_id;
-use crate::error::{DataValidationError, LTZFError};
-use crate::utils::notify;
-use crate::{Configuration, db};
-
-use openapi::apis::default::*;
+use axum_extra::extract::Host;
 use openapi::models;
 
-mod auth;
-mod compare;
-mod kalender;
-mod objects;
+use crate::Configuration;
+use crate::Result;
+use crate::error::LTZFError;
+use crate::utils::notify;
+use openapi::apis::unauthorisiert::*;
+
+pub(crate) mod auth;
+pub(crate) mod compare;
+pub(crate) mod misc;
+pub(crate) mod misc_auth;
+pub(crate) mod sitzung;
+pub(crate) mod vorgang;
+
+pub type Claims = (auth::APIScope, i32);
 
 #[derive(Clone)]
 pub struct LTZFServer {
@@ -54,1248 +55,486 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
     }
 }
 
-#[allow(unused_variables)]
 #[async_trait]
-impl openapi::apis::default::Default<LTZFError> for LTZFServer {
-    type Claims = (auth::APIScope, i32);
-
-    #[doc = "AuthPost - POST /api/v1/auth"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn auth_post(
+impl Unauthorisiert<LTZFError> for LTZFServer {
+    async fn ping(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        body: &models::CreateApiKey,
-    ) -> Result<AuthPostResponse> {
-        if claims.0 != auth::APIScope::KeyAdder {
-            return Ok(AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
+        _method: &axum::http::Method,
+        _host: &Host,
+        _cookies: &axum_extra::extract::CookieJar,
+        query_params: &models::PingQueryParams,
+    ) -> Result<PingResponse> {
+        if let Some(t) = query_params.t {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64();
+            tracing::debug!("Ping with one-way time: {} s", current_time - t);
         }
-        match auth::auth_get(
-            self,
-            body.scope.clone().try_into().unwrap(),
-            body.expires_at,
-            claims.1,
-        )
-        .await
-        {
-            Ok(key) => {
-                return Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
-                    key,
-                ));
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        }
+        Ok(PingResponse::Status200_Pong)
     }
 
-    #[doc = "AuthDelete - DELETE /api/v1/auth"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn auth_delete(
+    async fn status(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        header_params: &models::AuthDeleteHeaderParams,
-    ) -> Result<AuthDeleteResponse> {
-        if claims.0 != APIScope::KeyAdder {
-            return Ok(
-                openapi::apis::default::AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid,
+        _method: &axum::http::Method,
+        _host: &Host,
+        _cookies: &axum_extra::extract::CookieJar,
+    ) -> Result<StatusResponse> {
+        tracing::debug!("Status Requested");
+        // TODO: implement "API is not running for some reason" markers
+        Ok(StatusResponse::Status200_APIIsRunning {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
+    }
+}
+#[derive(Debug)]
+pub struct PaginationResponsePart {
+    pub x_total_count: i32,
+    pub x_total_pages: i32,
+    pub x_page: i32,
+    pub x_per_page: i32,
+}
+impl PaginationResponsePart {
+    pub const DEFAULT_PER_PAGE: i32 = 32;
+    pub const MAX_PER_PAGE: i32 = 256;
+    pub fn new(x_total_count: i32, x_page: Option<i32>, x_per_page: Option<i32>) -> Self {
+        let x_per_page = x_per_page
+            .map(|x| x.clamp(0, Self::MAX_PER_PAGE))
+            .unwrap_or(Self::DEFAULT_PER_PAGE);
+        let x_total_pages = ((x_total_count as f32) / x_per_page as f32).ceil().max(1.) as i32;
+        let x_page = x_page.map(|x| x.clamp(1, x_total_pages)).unwrap_or(1);
+
+        Self {
+            x_total_count,
+            x_total_pages,
+            x_page,
+            x_per_page,
+        }
+    }
+    pub fn limit(&self) -> i64 {
+        self.x_per_page as i64
+    }
+    pub fn offset(&self) -> i64 {
+        ((self.x_page - 1) * self.x_per_page) as i64
+    }
+    pub fn start(&self) -> usize {
+        ((self.x_page - 1) * self.x_per_page) as usize
+    }
+    pub fn end(&self) -> usize {
+        (self.offset() + self.limit())
+            .min(self.x_total_count as i64)
+            .max(0) as usize
+    }
+    pub fn generate_link_header(&self, link_first_part: &str) -> String {
+        let mut link_string = String::new();
+        if self.x_page < self.x_total_pages {
+            link_string = format!(
+                "<\"{}?page={}&per_page={}\">; rel=\"next\", ",
+                link_first_part,
+                self.x_page + 1,
+                self.x_per_page
             );
         }
-        let key_to_delete = &header_params.api_key_delete;
-        return auth::auth_delete(self, key_to_delete).await;
-    }
-
-    #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn kal_date_get(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::KalDateGetHeaderParams,
-        path_params: &models::KalDateGetPathParams,
-    ) -> Result<KalDateGetResponse> {
-        let mut tx = self.sqlx_db.begin().await?;
-        let res =
-            kalender::kal_get_by_date(path_params.datum, path_params.parlament, &mut tx, self)
-                .await?;
-        tx.commit().await?;
-        Ok(res)
-    }
-
-    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn kal_date_put(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::KalDatePutPathParams,
-        body: &Vec<models::Sitzung>,
-    ) -> Result<KalDatePutResponse> {
-        let last_upd_day = chrono::Utc::now()
-            .date_naive()
-            .checked_sub_days(chrono::Days::new(1))
-            .unwrap();
-        if !(claims.0 == APIScope::Admin
-            || claims.0 == APIScope::KeyAdder
-            || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
-        {
-            tracing::warn!(
-                "Unauthorized kal_date_put with path date {} and last upd day {}",
-                path_params.datum,
-                last_upd_day
-            );
-            return Ok(KalDatePutResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        let len = body.len();
-        let body: Vec<_> = body
-            .iter()
-            .filter(|&f| f.termin.date_naive() >= last_upd_day)
-            .cloned()
-            .collect();
-
-        if len != body.len() {
-            tracing::info!(
-                "Filtered {} Sitzung entries due to date constraints",
-                len - body.len()
+        if self.x_page > 1 {
+            link_string = format!(
+                "{}<\"{}?page={}&per_page={}\">; rel=\"previous\", ",
+                link_string,
+                link_first_part,
+                self.x_page - 1,
+                self.x_per_page
             );
         }
-
-        let mut tx = self.sqlx_db.begin().await?;
-
-        let res = kalender::kal_put_by_date(
-            path_params.datum,
-            path_params.parlament,
-            body,
-            &mut tx,
-            self,
-        )
-        .await?;
-        tx.commit().await?;
-        Ok(res)
-    }
-
-    #[doc = "KalGet - GET /api/v1/kalender"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn kal_get(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::KalGetHeaderParams,
-        query_params: &models::KalGetQueryParams,
-    ) -> Result<KalGetResponse> {
-        let mut tx = self.sqlx_db.begin().await?;
-        let res = kalender::kal_get_by_param(query_params, header_params, &mut tx, self).await?;
-        tx.commit().await?;
-        Ok(res)
-    }
-
-    #[doc = "VorgangGetById - GET /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn vorgang_get_by_id(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::VorgangGetByIdHeaderParams,
-        path_params: &models::VorgangGetByIdPathParams,
-    ) -> Result<VorgangGetByIdResponse> {
-        tracing::trace!(
-            "vorgang_get_by_id called with id {}",
-            path_params.vorgang_id
+        link_string = format!(
+            "{}<\"{}?page={}&per_page={}\">; rel=\"first\", ",
+            link_string, link_first_part, 1, self.x_per_page
         );
-        let vorgang = objects::vg_id_get(self, header_params, path_params).await;
-
-        match vorgang {
-            Ok(vorgang) => Ok(VorgangGetByIdResponse::Status200_SuccessfulOperation(
-                vorgang,
-            )),
-            Err(e) => match &e {
-                LTZFError::Validation { source } => match **source {
-                    crate::error::DataValidationError::QueryParametersNotSatisfied => {
-                        Ok(VorgangGetByIdResponse::Status304_NoNewChanges)
-                    }
-                    _ => Err(e),
-                },
-                LTZFError::Database { source } => match **source {
-                    crate::error::DatabaseError::Sqlx {
-                        source: sqlx::Error::RowNotFound,
-                    } => Ok(VorgangGetByIdResponse::Status404_ContentNotFound),
-                    _ => Err(e),
-                },
-                _ => Err(e),
-            },
-        }
-    }
-    #[doc = "VorgangDelete - DELETE /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn vorgang_delete(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::VorgangDeletePathParams,
-    ) -> Result<VorgangDeleteResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await
-    }
-
-    #[doc = "VorgangIdPut - PUT /api/v1/vorgang/{vorgang_id}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn vorgang_id_put(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::VorgangIdPutPathParams,
-        body: &models::Vorgang,
-    ) -> Result<VorgangIdPutResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(VorgangIdPutResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        let out = objects::vorgang_id_put(self, path_params, body).await?;
-        Ok(out)
-    }
-
-    #[doc = "VorgangGet - GET /api/v1/vorgang"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn vorgang_get(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::VorgangGetHeaderParams,
-        query_params: &models::VorgangGetQueryParams,
-    ) -> Result<VorgangGetResponse> {
-        let mut tx = self.sqlx_db.begin().await?;
-        match objects::vg_get(header_params, query_params, &mut tx).await {
-            Ok(x) => {
-                tx.commit().await?;
-                Ok(x)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    #[doc = "VorgangPut - PUT /api/v1/vorgang"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn vorgang_put(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        query_params: &models::VorgangPutQueryParams,
-        body: &models::Vorgang,
-    ) -> Result<VorgangPutResponse> {
-        // technically not necessary since all authenticated scopes are allowed, still, better be explicit about that
-        if claims.0 != APIScope::KeyAdder
-            && claims.0 != APIScope::Admin
-            && claims.0 != APIScope::Collector
-        {
-            return Ok(VorgangPutResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        let rval = objects::vorgang_put(self, body).await;
-        match rval {
-            Ok(_) => Ok(VorgangPutResponse::Status201_Success),
-            Err(e) => match &e {
-                LTZFError::Validation { source } => match **source {
-                    DataValidationError::AmbiguousMatch { .. } => {
-                        Ok(VorgangPutResponse::Status409_Conflict)
-                    }
-                    _ => Err(e),
-                },
-                _ => Err(e),
-            },
-        }
-    }
-
-    #[doc = "SitzungDelete - DELETE /api/v1/sitzung/{sid}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn sitzung_delete(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::SitzungDeletePathParams,
-    ) -> Result<SitzungDeleteResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        Ok(delete_sitzung_by_api_id(path_params.sid, self).await?)
-    }
-
-    #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn s_get_by_id(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::SGetByIdHeaderParams,
-        path_params: &models::SGetByIdPathParams,
-    ) -> Result<SGetByIdResponse> {
-        let ass = objects::s_get_by_id(self, header_params, path_params).await?;
-        return Ok(ass);
-    }
-
-    #[doc = "SidPut - PUT /api/v1/sitzung/{sid}"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn sid_put(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        claims: &Self::Claims,
-        path_params: &models::SidPutPathParams,
-        body: &models::Sitzung,
-    ) -> Result<SidPutResponse> {
-        if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
-            return Ok(SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
-        }
-        let out = objects::s_id_put(self, path_params, body).await?;
-        Ok(out)
-    }
-
-    #[doc = "SGet - GET /api/v1/sitzung"]
-    #[must_use]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
-    async fn s_get(
-        &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
-        header_params: &models::SGetHeaderParams,
-        query_params: &models::SGetQueryParams,
-    ) -> Result<SGetResponse> {
-        let res = objects::s_get(self, query_params, header_params).await?;
-        Ok(res)
+        link_string = format!(
+            "{}<\"{}?page={}&per_page={}\">; rel=\"last\"",
+            link_string,
+            link_first_part,
+            self.x_total_pages.max(1),
+            self.x_per_page
+        );
+        link_string
     }
 }
 
 #[cfg(test)]
-mod endpoint_test {
-    use super::*;
-    use crate::{LTZFServer, Result};
-    use axum_extra::extract::Host;
-    use chrono::Utc;
-    use openapi::models::{self, VorgangIdPutPathParams, VorgangPutQueryParams};
-    use sha256::digest;
-    use uuid::Uuid;
-    const MASTER_URL: &str = "postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf";
+mod prp_test {
+    use crate::api::PaginationResponsePart;
+    #[test]
+    fn test_link_header() {
+        let prp = PaginationResponsePart::new(0, None, Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 2);
 
-    async fn setup_server(dbname: &str) -> Result<LTZFServer> {
-        let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE);", dbname))
-            .execute(&create_pool)
-            .await?;
-        sqlx::query(&format!(
-            "CREATE DATABASE {} WITH OWNER 'ltzf-user'",
-            dbname
-        ))
-        .execute(&create_pool)
-        .await?;
-        let pool = sqlx::PgPool::connect(&format!(
-            "postgres://ltzf-user:ltzf-pass@localhost:5432/{}",
-            dbname
-        ))
-        .await
-        .unwrap();
-        sqlx::migrate!().run(&pool).await?;
-        let hash = digest("total-nutzloser-wert");
-        sqlx::query!(
-            "INSERT INTO api_keys(key_hash, scope, created_by)
-            VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-            ON CONFLICT DO NOTHING;", hash)
-        .execute(&pool).await?;
-        Ok(LTZFServer::new(pool, Configuration::default(), None))
-    }
-    async fn cleanup_server(dbname: &str) -> Result<()> {
-        let create_pool = sqlx::PgPool::connect(MASTER_URL).await.unwrap();
-        sqlx::query(&format!("DROP DATABASE {} WITH (FORCE);", dbname))
-            .execute(&create_pool)
-            .await?;
-        Ok(())
-    }
+        let prp = PaginationResponsePart::new(100, Some(1), Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=2&per_page=16\">; rel=\"next\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 3);
 
-    // Authentication tests
-    #[tokio::test]
-    async fn test_auth_auth() {
-        let server = setup_server("test_auth").await.unwrap();
-        let resp = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Collector, 1),
-                &models::CreateApiKey {
-                    scope: "admin".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp, AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
-
-        let resp = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::CreateApiKey {
-                    scope: "collector".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp, AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
-
-        let resp = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::KeyAdder, 1),
-                &models::CreateApiKey {
-                    scope: "keyadder".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert_ne!(resp, AuthPostResponse::Status401_APIKeyIsMissingOrInvalid);
-        let key = match resp {
-            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
-            _ => panic!("Expected authorized response"),
-        };
-        // delete
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Collector, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(del, AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(del, AuthDeleteResponse::Status401_APIKeyIsMissingOrInvalid);
-
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::KeyAdder, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: "unknown-keyhash".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(del, AuthDeleteResponse::Status404_APIKeyNotFound);
-
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::KeyAdder, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(del, AuthDeleteResponse::Status204_Success);
-
-        cleanup_server("test_auth").await.unwrap();
+        let prp = PaginationResponsePart::new(100, Some(2), Some(16));
+        let lh = prp.generate_link_header("/");
+        let link_hdr_parts: Vec<_> = lh.split(", ").collect();
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=3&per_page=16\">; rel=\"next\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"previous\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=1&per_page=16\">; rel=\"first\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert!(
+            link_hdr_parts
+                .iter()
+                .any(|x| *x == "<\"/?page=7&per_page=16\">; rel=\"last\""),
+            "{:?}",
+            link_hdr_parts
+        );
+        assert_eq!(link_hdr_parts.len(), 4);
     }
 
-    // Calendar tests
-    #[tokio::test]
-    async fn test_calendar_endpoints() {
-        // Setup test server and database
-        let server = setup_server("test_calendar").await.unwrap();
-        let host = Host("localhost".to_string());
-        let cookies = CookieJar::new();
+    #[test]
+    fn test_start_and_end() {
+        let prp = PaginationResponsePart::new(0, None, None);
+        assert_eq!(prp.start(), 0);
+        assert_eq!(prp.end(), 0, "{prp:?}");
 
-        // Create test calendar entry
-        let test_date = chrono::Utc::now().date_naive();
-        let recent_date = test_date; // Define recent_date at the same scope level
-        let test_session = create_test_session();
-        let test_sessions = vec![test_session.clone()];
-
-        // Test cases for kal_date_put:
-        // 1. Update calendar entry with valid data and proper permissions
-        {
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Admin, 1),
-                    &models::KalDatePutPathParams {
-                        datum: test_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, KalDatePutResponse::Status201_Created);
-            // Allow time for database operations to complete
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        let prp = PaginationResponsePart::new(1, None, None);
+        assert_eq!(prp.start(), 0);
+        assert_eq!(prp.end(), 1);
+    }
+}
+pub struct DateRange {
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+impl
+    From<(
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    )> for DateRange
+{
+    fn from(
+        value: (
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+    ) -> Self {
+        Self {
+            since: value.0,
+            until: value.1,
         }
-
-        // 2. Update calendar entry with insufficient permissions
-        {
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1), // Using Collector scope with old date should fail
-                    &models::KalDatePutPathParams {
-                        datum: test_date.checked_sub_days(chrono::Days::new(5)).unwrap(), // Date more than 1 day old
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalDatePutResponse::Status401_APIKeyIsMissingOrInvalid
-            );
+    }
+}
+pub fn find_applicable_date_range(
+    y: Option<u32>,
+    m: Option<u32>,
+    d: Option<u32>,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    until: Option<chrono::DateTime<chrono::Utc>>,
+    ifmodsince: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<DateRange> {
+    let ymd_date_range = if let Some(y) = y {
+        if let Some(m) = m {
+            if let Some(d) = d {
+                Some((
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, d).unwrap(),
+                ))
+            } else {
+                Some((
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m, 1).unwrap(),
+                    chrono::NaiveDate::from_ymd_opt(y as i32, m + 1, 1)
+                        .unwrap()
+                        .checked_sub_days(chrono::Days::new(1))
+                        .unwrap(),
+                ))
+            }
+        } else {
+            Some((
+                chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1).unwrap(),
+                chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31).unwrap(),
+            ))
         }
+    } else {
+        None
+    }
+    .map(|(a, b)| {
+        (
+            a.and_hms_opt(0, 0, 0).unwrap().and_utc(),
+            b.and_hms_opt(23, 59, 59).unwrap().and_utc(),
+        )
+    });
 
-        // 3. Update calendar entry with date constraints (collector is allowed to update recent dates)
-        {
-            // Use the already defined recent_date variable instead of redefining it
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::KalDatePutPathParams {
-                        datum: recent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, KalDatePutResponse::Status201_Created);
-            // Allow time for database operations to complete
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    let mut since_min = ifmodsince;
+    let mut until_min = until;
+    if let Some(since) = since {
+        if since_min.is_some() {
+            since_min = Some(since_min.unwrap().min(since));
+        } else {
+            since_min = Some(since);
         }
+    }
+    if let Some((ymd_s, ymd_u)) = ymd_date_range {
+        if since_min.is_some() {
+            since_min = Some(ymd_s.max(since_min.unwrap()));
+        } else {
+            since_min = Some(ymd_s);
+        }
+        if until_min.is_some() {
+            until_min = Some(ymd_u.min(until_min.unwrap()));
+        } else {
+            until_min = Some(ymd_u);
+        }
+    }
 
-        // Test cases for kal_date_get:
-        // 1. Get calendar entry for valid date and parliament
-        {
-            let response = server
-                .kal_date_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalDateGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalDateGetPathParams {
-                        datum: recent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                KalDateGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(
-                    sessions,
-                ) => {
-                    assert!(
-                        !sessions.is_empty(),
-                        "Expected to find at least one session"
-                    );
-                    assert_eq!(sessions[0].gremium.parlament, models::Parlament::Bt);
-                    assert_eq!(
-                        sessions[0].termin.date_naive(),
-                        recent_date,
-                        "Expected to find a session with the requested date"
-                    );
-                }
-                _ => panic!("Expected to find sessions for the valid date"),
+    // semantic check
+    if let Some(sm) = since_min {
+        if sm < chrono::DateTime::parse_from_rfc3339("1945-01-01T00:00:00+00:00").unwrap() {
+            return None;
+        }
+        if let Some(um) = until {
+            if sm >= um {
+                return None;
             }
         }
-
-        // 2. Get calendar entry for non-existent date
-        {
-            let non_existent_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
-            let response = server
-                .kal_date_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalDateGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalDateGetPathParams {
-                        datum: non_existent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, KalDateGetResponse::Status404_NotFound);
-        }
-        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
-
-        // Test cases for kal_get:
-        // 1. Get calendar entries with valid parameters
-        {
-            let response = server
-                .kal_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalGetQueryParams {
-                        y: Some(recent_date.format("%Y").to_string().parse::<i32>().unwrap()),
-                        m: Some(recent_date.format("%m").to_string().parse::<i32>().unwrap()),
-                        dom: None,
-                        gr: None,
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        wp: Some(20),
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
-                    assert!(
-                        !sessions.is_empty(),
-                        "Expected to find sessions with valid filters"
-                    );
-                }
-                _ => panic!("Expected to find sessions with valid filters"),
-            }
-        }
-
-        // 2. Get calendar entries with invalid parameters (since > until)
-        {
-            let response = server
-                .kal_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalGetQueryParams {
-                        y: None,
-                        m: None,
-                        dom: None,
-                        gr: None,
-                        limit: None,
-                        offset: None,
-                        p: None,
-                        since: Some(chrono::Utc::now()),
-                        until: Some(chrono::Utc::now() - chrono::Duration::days(1)), // until is before since
-                        wp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalGetResponse::Status416_RequestRangeNotSatisfiable
-            );
-        }
-
-        // 3. Get calendar entries with date range
-        {
-            let start_date = recent_date
-                .and_time(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap())
-                .and_utc();
-            let end_date = recent_date
-                .checked_add_days(chrono::Days::new(5))
-                .unwrap()
-                .and_time(chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap())
-                .and_utc();
-
-            let response = server
-                .kal_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalGetQueryParams {
-                        y: None,
-                        m: None,
-                        dom: None,
-                        gr: None,
-                        limit: None,
-                        offset: None,
-                        p: Some(models::Parlament::Bt),
-                        since: Some(start_date),
-                        until: Some(end_date),
-                        wp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                KalGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
-                    assert!(
-                        !sessions.is_empty(),
-                        "Expected to find sessions in date range"
-                    );
-                    for session in sessions {
-                        assert!(
-                            session.termin >= start_date && session.termin <= end_date,
-                            "Found session outside requested date range"
-                        );
-                    }
-                }
-                _ => panic!("Expected to find sessions in date range"),
-            }
-        }
-
-        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
-        // TODO: Test for Status204_NoContent
-
-        // Cleanup
-        cleanup_server("test_calendar").await.unwrap();
     }
 
-    // Procedure (Vorgang) tests
-    #[tokio::test]
-    async fn test_vorgang_get_by_id_endpoints() {
-        // Setup test server and database
-        let server = setup_server("test_vorgang_by_id_get").await.unwrap();
-
-        let test_vorgang = create_test_vorgang();
-        // First create the procedure
-        let create_response = server
-            .vorgang_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Collector, 1),
-                &models::VorgangPutQueryParams {
-                    collector: test_vorgang.api_id,
-                },
-                &test_vorgang,
-            )
-            .await
-            .unwrap();
-        assert_eq!(create_response, VorgangPutResponse::Status201_Success);
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        // Test cases for vorgang_get_by_id:
-        // 1. Get existing procedure
+    if let Some((ys, yu)) = ymd_date_range {
+        if since_min.is_some() && since_min.unwrap() > yu
+            || until_min.is_some() && until_min.unwrap() < ys
         {
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                VorgangGetByIdResponse::Status200_SuccessfulOperation(vorgang) => {
-                    assert_eq!(vorgang.api_id, test_vorgang.api_id);
-                    assert_eq!(vorgang.titel, test_vorgang.titel);
-                }
-                _ => panic!("Expected successful operation response"),
-            }
+            None
+        } else {
+            Some((since_min, until_min).into())
         }
+    } else {
+        Some((since_min, until_min).into())
+    }
+}
 
-        // 2. Get non-existent procedure
-        {
-            let non_existent_id = Uuid::now_v7();
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: non_existent_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
-        }
+#[cfg(test)]
+mod test_applicable_date_range {
+    use super::find_applicable_date_range;
+    use chrono::DateTime;
 
-        // 3. Get procedure with invalid ID
-        {
-            let invalid_id = Uuid::nil();
-            let response = server
-                .vorgang_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetByIdPathParams {
-                        vorgang_id: invalid_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, VorgangGetByIdResponse::Status404_ContentNotFound);
-        }
-        let response = server
-            .vorgang_get_by_id(
-                &Method::GET,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &models::VorgangGetByIdHeaderParams {
-                    if_modified_since: Some(chrono::Utc::now()),
-                },
-                &models::VorgangGetByIdPathParams {
-                    vorgang_id: test_vorgang.api_id,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(response, VorgangGetByIdResponse::Status304_NoNewChanges);
-        cleanup_server("test_vorgang_by_id_get").await.unwrap();
+    #[test]
+    fn test_date_range_none() {
+        let result = find_applicable_date_range(None, None, None, None, None, None);
+        assert!(
+            result.is_some()
+                && result.as_ref().unwrap().since.is_none()
+                && result.unwrap().until.is_none(),
+            "None dates should not fail but produce (None, None)"
+        );
+    }
+    #[test]
+    fn test_date_range_untilsince() {
+        let since = DateTime::parse_from_rfc3339("1960-01-01T00:00:00+00:00")
+            .unwrap()
+            .to_utc();
+        let until = DateTime::parse_from_rfc3339("1960-01-02T00:00:00+00:00")
+            .unwrap()
+            .to_utc();
+        let result = find_applicable_date_range(None, None, None, Some(since), Some(until), None);
+        assert!(
+            result.is_some()
+                && result.as_ref().unwrap().since == Some(since)
+                && result.unwrap().until == Some(until),
+            "Since and until should yield (since, until)"
+        )
+    }
+    #[test]
+    fn test_date_range_ymd() {
+        let y = 2012u32;
+        let m = 5u32;
+        let d = 12u32;
+
+        // ymd
+        let result = find_applicable_date_range(Some(y), Some(m), Some(d), None, None, None);
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, d)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
+        // ym
+        let result = find_applicable_date_range(Some(y), Some(m), None, None, None, None);
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, m, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, m, 31)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
+        // y
+        let result = find_applicable_date_range(Some(y), None, None, None, None, None);
+        let expected_since = chrono::NaiveDate::from_ymd_opt(y as i32, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(y as i32, 12, 31)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(
+            result.since == Some(expected_since) && result.until == Some(expected_until),
+            "ymd should start and end at the date range"
+        );
     }
 
-    #[tokio::test]
-    async fn test_vorgang_get_filtered_endpoints() {
-        let server = setup_server("test_vorgang_get_filtered").await.unwrap();
-        let test_vorgang = create_test_vorgang();
-        // First create the procedure
-        {
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutQueryParams {
-                        collector: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                create_response,
-                VorgangPutResponse::Status201_Success,
-                "Failed to create test procedure"
-            );
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        }
+    #[test]
+    fn test_minmax() {
+        let y = 2012u32;
 
-        // 2. Get procedures with invalid parameters
-        {
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetQueryParams {
-                        limit: None,
-                        offset: None,
-                        p: None,
-                        since: Some(Utc::now()),
-                        until: Some(Utc::now() - chrono::Duration::days(365)), // invalid: until is before since
-                        vgtyp: None,
-                        wp: None,
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangGetResponse::Status416_RequestRangeNotSatisfiable
-            );
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetQueryParams {
-                        limit: None,  // Invalid limit
-                        offset: None, // Invalid offset
-                        p: None,
-                        since: Some(Utc::now() + chrono::Duration::days(365)),
-                        until: Some(Utc::now() + chrono::Duration::days(366)),
-                        vgtyp: None,
-                        wp: None,
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
-            );
-        }
+        let since = chrono::NaiveDate::from_ymd_opt(2000, 3, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
+            .unwrap()
+            .and_hms_opt(15, 59, 59)
+            .unwrap()
+            .and_utc();
 
-        // 3. Get procedures with filters
-        {
-            let test_vorgang = create_test_vorgang();
-            // First create a procedure with specific parameters
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutQueryParams {
-                        collector: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        let expected_since = chrono::NaiveDate::from_ymd_opt(2012, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let expected_until = chrono::NaiveDate::from_ymd_opt(2012, 7, 31)
+            .unwrap()
+            .and_hms_opt(15, 59, 59)
+            .unwrap()
+            .and_utc();
 
-            // Then get it with matching filters
-            let response = server
-                .vorgang_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::VorgangGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::VorgangGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        vgtyp: Some(test_vorgang.typ),
-                        wp: Some(test_vorgang.wahlperiode as i32),
-                        inifch: None,
-                        iniorg: None,
-                        inipsn: None,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                VorgangGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuVorgang(
-                    vorgange,
-                ) => {
-                    assert!(!vorgange.is_empty());
-                }
-                response => panic!("Expected successful operation response, got {:?}", response),
-            }
-        }
-
-        // Cleanup
-        cleanup_server("test_vorgang_get_filtered").await.unwrap();
+        let result =
+            find_applicable_date_range(Some(y), None, None, Some(since), Some(until), None);
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.since.is_some() && result.since.unwrap() == expected_since);
+        assert!(result.until.is_some() && result.until.unwrap() == expected_until);
     }
+}
 
-    #[tokio::test]
-    async fn test_vorgang_put_endpoint() {
-        // Setup test server and database
-        let server = setup_server("test_vorgang_put").await.unwrap();
-        let host = Host("localhost".to_string());
-        let cookies = CookieJar::new();
-
-        // Test cases for vorgang_id_put:
-        // 1. Update existing procedure with valid data and admin permissions
-        {
-            let test_vorgang = create_test_vorgang();
-            let response = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, VorgangIdPutResponse::Status201_Created);
-        }
-
-        // 2. Update procedure with insufficient permissions (Collector)
-        {
-            let test_vorgang = create_test_vorgang();
-            let response = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangIdPutPathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangIdPutResponse::Status401_APIKeyIsMissingOrInvalid
-            );
-        }
-
-        // Test cases for vorgang_put:
-        // 1. Create new procedure with valid data and collector permissions
-        {
-            let test_vorgang = create_test_vorgang();
-            let response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutQueryParams {
-                        collector: test_vorgang.api_id,
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, VorgangPutResponse::Status201_Success);
-        }
-
-        // 2. Handle ambiguous matches (conflict)
-        {
-            let vg1 = create_test_vorgang();
-            let mut vg2 = vg1.clone();
-            let mut vg3 = vg1.clone();
-            vg2.api_id = Uuid::now_v7();
-            vg3.api_id = Uuid::now_v7();
-
-            let rsp1 = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangIdPutPathParams {
-                        vorgang_id: vg1.api_id,
-                    },
-                    &vg1,
-                )
-                .await
-                .unwrap();
-            assert_eq!(rsp1, VorgangIdPutResponse::Status201_Created);
-
-            let rsp2 = server
-                .vorgang_id_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangIdPutPathParams {
-                        vorgang_id: vg2.api_id,
-                    },
-                    &vg2,
-                )
-                .await
-                .unwrap();
-            assert_eq!(rsp2, VorgangIdPutResponse::Status201_Created);
-
-            let conflict_resp = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(APIScope::Admin, 1),
-                    &VorgangPutQueryParams {
-                        collector: Uuid::nil(),
-                    },
-                    &vg3,
-                )
-                .await
-                .unwrap();
-            assert_eq!(conflict_resp, VorgangPutResponse::Status409_Conflict);
-        }
-
-        // Cleanup
-        cleanup_server("test_vorgang_put").await.unwrap();
+#[derive(Debug, Clone)]
+pub(crate) struct WrappedAutor {
+    pub autor: models::Autor,
+}
+impl PartialEq for WrappedAutor {
+    fn eq(&self, other: &Self) -> bool {
+        self.autor.organisation == other.autor.organisation
+            && self.autor.person == other.autor.person
     }
-
-    #[tokio::test]
-    async fn test_vorgang_delete_endpoints() {
-        // Setup test server and database
-        let server = setup_server("test_vorgang_delete").await.unwrap();
-        // Test cases for vorgang_delete:
-        // 1. Delete existing procedure with proper permissions
-        {
-            let test_vorgang = create_test_vorgang();
-            // First create the procedure
-            let create_response = server
-                .vorgang_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangPutQueryParams {
-                        collector: Uuid::now_v7(),
-                    },
-                    &test_vorgang,
-                )
-                .await
-                .unwrap();
-            assert_eq!(create_response, VorgangPutResponse::Status201_Success);
-
-            // Then delete it
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status204_DeletedSuccessfully,
-                "Failed to delete procedure with id {}",
-                test_vorgang.api_id
-            );
-        }
-
-        // 2. Delete non-existent procedure
-        {
-            let non_existent_id = Uuid::now_v7();
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: non_existent_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status404_NoElementWithThisID
-            );
-        }
-
-        // 3. Delete procedure with insufficient permissions
-        {
-            let test_vorgang = create_test_vorgang();
-            let response = server
-                .vorgang_delete(
-                    &Method::DELETE,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::VorgangDeletePathParams {
-                        vorgang_id: test_vorgang.api_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                VorgangDeleteResponse::Status401_APIKeyIsMissingOrInvalid
-            );
-        }
-
-        // Cleanup
-        cleanup_server("test_vorgang_delete").await.unwrap();
+}
+impl Eq for WrappedAutor {}
+impl PartialOrd for WrappedAutor {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(std::cmp::Ord::cmp(self, other))
     }
+}
+impl Ord for WrappedAutor {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.autor
+            .organisation
+            .cmp(&other.autor.organisation)
+            .then(self.autor.person.cmp(&other.autor.person))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod endpoint_test {
+    use openapi::models;
+
+    use crate::utils::test::generate::default_gremium;
 
     // Session (Sitzung) tests
-    fn create_test_session() -> models::Sitzung {
-        use chrono::{DateTime, Utc};
-        use openapi::models::{Autor, DokRef, Dokument, Gremium, Parlament, Sitzung, Top};
+    pub(crate) fn create_test_session() -> models::Sitzung {
+        use chrono::Utc;
+        use openapi::models::{
+            Autor, Dokument, Gremium, Parlament, Sitzung, StationDokumenteInner, Top,
+        };
         use uuid::Uuid;
 
         // Create a test document
         let test_doc = Dokument {
+            touched_by: None,
             api_id: Some(Uuid::now_v7()),
             titel: "Test Document".to_string(),
             kurztitel: None,
@@ -1305,10 +544,10 @@ mod endpoint_test {
             typ: openapi::models::Doktyp::Entwurf,
             link: "http://example.com/doc".to_string(),
             hash: "testhash".to_string(),
-            zp_modifiziert: DateTime::from(Utc::now()),
+            zp_modifiziert: Utc::now(),
             drucksnr: None,
-            zp_referenz: DateTime::from(Utc::now()),
-            zp_erstellt: Some(DateTime::from(Utc::now())),
+            zp_referenz: Utc::now(),
+            zp_erstellt: Some(Utc::now()),
             meinung: None,
             schlagworte: None,
             autoren: vec![Autor {
@@ -1322,7 +561,7 @@ mod endpoint_test {
         // Create a test top
         let test_top = Top {
             titel: "Test Top".to_string(),
-            dokumente: Some(vec![DokRef::Dokument(Box::new(test_doc))]),
+            dokumente: Some(vec![StationDokumenteInner::Dokument(Box::new(test_doc))]),
             nummer: 1,
             vorgang_id: None,
         };
@@ -1341,7 +580,8 @@ mod endpoint_test {
             nummer: 1,
             titel: Some("Test Sitzung".to_string()),
             public: true,
-            termin: DateTime::from(Utc::now()),
+            touched_by: None,
+            termin: Utc::now(),
             gremium: Gremium {
                 name: "Test Gremium".to_string(),
                 link: Some("http://example.com/gremium".to_string()),
@@ -1355,429 +595,11 @@ mod endpoint_test {
         }
     }
 
-    #[tokio::test]
-    async fn test_session_get_endpoints() {
-        // Setup test server and database
-        let server = setup_server("test_session_get").await.unwrap();
-
-        let test_session = create_test_session();
-        // First create the session
-        let create_response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::SidPutPathParams {
-                    sid: test_session.api_id.unwrap(),
-                },
-                &test_session,
-            )
-            .await
-            .unwrap();
-        assert_eq!(create_response, SidPutResponse::Status201_Created);
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        // Test cases for s_get_by_id:
-        // 1. Get existing session
-        {
-            let response = server
-                .s_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetByIdPathParams {
-                        sid: test_session.api_id.unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                SGetByIdResponse::Status200_SuccessfulOperation(session) => {
-                    assert_eq!(session.api_id, test_session.api_id);
-                    assert_eq!(session.titel, test_session.titel);
-                }
-                _ => panic!("Expected successful operation response"),
-            }
-        }
-
-        // 2. Get non-existent session
-        {
-            let non_existent_id = Uuid::now_v7();
-            let response = server
-                .s_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetByIdPathParams {
-                        sid: non_existent_id,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SGetByIdResponse::Status404_ContentNotFound);
-        }
-
-        // 3. Get session with invalid ID
-        {
-            let invalid_id = Uuid::nil();
-            let response = server
-                .s_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetByIdPathParams { sid: invalid_id },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SGetByIdResponse::Status404_ContentNotFound);
-        }
-        {
-            let response = server
-                .s_get_by_id(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: Some(chrono::Utc::now()),
-                    },
-                    &models::SGetByIdPathParams {
-                        sid: test_session.api_id.unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SGetByIdResponse::Status304_NotModified);
-        }
-
-        // Test cases for s_get:
-        // 1. Get sessions with valid parameters
-        {
-            let response = server
-                .s_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetQueryParams {
-                        limit: None,
-                        offset: None,
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        wp: Some(20),
-                        vgid: None,
-                        vgtyp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
-                    assert!(!sessions.is_empty());
-                }
-                rsp => panic!("Expected successful operation response, got {:?}", rsp),
-            }
-        }
-
-        // 2. Get sessions with invalid parameters
-        {
-            let response = server
-                .s_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetQueryParams {
-                        limit: None,
-                        offset: None,
-                        p: None,
-                        since: Some(Utc::now()),
-                        until: Some(Utc::now() - chrono::Duration::days(365)),
-                        wp: None,
-                        vgid: None,
-                        vgtyp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SGetResponse::Status416_RequestRangeNotSatisfiable);
-        }
-
-        let test_session = create_test_session();
-        // First create a session with specific parameters
-        let create_response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::SidPutPathParams {
-                    sid: test_session.api_id.unwrap(),
-                },
-                &test_session,
-            )
-            .await
-            .unwrap();
-        assert_eq!(create_response, SidPutResponse::Status201_Created);
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        // 3. Get sessions with filters
-        {
-            let response = server
-                .s_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        wp: Some(20),
-                        vgid: None,
-                        vgtyp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                SGetResponse::Status200_AntwortAufEineGefilterteAnfrageZuSitzungen(sessions) => {
-                    assert!(!sessions.is_empty());
-                }
-                _ => panic!("Expected successful operation response"),
-            }
-        }
-        {
-            let response = server
-                .s_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetHeaderParams {
-                        if_modified_since: Some(chrono::Utc::now()),
-                    },
-                    &models::SGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        wp: Some(20),
-                        vgid: None,
-                        vgtyp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SGetResponse::Status304_NoNewChanges);
-        }
-        {
-            let response = server
-                .s_get(
-                    &Method::GET,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::SGetQueryParams {
-                        limit: Some(10),
-                        offset: Some(0),
-                        p: Some(models::Parlament::Bt),
-                        since: None,
-                        until: None,
-                        wp: Some(22),
-                        vgid: None,
-                        vgtyp: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                SGetResponse::Status204_NoContentFoundForTheSpecifiedParameters
-            );
-        }
-        // Cleanup
-        cleanup_server("test_session_get").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_session_modify_endpoints() {
-        let server = setup_server("session_modify_ep").await.unwrap();
-        let sitzung = create_test_session();
-        // - Input non-existing session
-        {
-            let response = server
-                .sid_put(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Admin, 1),
-                    &models::SidPutPathParams {
-                        sid: sitzung.api_id.unwrap(),
-                    },
-                    &sitzung,
-                )
-                .await
-                .unwrap();
-            assert_eq!(response, SidPutResponse::Status201_Created);
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        }
-
-        // - Update existing session with the same data
-        let response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
-                },
-                &sitzung,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            response,
-            SidPutResponse::Status204_NotModified,
-            "Failed to update existing session with the same data.\nInput:  {:?}\n\n Output: {:?}",
-            sitzung,
-            server
-                .s_get_by_id(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: None
-                    },
-                    &models::SGetByIdPathParams {
-                        sid: sitzung.api_id.unwrap()
-                    },
-                )
-                .await
-                .unwrap()
-        );
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-        // - Update existing session with valid new data
-        let rsp_new = models::Sitzung {
-            link: Some("https://example.com/a/b/c".to_string()),
-            ..sitzung.clone()
-        };
-        let response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
-                },
-                &rsp_new,
-            )
-            .await
-            .unwrap();
-        assert_eq!(response, SidPutResponse::Status201_Created);
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-        // - Update session with insufficient permissions
-        let response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Collector, 1),
-                &models::SidPutPathParams {
-                    sid: sitzung.api_id.unwrap(),
-                },
-                &sitzung,
-            )
-            .await
-            .unwrap();
-        assert_eq!(response, SidPutResponse::Status401_APIKeyIsMissingOrInvalid);
-
-        // Test cases for sitzung_delete:
-        {
-            // - Delete existing session with proper permissions
-            let response = server
-                .sitzung_delete(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::KeyAdder, 1),
-                    &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                SitzungDeleteResponse::Status204_DeletedSuccessfully
-            );
-
-            // - Delete non-existent session
-            let response = server
-                .sitzung_delete(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::KeyAdder, 1),
-                    &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                SitzungDeleteResponse::Status404_NoElementWithThisID
-            );
-
-            // - Delete session with insufficient permissions
-            let response = server
-                .sitzung_delete(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(auth::APIScope::Collector, 1),
-                    &models::SitzungDeletePathParams {
-                        sid: sitzung.api_id.unwrap(),
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                SitzungDeleteResponse::Status401_APIKeyIsMissingOrInvalid
-            );
-        }
-        cleanup_server("session_modify_ep").await.unwrap();
-    }
-
-    fn create_test_vorgang() -> models::Vorgang {
-        use chrono::{DateTime, Utc};
+    pub(crate) fn create_test_vorgang() -> models::Vorgang {
+        use chrono::Utc;
         use openapi::models::{
-            Autor, DokRef, Doktyp, Dokument, Parlament, Station, Stationstyp, VgIdent, VgIdentTyp,
-            Vorgang, Vorgangstyp,
+            Autor, Doktyp, Dokument, Station, StationDokumenteInner, Stationstyp, VgIdent,
+            VgIdentTyp, Vorgang, Vorgangstyp,
         };
         use uuid::Uuid;
 
@@ -1785,6 +607,7 @@ mod endpoint_test {
         let test_doc = Dokument {
             api_id: Some(Uuid::now_v7()),
             titel: "Test Document".to_string(),
+            touched_by: None,
             kurztitel: None,
             vorwort: Some("Test Vorwort".to_string()),
             volltext: "Test Volltext".to_string(),
@@ -1792,10 +615,10 @@ mod endpoint_test {
             typ: Doktyp::Entwurf,
             link: "http://example.com/doc".to_string(),
             hash: "testhash".to_string(),
-            zp_modifiziert: DateTime::from(Utc::now()),
+            zp_modifiziert: Utc::now(),
             drucksnr: None,
-            zp_referenz: DateTime::from(Utc::now()),
-            zp_erstellt: Some(DateTime::from(Utc::now())),
+            zp_referenz: Utc::now(),
+            zp_erstellt: Some(Utc::now()),
             meinung: None,
             schlagworte: None,
             autoren: vec![models::Autor {
@@ -1809,16 +632,16 @@ mod endpoint_test {
         // Create a test station
         let test_station = Station {
             typ: Stationstyp::ParlInitiativ,
-            dokumente: vec![DokRef::Dokument(Box::new(test_doc))],
-            zp_start: DateTime::from(Utc::now()),
+            dokumente: vec![StationDokumenteInner::Dokument(Box::new(test_doc))],
+            zp_start: Utc::now(),
             api_id: Some(Uuid::now_v7()),
+            touched_by: None,
             titel: Some("Test Station".to_string()),
             gremium_federf: None,
             link: Some("http://example.com".to_string()),
             trojanergefahr: None,
-            zp_modifiziert: Some(DateTime::from(Utc::now())),
-            parlament: Parlament::Bt,
-            gremium: None,
+            zp_modifiziert: Some(Utc::now()),
+            gremium: default_gremium(),
             schlagworte: None,
             additional_links: None,
             stellungnahmen: None,
@@ -1843,6 +666,8 @@ mod endpoint_test {
             api_id: Uuid::now_v7(),
             titel: "Test Vorgang".to_string(),
             kurztitel: Some("Test".to_string()),
+            lobbyregister: None,
+            touched_by: None,
             wahlperiode: 20,
             verfassungsaendernd: false,
             typ: Vorgangstyp::GgEinspruch,

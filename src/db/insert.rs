@@ -1,15 +1,20 @@
+use super::*;
 use std::str::FromStr;
 
+use crate::db::merge::candidates::dokument_merge_candidates;
 use crate::{
     LTZFServer, Result,
     utils::{self, notify::notify_new_enum_entry},
 };
 use openapi::models;
 use sqlx::PgTransaction;
+use uuid::Uuid;
 
 /// Inserts a new Vorgang into the database.
 pub async fn insert_vorgang(
     vg: &models::Vorgang,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     server: &LTZFServer,
 ) -> Result<i32> {
@@ -81,9 +86,97 @@ pub async fn insert_vorgang(
     .await?;
 
     // insert stations
+    let mut stat_ids = vec![];
     for stat in &vg.stationen {
-        insert_station(stat.clone(), vg_id, tx, server).await?;
+        stat_ids.push(
+            insert_station(stat.clone(), vg_id, scraper_id, collector_key, tx, server).await?,
+        );
     }
+    sqlx::query!(
+        "INSERT INTO scraper_touched_vorgang(vg_id, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(vg_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        vg_id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT vg_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY vg_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_vorgang
+        )
+        DELETE FROM scraper_touched_vorgang stv
+        USING ranked_objects ro
+        WHERE stv.vg_id=ro.vg_id AND
+        stv.scraper=ro.scraper AND
+        ro.rn > $1",
+        server.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    // insert Lobbyregister
+    if let Some(lobbyr) = &vg.lobbyregister {
+        for l in lobbyr {
+            let aid = insert_or_retrieve_autor(&l.organisation, tx, server).await?;
+            let lrid = sqlx::query!(
+                "INSERT INTO lobbyregistereintrag(intention, interne_id, organisation, vg_id, link)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id",
+                &l.intention,
+                &l.interne_id,
+                &aid,
+                vg_id,
+                &l.link
+            )
+            .map(|r| r.id)
+            .fetch_one(&mut **tx)
+            .await?;
+            sqlx::query!(
+                "INSERT INTO rel_lobbyreg_drucksnr(drucksnr, lob_id) 
+            SELECT x, $1 FROM UNNEST($2::text[]) as x(x)",
+                lrid,
+                &l.betroffene_drucksachen
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+
+    // bookkeeping
+    sqlx::query!(
+        "INSERT INTO scraper_touched_station(stat_id, collector_key, scraper) 
+    SELECT sid, $2, $3 FROM UNNEST($1::int4[]) as sid ON CONFLICT(stat_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        &stat_ids[..],
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT stat_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY stat_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_station
+        )
+        DELETE FROM scraper_touched_station st
+        USING ranked_objects ro
+        WHERE st.stat_id=ro.stat_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        server.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
+
     tracing::info!("Vorgang Insertion Successful with ID: {}", vg_id);
     Ok(vg_id)
 }
@@ -91,6 +184,8 @@ pub async fn insert_vorgang(
 pub async fn insert_station(
     stat: models::Station,
     vg_id: i32,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -103,26 +198,19 @@ pub async fn insert_station(
     {
         return Ok(id.id);
     }
-    let gr_id = if let Some(gremium) = stat.gremium {
-        let gr_id = insert_or_retrieve_gremium(&gremium, tx, srv).await?;
-        Some(gr_id)
-    } else {
-        None
-    };
+    let gr_id = insert_or_retrieve_gremium(&stat.gremium, tx, srv).await?;
     let stat_id = sqlx::query!(
         "INSERT INTO station 
-        (api_id, gr_id, link, p_id, titel, trojanergefahr, typ, 
+        (api_id, gr_id, link, titel, trojanergefahr, typ, 
         zp_start, vg_id, zp_modifiziert, gremium_isff)
         VALUES
-        ($1, $2, $3,
-        (SELECT id FROM parlament   WHERE value = $4), $5, $6,
-        (SELECT id FROM stationstyp WHERE value = $7), $8, $9, 
-        COALESCE($10, NOW()), $11)
+        ($1, $2, $3, $4, $5,
+        (SELECT id FROM stationstyp WHERE value = $6), $7, $8, 
+        COALESCE($9, NOW()), $10)
         RETURNING station.id",
         sapi,
         gr_id,
         stat.link,
-        stat.parlament.to_string(),
         stat.titel,
         stat.trojanergefahr.map(|x| x as i32),
         srv.guard_ts(stat.typ, sapi, obj)?,
@@ -146,9 +234,9 @@ pub async fn insert_station(
     .await?;
 
     // assoziierte dokumente
-    let mut did = Vec::with_capacity(stat.dokumente.len());
+    let mut did = vec![];
     for dokument in stat.dokumente {
-        did.push(insert_or_retrieve_dok(&dokument, tx, srv).await?);
+        did.push(insert_or_retrieve_dok(&dokument, scraper_id, collector_key, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO rel_station_dokument(stat_id, dok_id) 
@@ -163,7 +251,7 @@ pub async fn insert_station(
     if let Some(stln) = stat.stellungnahmen {
         let mut doks = Vec::with_capacity(stln.len());
         for stln in stln {
-            doks.push(insert_dokument(stln, tx, srv).await?);
+            doks.push(insert_or_retrieve_dok(&stln, scraper_id, collector_key, tx, srv).await?);
         }
         sqlx::query!(
             "INSERT INTO rel_station_stln (stat_id, dok_id)
@@ -182,11 +270,13 @@ pub async fn insert_station(
 
 pub async fn insert_dokument(
     dok: models::Dokument,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut sqlx::PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
     let dapi = dok.api_id.unwrap_or(uuid::Uuid::now_v7());
-    match crate::db::merge::vorgang::dokument_merge_candidates(&dok, &mut **tx, srv).await? {
+    match dokument_merge_candidates(&dok, &mut **tx, srv).await? {
         super::merge::MatchState::ExactlyOne(id) => return Ok(id),
         super::merge::MatchState::Ambiguous(matches) => {
             let api_ids = sqlx::query!(
@@ -226,7 +316,6 @@ pub async fn insert_dokument(
     .map(|r| r.id)
     .fetch_one(&mut **tx)
     .await?;
-
     // Schlagworte
     insert_dok_sw(did, dok.schlagworte.unwrap_or_default(), tx).await?;
 
@@ -243,11 +332,42 @@ pub async fn insert_dokument(
     )
     .execute(&mut **tx)
     .await?;
+
+    sqlx::query!(
+        "INSERT INTO scraper_touched_dokument(dok_id, collector_key, scraper) 
+    VALUES ($1, $2, $3) 
+    ON CONFLICT(dok_id, scraper) DO UPDATE SET time_stamp=NOW()",
+        did,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT dok_id, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY dok_id
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_dokument
+        )
+        DELETE FROM scraper_touched_dokument st
+        USING ranked_objects ro
+        WHERE st.dok_id=ro.dok_id AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(did)
 }
 
 pub async fn insert_sitzung(
     ass: &models::Sitzung,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -273,7 +393,7 @@ pub async fn insert_sitzung(
     .await?;
     // insert tops
     for top in &ass.tops {
-        insert_top(id, top, tx, srv).await?;
+        insert_top(id, top, scraper_id, collector_key, tx, srv).await?;
     }
 
     // insert experten
@@ -290,6 +410,33 @@ pub async fn insert_sitzung(
     )
     .execute(&mut **tx)
     .await?;
+    sqlx::query!(
+        "INSERT INTO scraper_touched_sitzung (sid, collector_key, scraper) VALUES ($1, $2, $3) ON CONFLICT(sid, scraper) 
+        DO UPDATE SET time_stamp=NOW()",
+        id,
+        collector_key,
+        scraper_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "WITH ranked_objects AS (
+        SELECT sid, scraper, 
+        ROW_NUMBER() OVER (
+            PARTITION BY sid
+            ORDER BY time_stamp DESC
+        ) AS rn 
+        FROM scraper_touched_sitzung
+        )
+        DELETE FROM scraper_touched_sitzung st
+        USING ranked_objects ro
+        WHERE st.sid=ro.sid AND
+        st.scraper=ro.scraper AND
+        ro.rn > $1",
+        srv.config.per_object_scraper_log_size as i64
+    )
+    .execute(&mut **tx)
+    .await?;
     tracing::info!(
         "Neue Sitzung angelegt am {} im Parlament {}",
         ass.termin,
@@ -301,6 +448,8 @@ pub async fn insert_sitzung(
 pub async fn insert_top(
     sid: i32,
     top: &models::Top,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
@@ -318,7 +467,7 @@ pub async fn insert_top(
     // drucksachen
     let mut dids = vec![];
     for d in top.dokumente.as_ref().unwrap_or(&vec![]) {
-        dids.push(insert_or_retrieve_dok(d, tx, srv).await?);
+        dids.push(insert_or_retrieve_dok(d, scraper_id, collector_key, tx, srv).await?);
     }
     sqlx::query!(
         "INSERT INTO tops_doks(top_id, dok_id)
@@ -465,13 +614,17 @@ pub async fn insert_or_retrieve_autor(
 }
 
 pub async fn insert_or_retrieve_dok(
-    dr: &models::DokRef,
+    dr: &models::StationDokumenteInner,
+    scraper_id: Uuid,
+    collector_key: KeyIndex,
     tx: &mut PgTransaction<'_>,
     srv: &LTZFServer,
 ) -> Result<i32> {
     match dr {
-        models::DokRef::Dokument(dok) => Ok(insert_dokument((**dok).clone(), tx, srv).await?),
-        models::DokRef::String(dapi_id) => {
+        models::StationDokumenteInner::Dokument(dok) => {
+            Ok(insert_dokument((**dok).clone(), scraper_id, collector_key, tx, srv).await?)
+        }
+        models::StationDokumenteInner::String(dapi_id) => {
             let api_id = uuid::Uuid::from_str(dapi_id.as_str())?;
             Ok(
                 sqlx::query!("SELECT id FROM dokument WHERE api_id = $1", api_id)
@@ -537,4 +690,10 @@ pub async fn insert_dok_sw(did: i32, sw: Vec<String>, tx: &mut PgTransaction<'_>
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    #[tokio::test]
+    async fn test_vg_insert() {}
 }

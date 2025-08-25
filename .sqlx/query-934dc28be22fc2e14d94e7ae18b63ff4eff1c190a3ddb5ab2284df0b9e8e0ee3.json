@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT drucksnr FROM rel_lobbyreg_drucksnr WHERE lob_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "drucksnr",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "934dc28be22fc2e14d94e7ae18b63ff4eff1c190a3ddb5ab2284df0b9e8e0ee3"
+}

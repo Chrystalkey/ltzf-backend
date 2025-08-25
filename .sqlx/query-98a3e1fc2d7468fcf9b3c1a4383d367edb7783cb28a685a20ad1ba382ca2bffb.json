@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM autor WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "person",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "organisation",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "fachgebiet",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "lobbyregister",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "98a3e1fc2d7468fcf9b3c1a4383d367edb7783cb28a685a20ad1ba382ca2bffb"
+}

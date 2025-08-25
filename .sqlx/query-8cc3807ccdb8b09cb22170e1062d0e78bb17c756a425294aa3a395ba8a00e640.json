@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.value, g.name, g.wp, g.link \n        FROM gremium g INNER JOIN parlament p on p.id = g.parl\n        WHERE g.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "wp",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "link",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8cc3807ccdb8b09cb22170e1062d0e78bb17c756a425294aa3a395ba8a00e640"
+}

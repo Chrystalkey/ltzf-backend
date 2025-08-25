@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(1) as cnt FROM \n        UNNEST($1::text[], $2::text[]) as iv(person, orga)\n        WHERE EXISTS (\n            SELECT 1 FROM autor a WHERE \n            (a.person IS NULL AND  iv.person IS NULL OR a.person=iv.person) \n            AND a.organisation = iv.orga)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cnt",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c1595dceca33fcf177332b71639d641067ffadfcfd722acc18a0c9667e4be96a"
+}

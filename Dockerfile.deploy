@@ -1,11 +1,11 @@
 FROM rust:1.86-slim-bookworm AS builder
 
-ENV OPENAPI_GENERATOR_VERSION="7.12.0"
+ENV OPENAPI_GENERATOR_VERSION="7.14.0"
 
 WORKDIR /app
 
 RUN apt update \
-    &&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 maven jq curl\
+    &&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 maven jq curl ripgrep\
     &&  rm -rf /var/lib/apt/lists/* \
     && curl "https://raw.githubusercontent.com/OpenAPITools/openapi-generator/master/bin/utils/openapi-generator-cli.sh" > ./openapi-generator-cli \
     && chmod u+x ./openapi-generator-cli
@@ -15,7 +15,7 @@ RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./rs-test \
     && rm -rf rs-test openapi.yml
 
-RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/tags/v0.1.0/docs/specs/openapi.yml" > ./openapi.yml \
+RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml" > ./openapi.yml \
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./oapicode
 
 RUN adduser \
@@ -46,7 +46,7 @@ FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the LTZF"
-LABEL version="0.2.2"
+LABEL version="0.2.3"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1

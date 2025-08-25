@@ -1,5 +1,7 @@
-pub mod vorgang;
+pub mod candidates;
+pub mod execute;
 
+#[derive(Debug)]
 pub enum MatchState<T> {
     Ambiguous(Vec<T>),
     ExactlyOne(T),
@@ -7,6 +9,7 @@ pub enum MatchState<T> {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
     use similar::ChangeTag;
     let diff = similar::TextDiff::from_lines(expected, got);
@@ -15,7 +18,7 @@ pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
         .iter_all_changes()
         .filter(|x| x.tag() != ChangeTag::Equal);
     let mut current_sign = ChangeTag::Equal;
-    while let Some(el) = diffiter.next() {
+    for el in diffiter {
         let sign = match el.tag() {
             ChangeTag::Equal => continue,
             ChangeTag::Delete => "-",
@@ -35,5 +38,5 @@ pub(crate) fn display_strdiff(expected: &str, got: &str) -> String {
             s = format!("{}{}", s, el.value());
         }
     }
-    format!("{}\n-----------------------------------", s)
+    format!("{s}\n-----------------------------------")
 }
