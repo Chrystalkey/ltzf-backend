@@ -73,7 +73,7 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$i
 #[async_trait]
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    /// AutorenDeleteByParam - DELETE /api/v1/autoren
+    /// AutorenDeleteByParam - DELETE /api/v2/autoren
     async fn autoren_delete_by_param(
         &self,
         _method: &Method,
@@ -123,7 +123,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// GremienDeleteByParam - DELETE /api/v1/gremien
+    /// GremienDeleteByParam - DELETE /api/v2/gremien
     async fn gremien_delete_by_param(
         &self,
         _method: &Method,
@@ -173,7 +173,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// EnumDelete - DELETE /api/v1/enumeration/{name}/{item}
+    /// EnumDelete - DELETE /api/v2/enumeration/{name}/{item}
     async fn enum_delete(
         &self,
         _method: &Method,
@@ -217,7 +217,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// AutorenPut - PUT /api/v1/autoren
+    /// AutorenPut - PUT /api/v2/autoren
     async fn autoren_put(
         &self,
         _method: &Method,
@@ -426,7 +426,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// GremienPut - PUT /api/v1/gremien
+    /// GremienPut - PUT /api/v2/gremien
     async fn gremien_put(
         &self,
         _method: &Method,
@@ -585,7 +585,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// EnumPut - PUT /api/v1/enumeration/{name}
+    /// EnumPut - PUT /api/v2/enumeration/{name}
     async fn enum_put(
         &self,
         _method: &Method,
@@ -826,7 +826,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         })
     }
 
-    /// DokumentDeleteId - DELETE /api/v1/dokument/{api_id}
+    /// DokumentDeleteId - DELETE /api/v2/dokument/{api_id}
     async fn dokument_delete_id(
         &self,
         _method: &Method,
@@ -854,7 +854,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         });
     }
 
-    /// DokumentPutId - PUT /api/v1/dokument/{api_id}
+    /// DokumentPutId - PUT /api/v2/dokument/{api_id}
     async fn dokument_put_id(
         &self,
         _method: &Method,

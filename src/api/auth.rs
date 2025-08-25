@@ -141,7 +141,7 @@ impl ApiKeyAuthHeader for LTZFServer {
 #[async_trait]
 impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "AuthDelete - DELETE /api/v1/auth"]
+    #[doc = "AuthDelete - DELETE /api/v2/auth"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_delete(
         &self,
@@ -181,7 +181,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         }
     }
 
-    #[doc = "AuthPost - POST /api/v1/auth"]
+    #[doc = "AuthPost - POST /api/v2/auth"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_post(
         &self,
@@ -300,7 +300,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
 #[async_trait]
 impl Authentifizierung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    /// AuthStatus - GET /api/v1/auth/status
+    /// AuthStatus - GET /api/v2/auth/status
     async fn auth_status(
         &self,
         _method: &Method,

@@ -75,7 +75,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             x_total_pages: Some(prp.x_total_pages),
             x_page: Some(prp.x_page),
             x_per_page: Some(prp.x_per_page),
-            link: Some(prp.generate_link_header("/api/v1/autoren")),
+            link: Some(prp.generate_link_header("/api/v2/autoren")),
         });
     }
 
@@ -137,11 +137,11 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             x_total_pages: Some(prp.x_total_pages),
             x_page: Some(prp.x_page),
             x_per_page: Some(prp.x_per_page),
-            link: Some(prp.generate_link_header("/api/v1/gremien")),
+            link: Some(prp.generate_link_header("/api/v2/gremien")),
         })
     }
 
-    /// EnumGet - GET /api/v1/enumeration/{name}
+    /// EnumGet - GET /api/v2/enumeration/{name}
     async fn enum_get(
         &self,
         _method: &Method,
@@ -215,12 +215,12 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
             x_page: Some(prp.x_page),
             x_per_page: Some(prp.x_per_page),
             link: Some(
-                prp.generate_link_header(&format!("/api/v1/enumeration/{}", path_params.name)),
+                prp.generate_link_header(&format!("/api/v2/enumeration/{}", path_params.name)),
             ),
         });
     }
 
-    /// DokumentGetById - GET /api/v1/dokument/{api_id}
+    /// DokumentGetById - GET /api/v2/dokument/{api_id}
     async fn dokument_get_by_id(
         &self,
         _method: &Method,

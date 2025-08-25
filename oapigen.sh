@@ -12,7 +12,7 @@ if [ ! -d "oapi-generator" ]; then
     cd oapi-generator || exit
 
     curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar
-    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml
+    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-main/docs/specs/openapi.yml
 
     cd ..
 fi
@@ -29,7 +29,7 @@ fi
 if [ ! -f "oapi-generator/openapi.yml" ]; then
     echo "Downloading OApi Spec"
     cd oapi-generator || exit
-    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-specchange/docs/specs/openapi.yml
+    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-main/docs/specs/openapi.yml
     cd ..
 fi
 

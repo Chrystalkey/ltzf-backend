@@ -44,7 +44,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
 #[async_trait]
 impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "SitzungDelete - DELETE /api/v1/sitzung/{sid}"]
+    #[doc = "SitzungDelete - DELETE /api/v2/sitzung/{sid}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sitzung_delete(
         &self,
@@ -64,7 +64,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         Ok(delete::delete_sitzung_by_api_id(path_params.sid, self).await?)
     }
 
-    #[doc = "SidPut - PUT /api/v1/sitzung/{sid}"]
+    #[doc = "SidPut - PUT /api/v2/sitzung/{sid}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn sid_put(
         &self,
@@ -121,7 +121,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
 impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
-    #[doc = "KalDatePut - PUT /api/v1/kalender/{parlament}/{datum}"]
+    #[doc = "KalDatePut - PUT /api/v2/kalender/{parlament}/{datum}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_put(
         &self,
@@ -207,7 +207,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 #[async_trait]
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "KalDateGet - GET /api/v1/kalender/{parlament}/{datum}"]
+    #[doc = "KalDateGet - GET /api/v2/kalender/{parlament}/{datum}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_date_get(
         &self,
@@ -270,7 +270,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
             link: Some(prp.generate_link_header(&format!(
-                "/api/v1/kalender/{}/{}",
+                "/api/v2/kalender/{}/{}",
                 path_params.parlament, path_params.datum
             ))),
             x_page: Some(prp.x_page),
@@ -282,7 +282,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
 
     /// TODO: unify kal_get and kal_date_get by utilising sitzung_retrieve_by_param
     /// find a way to implement pagination and the prp here
-    #[doc = "KalGet - GET /api/v1/kalender"]
+    #[doc = "KalGet - GET /api/v2/kalender"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn kal_get(
         &self,
@@ -349,12 +349,12 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 x_total_pages: Some(prp.x_total_pages),
                 x_page: Some(prp.x_page),
                 x_per_page: Some(prp.x_per_page),
-                link: Some(prp.generate_link_header("/api/v1/kalender")),
+                link: Some(prp.generate_link_header("/api/v2/kalender")),
             })
         }
     }
 
-    #[doc = "SGetById - GET /api/v1/sitzung/{sid}"]
+    #[doc = "SGetById - GET /api/v2/sitzung/{sid}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get_by_id(
         &self,
@@ -427,7 +427,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         }
     }
 
-    #[doc = "SGet - GET /api/v1/sitzung"]
+    #[doc = "SGet - GET /api/v2/sitzung"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn s_get(
         &self,
@@ -489,7 +489,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 x_total_pages: Some(prp.x_total_pages),
                 x_page: Some(prp.x_page),
                 x_per_page: Some(prp.x_per_page),
-                link: Some(prp.generate_link_header("/api/v1/sitzung")),
+                link: Some(prp.generate_link_header("/api/v2/sitzung")),
             })
         }
     }

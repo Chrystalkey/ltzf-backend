@@ -19,7 +19,7 @@ use crate::db;
 #[async_trait]
 impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "VorgangDelete - DELETE /api/v1/vorgang/{vorgang_id}"]
+    #[doc = "VorgangDelete - DELETE /api/v2/vorgang/{vorgang_id}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_delete(
         &self,
@@ -39,7 +39,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
         db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await
     }
 
-    #[doc = "VorgangIdPut - PUT /api/v1/vorgang/{vorgang_id}"]
+    #[doc = "VorgangIdPut - PUT /api/v2/vorgang/{vorgang_id}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_id_put(
         &self,
@@ -99,7 +99,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
 impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
-    #[doc = "VorgangPut - PUT /api/v1/vorgang"]
+    #[doc = "VorgangPut - PUT /api/v2/vorgang"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_put(
         &self,
@@ -149,7 +149,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 #[async_trait]
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
-    #[doc = "VorgangGetById - GET /api/v1/vorgang/{vorgang_id}"]
+    #[doc = "VorgangGetById - GET /api/v2/vorgang/{vorgang_id}"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get_by_id(
         &self,
@@ -223,7 +223,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         }
     }
 
-    #[doc = "VorgangGet - GET /api/v1/vorgang"]
+    #[doc = "VorgangGet - GET /api/v2/vorgang"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn vorgang_get(
         &self,
@@ -282,7 +282,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                     x_total_pages: Some(prp.x_total_pages),
                     x_page: Some(prp.x_page),
                     x_per_page: Some(prp.x_per_page),
-                    link: Some(prp.generate_link_header("/api/v1/vorgang")),
+                    link: Some(prp.generate_link_header("/api/v2/vorgang")),
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
                     x_rate_limit_reset: None,
