@@ -1,6 +1,6 @@
 echo "Checking for openapi-generator-cli"
 $VERSION="7.14.0"
-$SPEC_PATH="raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
+$SPEC_PATH="raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-auth/docs/specs/openapi.yml"
 
 if (-Not (Test-Path -Path "oapi-generator" -PathType Container)) {
     Write-Host "Creating oapi-generator directory"
