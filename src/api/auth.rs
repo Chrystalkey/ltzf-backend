@@ -141,6 +141,29 @@ impl ApiKeyAuthHeader for LTZFServer {
 #[async_trait]
 impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
+
+    async fn auth_listing(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        query_params: &models::AuthListingQueryParams,
+    ) -> Result<AuthListingResponse> {
+        todo!()
+    }
+
+    async fn auth_listing_keytag(
+        &self,
+        method: &Method,
+        host: &Host,
+        cookies: &CookieJar,
+        claims: &Self::Claims,
+        path_params: &models::AuthListingKeytagPathParams,
+    ) -> Result<AuthListingKeytagResponse> {
+        todo!()
+    }
+
     #[doc = "AuthDelete - DELETE /api/v2/auth"]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn auth_delete(
@@ -221,38 +244,28 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             key,
         ))
     }
+}
+
+#[async_trait]
+impl Authentifizierung<LTZFError> for LTZFServer {
+    type Claims = crate::api::Claims;
     async fn auth_rotate(
         &self,
         _method: &axum::http::Method,
         _host: &axum_extra::extract::Host,
         _cookies: &axum_extra::extract::CookieJar,
         claims: &Self::Claims,
-        body: &openapi::models::AuthRotateRequest,
     ) -> Result<AuthRotateResponse> {
-        if claims.0 != APIScope::KeyAdder {
-            tracing::warn!("Permissions Insufficient");
-            return Ok(AuthRotateResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
         let mut tx = self.sqlx_db.begin().await?;
-        let old_key_entry = sqlx::query!("SELECT scope,value as named_scope, expires_at, created_at FROM api_keys INNER JOIN api_scope ON scope=api_scope.id WHERE key_hash = $1", body.old_key_hash)
-        .fetch_optional(&mut *tx)
+        let old_key_entry = sqlx::query!(
+            "SELECT scope,value as named_scope, expires_at, created_at 
+            FROM api_keys INNER JOIN api_scope ON scope=api_scope.id 
+            WHERE api_keys.id = $1",
+            claims.1
+        )
+        .fetch_one(&mut *tx)
         .await?;
-        if old_key_entry.is_none() {
-            tracing::warn!(
-                "While rotating key: Expected to find old key with hash {} in the database",
-                body.old_key_hash
-            );
-            return Ok(AuthRotateResponse::Status404_NotFound {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            });
-        }
-        let old_key_entry = old_key_entry.unwrap();
+
         // new key, replacing the old one
         let new_key = generate_api_key().await;
         let key_digest = digest(new_key.clone());
@@ -275,8 +288,8 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         sqlx::query!(
             "UPDATE api_keys 
         SET expires_at = $2, rotated_for = $3
-        WHERE key_hash = $1",
-            body.old_key_hash,
+        WHERE id = $1",
+            claims.1,
             rot_expiration_date.clone(),
             new_id
         )
@@ -295,11 +308,6 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             },
         ))
     }
-}
-
-#[async_trait]
-impl Authentifizierung<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     /// AuthStatus - GET /api/v2/auth/status
     async fn auth_status(
         &self,
@@ -328,15 +336,62 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     }
 }
 
+pub fn keytag_of(thing: &String) -> String {
+    return thing.chars().take(16).collect();
+}
+
 #[cfg(test)]
 mod auth_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
-    use openapi::apis::authentifizierung::{AuthStatusResponse, Authentifizierung};
+    use openapi::apis::authentifizierung::{AuthRotateResponse, AuthStatusResponse, Authentifizierung};
     use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
-    use openapi::models;
+    use openapi::apis::collector_schnittstellen_vorgang::CollectorSchnittstellenVorgang;
+    use openapi::models::{self, AuthListingQueryParams};
 
-    use crate::utils::test::TestSetup;
+    use crate::api::auth::keytag_of;
+    use crate::utils::test::{generate, TestSetup};
+    use crate::LTZFServer;
+
+    async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32{
+        fetch_key_row(server, keytag).await.id
+    }
+
+    struct KeyRow{
+        id: i32,
+        created_by: i32,
+        deleted_by: Option<i32>,
+        key_hash: String,
+        created_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+        last_used: Option<chrono::DateTime<chrono::Utc>>,
+        scope: i32,
+        rotated_for: Option<i32>,
+        salt: String,
+        keytag: String,
+    }
+    async fn fetch_key_row(server: &LTZFServer, keytag: String) -> KeyRow {
+        let mut tx = server.sqlx_db.begin().await.unwrap();
+        let index = sqlx::query!("SELECT * FROM api_keys WHERE keytag = $1", keytag)
+        .map(|r| KeyRow{
+            id: r.id,
+            created_by: r.created_by,
+            deleted_by: r.deleted_by,
+            key_hash: r.key_hash,
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+            last_used: r.last_used,
+            scope: r.scope,
+            rotated_for: r.rotated_for,
+            salt: r.salt,
+            keytag: r.keytag
+        })
+        .fetch_one(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        index
+    }
+
+    // GET /auth/status
     #[tokio::test]
     async fn test_auth_status() {
         let scenario = crate::utils::test::TestSetup::new("test_auth_status").await;
@@ -355,42 +410,49 @@ mod auth_test {
             )
             .await
             .unwrap();
-        let key = match key {
+
+        let original_key = match key {
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
             _ => panic!("Unexpected: Expected success"),
         };
+        let original_key_idx = fetch_key_index(server, keytag_of(&original_key)).await;
 
         let resp = server
             .auth_status(
                 &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 2),
+                &(super::APIScope::KeyAdder, original_key_idx),
             )
             .await;
+
         assert!(
-            matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) if r.expires_at - expiry_date < chrono::Duration::milliseconds(1) && r.scope == "keyadder" && !r.is_being_rotated),
+            matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) 
+            if r.expires_at - expiry_date < chrono::Duration::milliseconds(1) && r.scope == "keyadder" && !r.is_being_rotated),
             "Expected Successful response, got {resp:?}"
         );
 
-        let _rot_key = server
+        let rotstruct = server
             .auth_rotate(
                 &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 2),
-                &models::AuthRotateRequest {
-                    old_key_hash: sha256::digest(&key).to_string(),
-                },
+                &(super::APIScope::KeyAdder, original_key_idx),
             )
             .await
             .unwrap();
+        let fresh_key = match rotstruct {
+            AuthRotateResponse::Status201_RotationSuccessful(rots) => rots.new_api_key,
+            _ => unreachable!("Unreachable")
+        };
+        let fresh_key_index = fetch_key_index(server, keytag_of(&fresh_key));
+
         let key_status_rot = server
             .auth_status(
                 &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 2),
+                &(super::APIScope::KeyAdder, original_key_idx),
             )
             .await;
         assert!(
@@ -404,132 +466,72 @@ mod auth_test {
         scenario.teardown().await;
     }
 
-    #[tokio::test]
-    async fn test_auth_rotate() {
-        let scenario = TestSetup::new("test_auth_rot").await;
-        let server = &scenario.server;
-        let response = server
-            .auth_rotate(
+    async fn fetch_key_status(server: &LTZFServer, index: i32) -> models::ApiKeyStatus {
+        match server
+            .auth_status(
                 &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(super::APIScope::Collector, 1),
-                &models::AuthRotateRequest {
-                    old_key_hash: "abc123abc123".to_string(),
-                },
+                &(super::APIScope::KeyAdder, index),
             )
-            .await;
-        assert!(
-            matches!(
-                &response,
-                Ok(AuthRotateResponse::Status403_Forbidden { .. })
-            ),
-            "Expected to fail with too little permission"
-        );
-        // next: Not Found
-        let response = server
-            .auth_rotate(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 1),
-                &models::AuthRotateRequest {
-                    old_key_hash: "abc123abc123".to_string(),
-                },
-            )
-            .await;
-        assert!(matches!(
-            &response,
-            Ok(AuthRotateResponse::Status404_NotFound { .. })
-        ));
-
-        // next: success!
-        let key = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 1),
-                &models::CreateApiKey {
-                    scope: "keyadder".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        let key = if let AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) = key {
-            key
-        } else {
-            panic!("Expected Successful Key creation response")
-        };
-        let response = server
-            .auth_rotate(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 1),
-                &models::AuthRotateRequest {
-                    old_key_hash: sha256::digest(&key).to_string(),
-                },
-            )
-            .await;
-
-        assert!(matches!(&response,
-            Ok(AuthRotateResponse::Status201_RotationSuccessful(rotrsp)) if rotrsp.new_api_key != key && rotrsp.rotation_complete_date > chrono::Utc::now()
-        ));
-        scenario.teardown().await;
+            .await.unwrap() {
+                AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(stat) => stat
+            }
     }
 
-    // Authentication tests
+    // POST /auth
     #[tokio::test]
-    async fn test_auth_auth() {
-        let scenario = TestSetup::new("test_auth_post").await;
+    async fn test_generate_key() {
+        let scenario = TestSetup::new("test_generate_key").await;
         let server = &scenario.server;
+        // generate a key without proper permission
+        {
+            let resp = server
+                .auth_post(
+                    &Method::POST,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(super::APIScope::Collector, 1),
+                    &models::CreateApiKey {
+                        scope: "admin".to_string(),
+                        expires_at: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp,
+                AuthPostResponse::Status403_Forbidden {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
 
-        let resp = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::Collector, 1),
-                &models::CreateApiKey {
-                    scope: "admin".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            resp,
-            AuthPostResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
+            let resp = server
+                .auth_post(
+                    &Method::POST,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(super::APIScope::Admin, 1),
+                    &models::CreateApiKey {
+                        scope: "collector".to_string(),
+                        expires_at: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp,
+                AuthPostResponse::Status403_Forbidden {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None
+                }
+            );
+        }
 
-        let resp = server
-            .auth_post(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::Admin, 1),
-                &models::CreateApiKey {
-                    scope: "collector".to_string(),
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            resp,
-            AuthPostResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
-
+        // generate a key with proper permission
         let resp = server
             .auth_post(
                 &Method::POST,
@@ -551,89 +553,379 @@ mod auth_test {
             AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
             _ => panic!("Expected authorized response"),
         };
-        // delete
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
+        assert_eq!(key.len(), 64);
+        assert!(key.starts_with("ltzf_"));
+
+        scenario.teardown().await;
+    }
+
+    // GET /auth/keys
+    #[tokio::test]
+    async fn test_list_keys() {
+        let scenario = TestSetup::new("test_list_keys").await;
+        let server = &scenario.server;
+        let mut keys = vec![];
+        match server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await {
+                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+                _=> unreachable!()
+        }
+        match server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "collector".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await {
+                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+                _=> unreachable!()
+        }
+        match server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await {
+                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+                _=> unreachable!()
+        }
+        match server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "admin".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await {
+                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+                _=> unreachable!()
+        } 
+        // ------------------------------------------------------------------------------------------------------------
+        let response = server.auth_listing(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &AuthListingQueryParams{
+                    page:None,
+                    per_page: None,
+                    since: None,
+                    until: None,
+                }
+        ).await;
+        assert!(matches!(
+            response, 
+            Ok(AuthListingResponse::Status200_OK { body, ..})
+            if body.clone().sort_by(|x, y| x.to_string().cmp(&y.to_string())) == keys.iter().map(|x| keytag_of(x)).collect::<Vec<_>>().sort()
+        ));
+        // insufficient permissions
+        let response = server.auth_listing(
+                &Method::GET,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::Collector, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            del,
-            AuthDeleteResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
+                &AuthListingQueryParams{
+                    page:None,
+                    per_page: None,
+                    since: None,
+                    until: None,
+                }
+        ).await;
+        assert!(matches!(response, Ok(AuthListingResponse::Status403_Forbidden { .. })));
+
+        scenario.teardown().await;
+    }
+
+    // GET /auth/keys/{key_tag}
+    #[tokio::test]
+    async fn test_administer_key_details() {
+        let scenario = TestSetup::new("test_administer_key_details").await;
+        let server = &scenario.server;
+        let rsp = server
+            .auth_post(
+                &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(super::APIScope::Admin, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key.clone(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await;
+        let key = match rsp {
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key))=>key,
+            _=> unreachable!()
+        };
+        let key_idx = fetch_key_index(server, keytag_of(&key)).await;
+        server.vorgang_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, key_idx),
+                &models::VorgangPutHeaderParams{
+                    x_scraper_id: uuid::Uuid::nil(),
+                },
+                &generate::default_vorgang()
+            ).await;
+        // enough setup, here it comes:
+        let rsp = server.auth_listing_keytag(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::AuthListingKeytagPathParams{
+                    keytag: keytag_of(&key)
+                }
+        ).await;
+        match rsp {
+            Ok(AuthListingKeytagResponse::Status200_OK { body, ..}) => {
+                todo!("{:?}", body)
+            },
+            _ => unreachable!()
+        }
+        scenario.teardown().await;
+    }
+
+    // DELETE /auth
+    #[tokio::test]
+    async fn test_revoke_key() {
+        let scenario = TestSetup::new("test_revoke_key").await;
+        let server = &scenario.server;
+        let rsp = server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
                 },
             )
             .await
             .unwrap();
-        assert_eq!(
-            del,
-            AuthDeleteResponse::Status403_Forbidden {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
+        assert!(matches!(
+            rsp,
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(..)
+        ));
+        let key = match rsp {
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
+            _ => unreachable!("Not possible"),
+        };
+        let tag = keytag_of(&key);
+        let row = fetch_key_row(server, tag.clone()).await;
+        assert_eq!(row.deleted_by, None);
 
-        let del = server
+        // delete successfully
+        let rsp = server
             .auth_delete(
-                &Method::DELETE,
+                &Method::POST,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::AuthDeleteHeaderParams {
-                    api_key_delete: "unknown-keyhash".to_string(),
+                    api_key_delete: tag.clone(),
                 },
             )
             .await
             .unwrap();
-        assert_eq!(
-            del,
-            AuthDeleteResponse::Status404_NotFound {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
-
-        let del = server
-            .auth_delete(
-                &Method::DELETE,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 1),
-                &models::AuthDeleteHeaderParams {
-                    api_key_delete: key,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            del,
+        assert!(matches!(
+            rsp,
             AuthDeleteResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None
             }
-        );
+        ));
+        let row = fetch_key_row(server, tag.clone()).await;
+        let idx = fetch_key_index(server, tag.clone()).await;
+        assert_eq!(row.deleted_by, Some(idx));
+
+        // delete already deleted key
+        let rsp = server
+            .auth_delete(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: tag.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            rsp,
+            AuthDeleteResponse::Status204_NoContent {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        ));
+        let row = fetch_key_row(server, tag.clone()).await;
+        let idx = fetch_key_index(server, tag.clone()).await;
+        assert_eq!(row.deleted_by, Some(idx));
+
+        // delete without permission
+        let rsp = server
+            .auth_delete(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Admin, 1),
+                &models::AuthDeleteHeaderParams {
+                    api_key_delete: tag.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            rsp,
+            AuthDeleteResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        ));
+
+        scenario.teardown().await;
+    }
+
+    // POST /auth/rotate
+    #[tokio::test]
+    async fn test_rotate_own_key() {
+        let scenario = TestSetup::new("test_rotate_own_key").await;
+        let server = &scenario.server;
+        let resp = server
+            .auth_post(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 1),
+                &models::CreateApiKey {
+                    scope: "keyadder".to_string(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        let key0 = match resp {
+            AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key) => key,
+            _ => unreachable!("blub"),
+        };
+        let key0_idx = fetch_key_index(server, keytag_of(&key0)).await;
+
+        // first test: status of the key is not in rotation
+        // then rotate: The key is in rotation at index 2
+        let key1 = {
+            let key_status = fetch_key_status(server, 2).await;
+            assert!(!key_status.is_being_rotated && key_status.scope == "keyadder".to_string());
+            let rrsp = server.auth_rotate(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 2)
+            ).await.unwrap();
+            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            match rrsp {
+                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
+                _ => unreachable!("not possible")
+            }
+            // state of the db: 
+            // 1. superadmin key
+            // 2. key in rotation (1d)
+            // 3. freshly generated key (1y)
+        }.new_api_key;
+        let key1_idx = fetch_key_index(server, keytag_of(&key1)).await;
+        
+        // testing that the time limits work and a "standalone" rotation is possible
+        let key0_status = fetch_key_status(server, key0_idx).await; // old key
+        assert!(key0_status.is_being_rotated && key0_status.scope == "keyadder".to_string() && key0_status.expires_at.checked_sub_days(chrono::Days::new(1)).unwrap() <= chrono::Utc::now());
+        let key1_status = fetch_key_status(server, key1_idx).await; // new key
+        assert!(!key1_status.is_being_rotated && key1_status.scope == "keyadder".to_string() && key1_status.expires_at.checked_sub_months(chrono::Months::new(11)).unwrap() <= chrono::Utc::now());
+
+        // rotate the new key and expect the key in rotation to be invalidated
+        let key2 = {
+            let rrsp = server.auth_rotate(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 3)
+            ).await.unwrap();
+            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            match rrsp {
+                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
+                _ => unreachable!("not possible")
+            }
+            // state of the db: 
+            // 1. superadmin key
+            // key0: ~~key in rotation (1d)~~ -> invalidated key
+            // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
+            // key2: freshly generated key (1y)
+        }.new_api_key;
+        let key2_idx = fetch_key_index(server, keytag_of(&key2)).await;
+        let key2_status = fetch_key_status(server, key2_idx).await; // new key
+        assert!(!key2_status.is_being_rotated);
+        let key0_row = fetch_key_row(server, key0).await;
+        assert_eq!(key0_row.deleted_by, Some(key0_idx));
+        let key1_status = fetch_key_status(server, key1_idx).await;
+        assert!(key1_status.is_being_rotated);
+
+        // rotate the key in rotation again and expect the previously generated fresh key to be invalidated.
+        // the old key's lifetime does not change from the first rotation (otherwise it could be extended -> secu risk)
+        let key3 = {
+            let rrsp = server.auth_rotate(
+                &Method::POST,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::KeyAdder, 3)
+            ).await.unwrap();
+            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            match rrsp {
+                AuthRotateResponse::Status201_RotationSuccessful(s) => s,
+                _ => unreachable!("not possible")
+            }
+            // state of the db: 
+            // 1. superadmin key
+            // key0: ~~key in rotation (1d)~~ -> invalidated
+            // key1: ~~freshly generated key (1y)~~ -> key in rotation (original timestamp)
+            // key2: ~~freshly generated key (1y)~~ -> invalidated
+            // key3: freshly generated key (1y)
+        }.new_api_key;
+        let key3_idx = fetch_key_index(server, keytag_of(&key3)).await;
+        let key3_status = fetch_key_status(server, key3_idx).await;
+        let key1_status_new = fetch_key_status(server, key1_idx).await;
+        let key2_row = fetch_key_row(server, keytag_of(&key2)).await;
+
+        assert_eq!(key1_status_new.expires_at, key1_status.expires_at);
+        assert!(!key3_status.is_being_rotated);
+        assert_eq!(key2_row.deleted_by, Some(key2_idx));
 
         scenario.teardown().await;
     }
