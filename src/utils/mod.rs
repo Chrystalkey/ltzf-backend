@@ -40,6 +40,73 @@ pub fn init_tracing() {
         .init();
 }
 
+pub(crate) mod auth {
+    use rand::distr::Alphanumeric;
+    use rand::{Rng, rng};
+    use sha256::digest;
+    pub(crate) fn keytag_of(thing: &str) -> String {
+        thing.chars().take(16).collect()
+    }
+    pub(crate) fn hash_full_key(salt: &str, full_key: &str) -> String {
+        hash_secret(salt, &full_key.chars().skip(16).collect::<String>())
+    }
+    pub(crate) fn hash_secret(salt: &str, secret: &str) -> String {
+        digest(salt.chars().chain(secret.chars()).collect::<String>())
+    }
+
+    pub fn generate_api_key() -> String {
+        let key: String = "ltzf_"
+            .chars()
+            .chain(
+                rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(59)
+                    .map(char::from)
+                    .map(|c| {
+                        if rng().random_bool(0.5f64) {
+                            c.to_ascii_lowercase()
+                        } else {
+                            c.to_ascii_uppercase()
+                        }
+                    }),
+            )
+            .collect();
+        key
+    }
+    pub(crate) fn generate_salt() -> String {
+        rng()
+            .sample_iter(&Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .map(|c| {
+                if rng().random_bool(0.5f64) {
+                    c.to_ascii_lowercase()
+                } else {
+                    c.to_ascii_uppercase()
+                }
+            })
+            .collect()
+    }
+    pub(crate) async fn find_new_key(
+        tx: &mut sqlx::PgTransaction<'_>,
+    ) -> crate::Result<(String, String)> {
+        let mut new_key = crate::utils::auth::generate_api_key();
+        let mut new_salt = crate::utils::auth::generate_salt();
+
+        loop {
+            let found = sqlx::query!("SELECT id FROM api_keys")
+                .fetch_optional(&mut **tx)
+                .await?;
+            if found.is_some() {
+                return Ok((new_key, new_salt));
+            } else {
+                new_key = crate::utils::auth::generate_api_key();
+                new_salt = crate::utils::auth::generate_salt();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test {
     use sha256::digest;
@@ -77,12 +144,19 @@ pub(crate) mod test {
         sqlx::migrate!().run(&pool).await?;
         let hash = digest("total-nutzloser-wert");
         sqlx::query!(
-            "INSERT INTO api_keys(key_hash, scope, created_by)
+            "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
             VALUES
-            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-            ON CONFLICT DO NOTHING;", hash)
+            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
+            ON CONFLICT DO NOTHING;", hash, "salziger-salzkeks", "total-nutzlos")
         .execute(&pool).await?;
-        Ok(LTZFServer::new(pool, Configuration::default(), None))
+        Ok(LTZFServer::new(
+            pool,
+            Configuration {
+                per_object_scraper_log_size: 5,
+                ..Default::default()
+            },
+            None,
+        ))
     }
 
     async fn cleanup_server(dbname: &str) -> Result<()> {
@@ -111,7 +185,7 @@ pub(crate) mod test {
                 mail_user: None,
                 mail_password: None,
                 mail_sender: None,
-                per_object_scraper_log_size: 200,
+                per_object_scraper_log_size: 5,
                 req_limit_count: 4096,
                 req_limit_interval: 2,
                 mail_recipient: None,
@@ -142,6 +216,7 @@ pub(crate) mod test {
                 .replace("5432/ltzf", &format!("5432/testing_{}", name));
             let oconfig = crate::Configuration {
                 db_url: db_url.clone(),
+                per_object_scraper_log_size: 5,
                 ..config
             };
             let out_server = LTZFServer {
@@ -154,10 +229,10 @@ pub(crate) mod test {
             // insert api key
             let keyadder_hash = digest(out_server.config.keyadder_key.as_str());
             sqlx::query!(
-                "INSERT INTO api_keys(key_hash, scope, created_by)
+                "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
                 VALUES
-                ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-                ON CONFLICT DO NOTHING;", keyadder_hash)
+                ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
+                ON CONFLICT DO NOTHING;", keyadder_hash, "salt-and-curry-no-pepper", "tegernsee-apfels")
             .execute(&out_server.sqlx_db).await?;
 
             Ok(out_server)

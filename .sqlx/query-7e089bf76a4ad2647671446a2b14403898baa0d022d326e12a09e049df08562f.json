@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
+  "query": "SELECT id FROM api_keys",
   "describe": {
     "columns": [
       {
@@ -10,13 +10,11 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false
     ]
   },
-  "hash": "33c2008ad8e290b2ae275d7b22cc5f1e802ed430d899aa36cea0b4b9ad7ebaed"
+  "hash": "7e089bf76a4ad2647671446a2b14403898baa0d022d326e12a09e049df08562f"
 }

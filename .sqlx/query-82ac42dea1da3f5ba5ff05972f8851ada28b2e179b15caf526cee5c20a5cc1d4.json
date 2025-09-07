@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT scope,value as named_scope, expires_at, created_at FROM api_keys INNER JOIN api_scope ON scope=api_scope.id WHERE key_hash = $1",
+  "query": "SELECT scope,value as named_scope, expires_at, created_at, rotated_for, keytag\n            FROM api_keys INNER JOIN api_scope ON scope=api_scope.id \n            WHERE api_keys.id = $1",
   "describe": {
     "columns": [
       {
@@ -22,19 +22,31 @@
         "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "rotated_for",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "keytag",
+        "type_info": "Varchar"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
+      false,
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
       false
     ]
   },
-  "hash": "63cbfcafc8595d34712107bbb9c580090bcdce3c0e30ea1ea4b069e24903b1bd"
+  "hash": "82ac42dea1da3f5ba5ff05972f8851ada28b2e179b15caf526cee5c20a5cc1d4"
 }

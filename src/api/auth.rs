@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::api::PaginationResponsePart;
+use crate::utils::as_option;
 use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use axum::http::Method;
@@ -9,11 +11,8 @@ use openapi::apis::ApiKeyAuthHeader;
 use openapi::apis::authentifizierung::*;
 use openapi::apis::authentifizierung_keyadder_schnittstellen::AuthentifizierungKeyadderSchnittstellen;
 use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
-use openapi::models;
 use openapi::models::RotationResponse;
-use rand::distr::Alphanumeric;
-use rand::{Rng, rng};
-use sha256::digest;
+use openapi::models::{self, AuthListingKeytag200Response};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum APIScope {
@@ -52,13 +51,6 @@ impl Display for APIScope {
     }
 }
 
-pub async fn generate_api_key() -> String {
-    let key: String = "ltzf_"
-        .chars()
-        .chain(rng().sample_iter(&Alphanumeric).take(59).map(char::from))
-        .collect();
-    key
-}
 async fn internal_extract_claims(
     server: &LTZFServer,
     headers: &axum::http::header::HeaderMap,
@@ -73,50 +65,85 @@ async fn internal_extract_claims(
         });
     }
     let key = key.unwrap().to_str()?;
-    let hash = digest(key);
-    tracing::trace!("Authenticating Key Hash {}", hash);
-    let table_rec = sqlx::query!(
-        "SELECT k.id, deleted, expires_at, value as scope 
+    let tag = crate::utils::auth::keytag_of(key);
+    tracing::trace!("Authenticating Key: `{}`", tag);
+
+    if let Some((id, deleted_by, expiry, scope, salt, hash)) = sqlx::query!(
+        "SELECT k.id, k.deleted_by, k.expires_at, value as scope, k.salt, k.key_hash
         FROM api_keys k
         INNER JOIN api_scope s ON s.id = k.scope
-        WHERE key_hash = $1",
-        hash
+        WHERE keytag = $1",
+        tag
     )
-    .map(|r| (r.id, r.deleted, r.expires_at, r.scope))
+    .map(|r| {
+        (
+            r.id,
+            r.deleted_by,
+            r.expires_at,
+            r.scope,
+            r.salt.to_string(),
+            r.key_hash,
+        )
+    })
     .fetch_optional(&server.sqlx_db)
-    .await?;
-
-    tracing::trace!("DB Result: {:?}", table_rec);
-    match table_rec {
-        Some((_, true, _, _)) => Err(LTZFError::Validation {
-            source: Box::new(crate::error::DataValidationError::Unauthorized {
-                reason: format!("API Key was valid but is deleted. Hash: {hash}"),
-            }),
-        }),
-        Some((id, _, expires_at, scope)) => {
-            if expires_at < chrono::Utc::now() {
-                return Err(LTZFError::Validation {
+    .await?
+    {
+        let incoming_hash = crate::utils::auth::hash_full_key(&salt, key);
+        if hash != incoming_hash {
+            Err(LTZFError::Validation {
+                source: Box::new(crate::error::DataValidationError::Unauthorized {
+                    reason: format!("API Key is not valid. Tag: {tag}"),
+                }),
+            })
+        } else if let Some(deleted_by) = deleted_by {
+            if deleted_by == id {
+                Err(LTZFError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
-                        reason: format!("API Key was valid but is expired. Hash: {hash}"),
+                        reason: format!(
+                            "API Key was valid but was either rotated or expired. Tag: {tag}"
+                        ),
                     }),
-                });
+                })
+            } else {
+                let delkeytag = sqlx::query!("SELECT keytag FROM api_keys WHERE id=$1", deleted_by)
+                    .map(|r| r.keytag)
+                    .fetch_one(&server.sqlx_db)
+                    .await?;
+                Err(LTZFError::Validation {
+                    source: Box::new(crate::error::DataValidationError::Unauthorized {
+                        reason: format!(
+                            "API Key was valid but is deleted. Tag: {tag}\nAdministrator Key: {delkeytag}"
+                        ),
+                    }),
+                })
             }
+        } else if expiry < chrono::Utc::now() {
+            sqlx::query!("UPDATE api_keys SET deleted_by = $1 WHERE id = $1", id)
+                .execute(&server.sqlx_db)
+                .await?;
+            Err(LTZFError::Validation {
+                source: Box::new(crate::error::DataValidationError::Unauthorized {
+                    reason: format!("API Key was valid but has expired. Tag: {tag}"),
+                }),
+            })
+        } else {
             let scope = (APIScope::try_from(scope.as_str()).unwrap(), id);
             sqlx::query!(
-                "UPDATE api_keys SET last_used = $1 WHERE key_hash = $2",
+                "UPDATE api_keys SET last_used = $1 WHERE id = $2",
                 chrono::Utc::now(),
-                hash
+                id
             )
             .execute(&server.sqlx_db)
             .await?;
-            tracing::trace!("Scope of key with hash`{}`: {:?}", hash, scope.0);
+            tracing::trace!("Scope of key with tag`{}`: {:?}", tag, scope.0);
             Ok(scope)
         }
-        None => Err(LTZFError::Validation {
+    } else {
+        Err(LTZFError::Validation {
             source: Box::new(crate::error::DataValidationError::Unauthorized {
                 reason: "API Key was not found in the Database".to_string(),
             }),
-        }),
+        })
     }
 }
 
@@ -144,24 +171,136 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
 
     async fn auth_listing(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         query_params: &models::AuthListingQueryParams,
     ) -> Result<AuthListingResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder {
+            tracing::info!("Tried accessing /auth/keys without proper permission");
+            return Ok(AuthListingResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let mut tx = self.sqlx_db.begin().await?;
+        let total_count = sqlx::query!("SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at < NOW()")
+        .map(|r| r.total_count)
+        .fetch_one(&mut *tx).await?.unwrap();
+        let prp = PaginationResponsePart::new(
+            total_count as i32,
+            query_params.page,
+            query_params.per_page,
+        );
+        let result = sqlx::query!(
+            "SELECT keytag FROM api_keys WHERE deleted_by IS NULL AND expires_at < NOW() ORDER BY expires_at DESC
+            OFFSET $1
+            LIMIT $2", prp.limit(), prp.offset())
+        .map(|r| models::KeyTag::from(r.keytag))
+        .fetch_all(&mut *tx).await?;
+
+        tx.commit().await?;
+        return Ok(AuthListingResponse::Status200_OK {
+            body: result,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+            x_total_count: Some(prp.x_total_count),
+            x_total_pages: Some(prp.x_total_pages),
+            x_page: Some(prp.x_page),
+            x_per_page: Some(prp.x_per_page),
+            link: Some(prp.generate_link_header("/api/v2/auth/keys")),
+        });
     }
 
     async fn auth_listing_keytag(
         &self,
-        method: &Method,
-        host: &Host,
-        cookies: &CookieJar,
+        _method: &Method,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
         path_params: &models::AuthListingKeytagPathParams,
     ) -> Result<AuthListingKeytagResponse> {
-        todo!()
+        if claims.0 != APIScope::KeyAdder {
+            return Ok(AuthListingKeytagResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
+        }
+        let dings = sqlx::query!(
+            "SELECT 1 AS disc, api_id FROM scraper_touched_vorgang tb
+            INNER JOIN vorgang v ON v.id= tb.vg_id
+			INNER JOIN api_keys ak ON ak.id = tb.collector_key
+            WHERE ak.keytag = $1
+            
+            UNION ALL
+            
+            SELECT 2, api_id FROM scraper_touched_station tb
+            INNER JOIN station s ON s.id=tb.stat_id
+			INNER JOIN api_keys ak ON ak.id = tb.collector_key
+            WHERE ak.keytag = $1
+
+            UNION ALL
+
+            SELECT 3, api_id FROM scraper_touched_sitzung tb
+            INNER JOIN sitzung s ON s.id=tb.sid
+			INNER JOIN api_keys ak ON ak.id = tb.collector_key
+            WHERE ak.keytag = $1
+
+            UNION ALL
+
+            SELECT 4, api_id FROM scraper_touched_dokument tb
+            INNER JOIN dokument d ON d.id = tb.dok_id
+			INNER JOIN api_keys ak ON ak.id = tb.collector_key
+            WHERE ak.keytag = $1",
+            path_params.keytag.to_string()
+        )
+        .fetch_all(&self.sqlx_db)
+        .await?;
+
+        let vorgaenge = as_option(
+            dings
+                .iter()
+                .filter(|r| r.disc == Some(1))
+                .map(|x| x.api_id.unwrap().to_string())
+                .collect(),
+        );
+        let stationen = as_option(
+            dings
+                .iter()
+                .filter(|r| r.disc == Some(2))
+                .map(|x| x.api_id.unwrap().to_string())
+                .collect(),
+        );
+        let sitzungen = as_option(
+            dings
+                .iter()
+                .filter(|r| r.disc == Some(3))
+                .map(|x| x.api_id.unwrap().to_string())
+                .collect(),
+        );
+        let dokumente = as_option(
+            dings
+                .iter()
+                .filter(|r| r.disc == Some(4))
+                .map(|x| x.api_id.unwrap().to_string())
+                .collect(),
+        );
+        let result = AuthListingKeytag200Response {
+            dokumente,
+            vorgaenge,
+            sitzungen,
+            stationen,
+        };
+        return Ok(AuthListingKeytagResponse::Status200_OK {
+            body: result,
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        });
     }
 
     #[doc = "AuthDelete - DELETE /api/v2/auth"]
@@ -181,27 +320,19 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        let hash = digest(&header_params.api_key_delete);
-        let ret = sqlx::query!(
-            "UPDATE api_keys SET deleted=TRUE WHERE key_hash=$1 RETURNING id",
-            hash
+        sqlx::query!(
+            "UPDATE api_keys SET deleted_by=$1 WHERE keytag=$2",
+            claims.1,
+            header_params.api_key_delete
         )
-        .fetch_optional(&self.sqlx_db)
+        .execute(&self.sqlx_db)
         .await?;
 
-        if ret.is_some() {
-            Ok(AuthDeleteResponse::Status204_NoContent {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            })
-        } else {
-            Ok(AuthDeleteResponse::Status404_NotFound {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            })
-        }
+        Ok(AuthDeleteResponse::Status204_NoContent {
+            x_rate_limit_limit: None,
+            x_rate_limit_remaining: None,
+            x_rate_limit_reset: None,
+        })
     }
 
     #[doc = "AuthPost - POST /api/v2/auth"]
@@ -223,21 +354,27 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             });
         }
         tracing::debug!("Key Creation Requested!");
-        let key = generate_api_key().await;
-        let key_digest = digest(key.clone());
+        let mut tx = self.sqlx_db.begin().await?;
+        let (key, salt) = crate::utils::auth::find_new_key(&mut tx).await?;
+        let tag = crate::utils::auth::keytag_of(&key);
+
+        let key_digest = crate::utils::auth::hash_full_key(&salt, &key);
 
         sqlx::query!(
-            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope)
+            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
         VALUES
-        ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4))",
+        ($1, $2, $3, (SELECT id FROM api_scope WHERE value = $4), $5, $6)",
             key_digest,
             claims.1,
             body.expires_at
                 .unwrap_or(chrono::Utc::now() + chrono::Duration::days(365)),
-            body.scope.to_string()
+            body.scope.to_string(),
+            salt,
+            tag
         )
-        .execute(&self.sqlx_db)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         tracing::info!("Generated Fresh API Key with Scope: {:?}", body.scope);
         Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
@@ -258,7 +395,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     ) -> Result<AuthRotateResponse> {
         let mut tx = self.sqlx_db.begin().await?;
         let old_key_entry = sqlx::query!(
-            "SELECT scope,value as named_scope, expires_at, created_at 
+            "SELECT scope,value as named_scope, expires_at, created_at, rotated_for, keytag
             FROM api_keys INNER JOIN api_scope ON scope=api_scope.id 
             WHERE api_keys.id = $1",
             claims.1
@@ -267,27 +404,52 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         .await?;
 
         // new key, replacing the old one
-        let new_key = generate_api_key().await;
-        let key_digest = digest(new_key.clone());
+        let (new_key, new_salt) = crate::utils::auth::find_new_key(&mut tx).await?;
+        let new_hash = crate::utils::auth::hash_full_key(&new_salt, &new_key);
+        let new_keytag = crate::utils::auth::keytag_of(&new_key);
 
         let new_id = sqlx::query!(
-            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope)
+            "INSERT INTO api_keys(key_hash, created_by, expires_at, scope, salt, keytag)
         VALUES
-        ($1, $2, $3, $4)
+        ($1, $2, $3, $4,$5, $6)
         RETURNING id",
-            key_digest,
+            new_hash,
             claims.1,
             chrono::Utc::now() + (old_key_entry.expires_at - old_key_entry.created_at),
-            old_key_entry.scope
+            old_key_entry.scope,
+            new_salt,
+            new_keytag
         )
         .map(|r| r.id)
         .fetch_one(&self.sqlx_db)
         .await?;
 
+        // at this point, fix up some failure cases:
+        // 1. if the old key is in rotation state (rotated_for is not NULL): invalidate the one it is rotated for
+        if let Some(rf) = old_key_entry.rotated_for {
+            sqlx::query!("UPDATE api_keys SET deleted_by = id WHERE id = $1", rf)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // 2. if the old key has a corresponding rotated_for entry: invalidate that one, and handle the old one like default
+        // this prohibits creating any number of successor keys in an infinite chain. That way there is at most one pair of [old key] -> [new key]
+        let r = sqlx::query!("SELECT id FROM api_keys WHERE rotated_for = $1", claims.1)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(inv_id) = r {
+            sqlx::query!(
+                "UPDATE api_keys SET deleted_by = id WHERE id = $1",
+                inv_id.id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        // set expiry to min(1d, existing) (basically: prohibit overriding the expiration date of an existing key)
         let rot_expiration_date = chrono::Utc::now() + chrono::Duration::days(1);
         sqlx::query!(
             "UPDATE api_keys 
-        SET expires_at = $2, rotated_for = $3
+        SET expires_at = LEAST($2::timestamptz, expires_at), rotated_for = $3
         WHERE id = $1",
             claims.1,
             rot_expiration_date.clone(),
@@ -298,7 +460,8 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         tx.commit().await?;
 
         tracing::info!(
-            "Rotated API Key with Scope: {:?}",
+            "Rotated API Key {} with Scope: {:?}",
+            old_key_entry.keytag,
             old_key_entry.named_scope
         );
         Ok(AuthRotateResponse::Status201_RotationSuccessful(
@@ -336,28 +499,27 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     }
 }
 
-pub fn keytag_of(thing: &String) -> String {
-    return thing.chars().take(16).collect();
-}
-
 #[cfg(test)]
 mod auth_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
-    use openapi::apis::authentifizierung::{AuthRotateResponse, AuthStatusResponse, Authentifizierung};
+    use openapi::apis::authentifizierung::{
+        AuthRotateResponse, AuthStatusResponse, Authentifizierung,
+    };
     use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
     use openapi::apis::collector_schnittstellen_vorgang::CollectorSchnittstellenVorgang;
     use openapi::models::{self, AuthListingQueryParams};
 
-    use crate::api::auth::keytag_of;
-    use crate::utils::test::{generate, TestSetup};
     use crate::LTZFServer;
+    use crate::utils::auth::keytag_of;
+    use crate::utils::test::{TestSetup, generate};
 
-    async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32{
+    async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
     }
 
-    struct KeyRow{
+    #[allow(unused)]
+    struct KeyRow {
         id: i32,
         created_by: i32,
         deleted_by: Option<i32>,
@@ -373,20 +535,22 @@ mod auth_test {
     async fn fetch_key_row(server: &LTZFServer, keytag: String) -> KeyRow {
         let mut tx = server.sqlx_db.begin().await.unwrap();
         let index = sqlx::query!("SELECT * FROM api_keys WHERE keytag = $1", keytag)
-        .map(|r| KeyRow{
-            id: r.id,
-            created_by: r.created_by,
-            deleted_by: r.deleted_by,
-            key_hash: r.key_hash,
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-            last_used: r.last_used,
-            scope: r.scope,
-            rotated_for: r.rotated_for,
-            salt: r.salt,
-            keytag: r.keytag
-        })
-        .fetch_one(&mut *tx).await.unwrap();
+            .map(|r| KeyRow {
+                id: r.id,
+                created_by: r.created_by,
+                deleted_by: r.deleted_by,
+                key_hash: r.key_hash,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+                last_used: r.last_used,
+                scope: r.scope,
+                rotated_for: r.rotated_for,
+                salt: r.salt,
+                keytag: r.keytag,
+            })
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         index
     }
@@ -427,7 +591,7 @@ mod auth_test {
             .await;
 
         assert!(
-            matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r)) 
+            matches!(&resp, Ok(AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(r))
             if r.expires_at - expiry_date < chrono::Duration::milliseconds(1) && r.scope == "keyadder" && !r.is_being_rotated),
             "Expected Successful response, got {resp:?}"
         );
@@ -443,9 +607,11 @@ mod auth_test {
             .unwrap();
         let fresh_key = match rotstruct {
             AuthRotateResponse::Status201_RotationSuccessful(rots) => rots.new_api_key,
-            _ => unreachable!("Unreachable")
+            _ => unreachable!("Unreachable"),
         };
-        let fresh_key_index = fetch_key_index(server, keytag_of(&fresh_key));
+        let fresh_key_index = fetch_key_index(server, keytag_of(&fresh_key)).await;
+        let fresh_key_status = fetch_key_status(server, fresh_key_index).await;
+        assert!(!fresh_key_status.is_being_rotated && fresh_key_status.scope == "keyadder");
 
         let key_status_rot = server
             .auth_status(
@@ -474,9 +640,11 @@ mod auth_test {
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, index),
             )
-            .await.unwrap() {
-                AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(stat) => stat
-            }
+            .await
+            .unwrap()
+        {
+            AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(stat) => stat,
+        }
     }
 
     // POST /auth
@@ -576,9 +744,10 @@ mod auth_test {
                     expires_at: None,
                 },
             )
-            .await {
-                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
-                _=> unreachable!()
+            .await
+        {
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+            _ => unreachable!(),
         }
         match server
             .auth_post(
@@ -591,9 +760,10 @@ mod auth_test {
                     expires_at: None,
                 },
             )
-            .await {
-                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
-                _=> unreachable!()
+            .await
+        {
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+            _ => unreachable!(),
         }
         match server
             .auth_post(
@@ -606,9 +776,10 @@ mod auth_test {
                     expires_at: None,
                 },
             )
-            .await {
-                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
-                _=> unreachable!()
+            .await
+        {
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+            _ => unreachable!(),
         }
         match server
             .auth_post(
@@ -621,42 +792,68 @@ mod auth_test {
                     expires_at: None,
                 },
             )
-            .await {
-                Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
-                _=> unreachable!()
-        } 
+            .await
+        {
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => keys.push(key),
+            _ => unreachable!(),
+        }
         // ------------------------------------------------------------------------------------------------------------
-        let response = server.auth_listing(
+        let response = server
+            .auth_listing(
                 &Method::GET,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
-                &AuthListingQueryParams{
-                    page:None,
+                &AuthListingQueryParams {
+                    page: None,
                     per_page: None,
                     since: None,
                     until: None,
-                }
-        ).await;
+                },
+            )
+            .await;
         assert!(matches!(
-            response, 
+            response,
             Ok(AuthListingResponse::Status200_OK { body, ..})
             if body.clone().sort_by(|x, y| x.to_string().cmp(&y.to_string())) == keys.iter().map(|x| keytag_of(x)).collect::<Vec<_>>().sort()
         ));
         // insufficient permissions
-        let response = server.auth_listing(
+        let response = server
+            .auth_listing(
+                &Method::GET,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(super::APIScope::Admin, 1),
+                &AuthListingQueryParams {
+                    page: None,
+                    per_page: None,
+                    since: None,
+                    until: None,
+                },
+            )
+            .await;
+        assert!(matches!(
+            response,
+            Ok(AuthListingResponse::Status403_Forbidden { .. })
+        ));
+        let response = server
+            .auth_listing(
                 &Method::GET,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::Collector, 1),
-                &AuthListingQueryParams{
-                    page:None,
+                &AuthListingQueryParams {
+                    page: None,
                     per_page: None,
                     since: None,
                     until: None,
-                }
-        ).await;
-        assert!(matches!(response, Ok(AuthListingResponse::Status403_Forbidden { .. })));
+                },
+            )
+            .await;
+        assert!(matches!(
+            response,
+            Ok(AuthListingResponse::Status403_Forbidden { .. })
+        ));
 
         scenario.teardown().await;
     }
@@ -679,35 +876,45 @@ mod auth_test {
             )
             .await;
         let key = match rsp {
-            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key))=>key,
-            _=> unreachable!()
+            Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(key)) => key,
+            _ => unreachable!(),
         };
         let key_idx = fetch_key_index(server, keytag_of(&key)).await;
-        server.vorgang_put(
+
+        let _ = server
+            .vorgang_put(
                 &Method::PUT,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, key_idx),
-                &models::VorgangPutHeaderParams{
+                &models::VorgangPutHeaderParams {
                     x_scraper_id: uuid::Uuid::nil(),
                 },
-                &generate::default_vorgang()
-            ).await;
+                &generate::default_vorgang(),
+            )
+            .await
+            .unwrap();
         // enough setup, here it comes:
-        let rsp = server.auth_listing_keytag(
+        let rsp = server
+            .auth_listing_keytag(
                 &Method::PUT,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
-                &models::AuthListingKeytagPathParams{
-                    keytag: keytag_of(&key)
-                }
-        ).await;
+                &models::AuthListingKeytagPathParams {
+                    keytag: keytag_of(&key),
+                },
+            )
+            .await;
+
         match rsp {
-            Ok(AuthListingKeytagResponse::Status200_OK { body, ..}) => {
-                todo!("{:?}", body)
-            },
-            _ => unreachable!()
+            Ok(AuthListingKeytagResponse::Status200_OK { body, .. }) => {
+                assert!(body.dokumente.is_some() && body.dokumente.unwrap().len() == 2);
+                assert!(body.sitzungen.is_none());
+                assert!(body.stationen.is_some() && body.stationen.unwrap().len() == 1);
+                assert!(body.vorgaenge.is_some() && body.vorgaenge.unwrap().len() == 1);
+            }
+            _ => unreachable!(),
         }
         scenario.teardown().await;
     }
@@ -764,8 +971,7 @@ mod auth_test {
             }
         ));
         let row = fetch_key_row(server, tag.clone()).await;
-        let idx = fetch_key_index(server, tag.clone()).await;
-        assert_eq!(row.deleted_by, Some(idx));
+        assert_eq!(row.deleted_by, Some(1));
 
         // delete already deleted key
         let rsp = server
@@ -789,8 +995,7 @@ mod auth_test {
             }
         ));
         let row = fetch_key_row(server, tag.clone()).await;
-        let idx = fetch_key_index(server, tag.clone()).await;
-        assert_eq!(row.deleted_by, Some(idx));
+        assert_eq!(row.deleted_by, Some(1));
 
         // delete without permission
         let rsp = server
@@ -846,53 +1051,83 @@ mod auth_test {
         let key1 = {
             let key_status = fetch_key_status(server, 2).await;
             assert!(!key_status.is_being_rotated && key_status.scope == "keyadder".to_string());
-            let rrsp = server.auth_rotate(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 2)
-            ).await.unwrap();
-            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            let rrsp = server
+                .auth_rotate(
+                    &Method::POST,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(super::APIScope::KeyAdder, 2),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                rrsp,
+                AuthRotateResponse::Status201_RotationSuccessful(..)
+            ));
             match rrsp {
                 AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible")
+                _ => unreachable!("not possible"),
             }
-            // state of the db: 
+            // state of the db:
             // 1. superadmin key
             // 2. key in rotation (1d)
             // 3. freshly generated key (1y)
-        }.new_api_key;
+        }
+        .new_api_key;
         let key1_idx = fetch_key_index(server, keytag_of(&key1)).await;
-        
+
         // testing that the time limits work and a "standalone" rotation is possible
         let key0_status = fetch_key_status(server, key0_idx).await; // old key
-        assert!(key0_status.is_being_rotated && key0_status.scope == "keyadder".to_string() && key0_status.expires_at.checked_sub_days(chrono::Days::new(1)).unwrap() <= chrono::Utc::now());
+        assert!(
+            key0_status.is_being_rotated
+                && key0_status.scope == "keyadder".to_string()
+                && key0_status
+                    .expires_at
+                    .checked_sub_days(chrono::Days::new(1))
+                    .unwrap()
+                    <= chrono::Utc::now()
+        );
         let key1_status = fetch_key_status(server, key1_idx).await; // new key
-        assert!(!key1_status.is_being_rotated && key1_status.scope == "keyadder".to_string() && key1_status.expires_at.checked_sub_months(chrono::Months::new(11)).unwrap() <= chrono::Utc::now());
+        assert!(
+            !key1_status.is_being_rotated
+                && key1_status.scope == "keyadder".to_string()
+                && key1_status
+                    .expires_at
+                    .checked_sub_months(chrono::Months::new(11))
+                    .unwrap()
+                    >= chrono::Utc::now()
+        );
 
         // rotate the new key and expect the key in rotation to be invalidated
         let key2 = {
-            let rrsp = server.auth_rotate(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 3)
-            ).await.unwrap();
-            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            let rrsp = server
+                .auth_rotate(
+                    &Method::POST,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(super::APIScope::KeyAdder, 3),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                rrsp,
+                AuthRotateResponse::Status201_RotationSuccessful(..)
+            ));
             match rrsp {
                 AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible")
+                _ => unreachable!("not possible"),
             }
-            // state of the db: 
+            // state of the db:
             // 1. superadmin key
             // key0: ~~key in rotation (1d)~~ -> invalidated key
             // key1: ~~freshly generated key (1y)~~ -> key in rotation (1d)
             // key2: freshly generated key (1y)
-        }.new_api_key;
+        }
+        .new_api_key;
         let key2_idx = fetch_key_index(server, keytag_of(&key2)).await;
         let key2_status = fetch_key_status(server, key2_idx).await; // new key
         assert!(!key2_status.is_being_rotated);
-        let key0_row = fetch_key_row(server, key0).await;
+        let key0_row = fetch_key_row(server, keytag_of(&key0)).await;
         assert_eq!(key0_row.deleted_by, Some(key0_idx));
         let key1_status = fetch_key_status(server, key1_idx).await;
         assert!(key1_status.is_being_rotated);
@@ -900,24 +1135,31 @@ mod auth_test {
         // rotate the key in rotation again and expect the previously generated fresh key to be invalidated.
         // the old key's lifetime does not change from the first rotation (otherwise it could be extended -> secu risk)
         let key3 = {
-            let rrsp = server.auth_rotate(
-                &Method::POST,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(super::APIScope::KeyAdder, 3)
-            ).await.unwrap();
-            assert!(matches!(rrsp, AuthRotateResponse::Status201_RotationSuccessful(..)));
+            let rrsp = server
+                .auth_rotate(
+                    &Method::POST,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(super::APIScope::KeyAdder, 3),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                rrsp,
+                AuthRotateResponse::Status201_RotationSuccessful(..)
+            ));
             match rrsp {
                 AuthRotateResponse::Status201_RotationSuccessful(s) => s,
-                _ => unreachable!("not possible")
+                _ => unreachable!("not possible"),
             }
-            // state of the db: 
+            // state of the db:
             // 1. superadmin key
             // key0: ~~key in rotation (1d)~~ -> invalidated
             // key1: ~~freshly generated key (1y)~~ -> key in rotation (original timestamp)
             // key2: ~~freshly generated key (1y)~~ -> invalidated
             // key3: freshly generated key (1y)
-        }.new_api_key;
+        }
+        .new_api_key;
         let key3_idx = fetch_key_index(server, keytag_of(&key3)).await;
         let key3_status = fetch_key_status(server, key3_idx).await;
         let key1_status_new = fetch_key_status(server, key1_idx).await;
