@@ -18,10 +18,13 @@ with open("variables.toml", "rb") as f:
 version = file["version"]["version"]
 
 replace("Dockerfile.deploy", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version=\"{version}\"")
+
 replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version=\"{version}\"")
 replace("Cargo.toml", r"version\s*=\s*\"\d+\.\d+\.\d+\"", f"version = \"{version}\"")
 
 oapid = file["openapi"]
+
+replace("Dockerfile.deploy", r"ENV OPENAPI_GENERATOR_VERSION=\"\d+\.\d+\.\d+\"", f"ENV OPENAPI_GENERATOR_VERSION=\"{oapid["oapigen-version"]}\"")
 
 replace("oapigen.ps1", r"$OPENAPI_GENERATOR_VERSION=\"\d+\.\d+\.\d+\"", f"$OPENAPI_GENERATOR_VERSION=\"{oapid["oapigen-version"]}\"")
 replace("oapigen.ps1", r"$SPEC_PATH=\"\d+\.\d+\.\d+\"", f"$SPEC_PATH=\"{oapid["oapi-spec"]}\"")
