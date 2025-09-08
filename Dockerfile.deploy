@@ -1,6 +1,7 @@
 FROM rust:1.86-slim-bookworm AS builder
 
 ENV OPENAPI_GENERATOR_VERSION="7.15.0"
+ENV SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
 
 WORKDIR /app
 
@@ -15,7 +16,7 @@ RUN echo 'openapi: 3.0.0\ninfo:\n  title: "spec"\n  version: "0.1.0"\npaths:\n  
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./rs-test \
     && rm -rf rs-test openapi.yml
 
-RUN curl "https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-auth/docs/specs/openapi.yml" > ./openapi.yml \
+RUN curl $SPEC_PATH > ./openapi.yml \
     && ./openapi-generator-cli generate -g rust-axum -i ./openapi.yml -o ./oapicode
 
 RUN adduser \
