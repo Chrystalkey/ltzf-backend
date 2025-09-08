@@ -1,5 +1,5 @@
 echo "Checking for openapi-generator-cli"
-$OPENAPI_GENERATOR_VERSION="7.14.0"
+$OPENAPI_GENERATOR_VERSION="7.15.0"
 $DIRECTORY="oapi-generator"
 $SPEC_PATH="raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-auth/docs/specs/openapi.yml"
 
