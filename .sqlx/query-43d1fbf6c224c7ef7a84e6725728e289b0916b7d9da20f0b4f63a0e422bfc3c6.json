@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT k.id, k.deleted_by, k.expires_at, value as scope, k.salt, k.key_hash\n        FROM api_keys k\n        INNER JOIN api_scope s ON s.id = k.scope\n        WHERE keytag = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "deleted_by",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "salt",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "key_hash",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "43d1fbf6c224c7ef7a84e6725728e289b0916b7d9da20f0b4f63a0e422bfc3c6"
+}

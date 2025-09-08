@@ -12,7 +12,6 @@ use clap::Parser;
 
 use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
-use sha256::digest;
 use tokio::net::TcpListener;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
 use tower_http::{cors, limit};
@@ -157,14 +156,21 @@ async fn main() -> Result<()> {
     let sqlx_db = init_db_conn(&config.db_url).await?;
 
     // Run Key Administrative Functions
-    let keyadder_hash = digest(config.keyadder_key.as_str());
+
+    let mut tx = sqlx_db.begin().await?;
+    let key = &config.keyadder_key;
+    let tag = utils::auth::keytag_of(key);
+    let salt = utils::auth::generate_salt();
+    let hash = utils::auth::hash_full_key(&salt, key);
 
     sqlx::query!(
-        "INSERT INTO api_keys(key_hash, scope, created_by)
-        VALUES
-        ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq))
-        ON CONFLICT DO NOTHING;", keyadder_hash)
-    .execute(&sqlx_db).await?;
+        "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)
+            VALUES
+            ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
+            ON CONFLICT DO NOTHING;", hash, salt, tag)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
     let mailbundle = crate::utils::notify::MailBundle::new(&config).await?;
 
     let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle));

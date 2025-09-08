@@ -1,15 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE api_keys SET last_used = $1 WHERE key_hash = $2",
+  "query": "UPDATE api_keys SET last_used = $1 WHERE id = $2",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
         "Timestamptz",
-        "Text"
+        "Int4"
       ]
     },
     "nullable": []
   },
-  "hash": "610c98f5cb508fec278ddac964f348c96b0c0dfa8c97f714ce6ebf8603c99b70"
+  "hash": "c9b1fd388856c70deeaef1643d92f328eb432184847689f8ce359f9ec3366b3f"
 }

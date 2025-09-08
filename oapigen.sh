@@ -1,26 +1,27 @@
 #!/bin/bash
 
-export OPENAPI_GENERATOR_VERSION="7.14.0"
+OPENAPI_GENERATOR_VERSION="7.15.0"
 DIRECTORY="oapi-generator"
+SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/dev-auth/docs/specs/openapi.yml"
 
 echo "Checking for openapi-generator-cli"
 
 # Create oapi-generator directory if it doesn't exist
-if [ ! -d "oapi-generator" ]; then
+if [ ! -d $DIRECTORY ]; then
     echo "Creating oapi-generator directory"
-    mkdir oapi-generator
-    cd oapi-generator || exit
+    mkdir $DIRECTORY
+    cd $DIRECTORY || exit
 
     curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar
-    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml
+    curl -o openapi.yml $SPEC_PATH
 
     cd ..
 fi
 
 # Download JAR if missing
-if [ ! -f "oapi-generator/openapi-generator-cli.jar" ]; then
+if [ ! -f "$DIRECTORY/openapi-generator-cli.jar" ]; then
     echo "Downloading OApi Generator"
-    cd oapi-generator || exit
+    cd $DIRECTORY || exit
     curl -o openapi-generator-cli.jar https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/$OPENAPI_GENERATOR_VERSION/openapi-generator-cli-$OPENAPI_GENERATOR_VERSION.jar
     cd ..
 fi
@@ -28,8 +29,8 @@ fi
 # Download YAML spec if missing
 if [ ! -f "oapi-generator/openapi.yml" ]; then
     echo "Downloading OApi Spec"
-    cd oapi-generator || exit
-    curl -o openapi.yml https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml
+    cd $DIRECTORY || exit
+    curl -o openapi.yml $SPEC_PATH
     cd ..
 fi
 

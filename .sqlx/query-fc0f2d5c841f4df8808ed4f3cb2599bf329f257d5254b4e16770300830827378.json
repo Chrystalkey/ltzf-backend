@@ -35,42 +35,47 @@
       },
       {
         "ordinal": 6,
-        "name": "coll_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "created_by",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 9,
         "name": "last_used",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 10,
         "name": "scope",
         "type_info": "Int4"
       },
       {
+        "ordinal": 11,
+        "name": "rotated_for",
+        "type_info": "Int4"
+      },
+      {
         "ordinal": 12,
-        "name": "deleted",
-        "type_info": "Bool"
+        "name": "salt",
+        "type_info": "Varchar"
       },
       {
         "ordinal": 13,
-        "name": "rotated_for",
+        "name": "keytag",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "deleted_by",
         "type_info": "Int4"
       }
     ],
@@ -86,12 +91,13 @@
       false,
       false,
       false,
-      true,
       false,
       false,
+      false,
       true,
+      false,
       true,
-      true,
+      false,
       false,
       true
     ]
