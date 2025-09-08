@@ -89,4 +89,4 @@ jobs:
         with:
           file: Dockerfile.deploy
           push: true
-          tags: crystalkey/ltzf-backend:0.2.3
+          tags: crystalkey/ltzf-backend:0.2.4
