@@ -23,7 +23,7 @@ replace("Dockerfile.deploy", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version
 replace("Dockerfile", r"LABEL version=\"\d+\.\d+\.\d+\"", f"LABEL version=\"{version}\"")
 replace("Cargo.toml", r"version\s*=\s*\"\d+\.\d+\.\d+\"", f"version = \"{version}\"")
 
-replace(".github/workflows/main.yml", r"tags: crystalkey/ltzf-backend:\d+\.\d+\.\d+", f"tags: crystalkey/ltzf-backend:{version}")
+replace(".github/workflows/docker-deploy.yml", r"tags: crystalkey/ltzf-backend:\d+\.\d+\.\d+", f"tags: crystalkey/ltzf-backend:{version}")
 
 oapid = file["openapi"]
 
