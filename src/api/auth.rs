@@ -186,7 +186,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             });
         }
         let mut tx = self.sqlx_db.begin().await?;
-        let total_count = sqlx::query!("SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at < NOW()")
+        let total_count = sqlx::query!("SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW()")
         .map(|r| r.total_count)
         .fetch_one(&mut *tx).await?.unwrap();
         let prp = PaginationResponsePart::new(
@@ -195,13 +195,14 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             query_params.per_page,
         );
         let result = sqlx::query!(
-            "SELECT keytag FROM api_keys WHERE deleted_by IS NULL AND expires_at < NOW() ORDER BY expires_at DESC
+            "SELECT keytag FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW() ORDER BY expires_at DESC
             OFFSET $1
-            LIMIT $2", prp.limit(), prp.offset())
+            LIMIT $2", prp.offset(), prp.limit())
         .map(|r| models::KeyTag::from(r.keytag))
         .fetch_all(&mut *tx).await?;
 
         tx.commit().await?;
+        tracing::info!("Listing {} keys with {:?}", &result.len(), prp);
         return Ok(AuthListingResponse::Status200_OK {
             body: result,
             x_rate_limit_limit: None,
@@ -812,11 +813,29 @@ mod auth_test {
                 },
             )
             .await;
-        assert!(matches!(
-            response,
-            Ok(AuthListingResponse::Status200_OK { body, ..})
-            if body.clone().sort_by(|x, y| x.to_string().cmp(&y.to_string())) == keys.iter().map(|x| keytag_of(x)).collect::<Vec<_>>().sort()
-        ));
+        match response {
+            Ok(AuthListingResponse::Status200_OK { body, .. }) => {
+                let mut bodykeys: Vec<_> = body
+                    .iter()
+                    .map(|x| {
+                        x.as_str()
+                            .strip_prefix("\"")
+                            .unwrap_or(x.as_str())
+                            .strip_suffix("\"")
+                            .unwrap_or(x.as_str())
+                    })
+                    .collect();
+                bodykeys.sort();
+                let mut keys = keys
+                    .iter()
+                    .map(|x| keytag_of(x))
+                    .chain(vec!["total-nutzlos".to_string()].drain(..))
+                    .collect::<Vec<_>>();
+                keys.sort();
+                assert_eq!(keys, bodykeys);
+            }
+            _ => unreachable!("unreachable"),
+        }
         // insufficient permissions
         let response = server
             .auth_listing(
