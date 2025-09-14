@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at < NOW()",
+  "query": "SELECT COUNT(1) AS total_count FROM api_keys WHERE deleted_by IS NULL AND expires_at > NOW()",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       null
     ]
   },
-  "hash": "f66e2c85333be58a1af96b5f13fc1aefa5ac22df69c21db55aa0d84fc00db008"
+  "hash": "e0c7c7881306a5fb37286bf739cbb5391ff7c6356571405c7b57189eb730c82f"
 }
