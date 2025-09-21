@@ -202,7 +202,7 @@ mod candid_test {
 
     #[tokio::test]
     async fn vorgang_test() {
-        let srv = generate::setup_server("test_dokument_candidates")
+        let srv = generate::setup_server("test_vorgang_candidates")
             .await
             .unwrap();
         let vgs = vec![
@@ -253,11 +253,13 @@ mod candid_test {
     }
     #[tokio::test]
     async fn station_test() {
-        todo!("Implement");
+        let _srv = generate::setup_server("test_station_candidates")
+            .await
+            .unwrap();
     }
     #[tokio::test]
     async fn dokument_test() {
-        let srv = generate::setup_server("test_vorgang_candidates")
+        let srv = generate::setup_server("test_dokument_candidates")
             .await
             .unwrap();
         let vgs = vec![
