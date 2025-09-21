@@ -162,6 +162,7 @@ async fn main() -> Result<()> {
     let tag = utils::auth::keytag_of(key);
     let salt = utils::auth::generate_salt();
     let hash = utils::auth::hash_full_key(&salt, key);
+    tracing::info!("Master key of this session has keytag {}", tag);
 
     sqlx::query!(
         "INSERT INTO api_keys(key_hash, scope, created_by, salt, keytag)

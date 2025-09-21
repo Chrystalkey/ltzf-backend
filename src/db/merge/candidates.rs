@@ -81,7 +81,7 @@ SELECT DISTINCT(vorgang.id), vorgang.api_id FROM vorgang -- gib vorgänge, bei d
 
 /// bei gleichem Vorgang => Vorraussetzung
 /// 1. wenn die api_id matcht
-/// 2. wenn typ und gremium matchen und mindestens ein Dokument gleich ist
+/// 2. wenn vorgang, typ und gremium matchen und mindestens ein Dokument gleich ist
 pub async fn station_merge_candidates(
     model: &models::Station,
     vorgang: i32,
@@ -152,8 +152,8 @@ pub async fn station_merge_candidates(
     })
 }
 
-/// bei gleichem
-/// - hash oder api_id oder drucksnr (und jeweils gleichem Typ)
+/// wenn gleich:
+/// api_id OR hash OR (typ AND drucksNr AND zp_referenz)
 pub async fn dokument_merge_candidates(
     model: &models::Dokument,
     executor: impl sqlx::PgExecutor<'_>,
@@ -163,9 +163,9 @@ pub async fn dokument_merge_candidates(
         "SELECT d.id FROM dokument d 
         INNER JOIN dokumententyp dt ON dt.id = d.typ 
         WHERE 
-        (d.hash = $1 OR
+        d.hash = $1 OR
         d.api_id = $2 OR
-        d.drucksnr = $3) AND dt.value = $4",
+        (d.drucksnr = $3 AND dt.value = $4 AND ($5 BETWEEN (d.zp_referenz-'12 hours'::interval) AND (d.zp_referenz+'12 hours'::interval)))",
         model.hash,
         model.api_id,
         model.drucksnr,
@@ -173,7 +173,8 @@ pub async fn dokument_merge_candidates(
             model.typ,
             model.api_id.unwrap_or(Uuid::nil()),
             "dok_merge_candidates"
-        )?
+        )?,
+        model.zp_referenz
     )
     .map(|r| r.id)
     .fetch_all(executor)
@@ -189,16 +190,21 @@ pub async fn dokument_merge_candidates(
 
 #[cfg(test)]
 mod candid_test {
+    use super::*;
     use crate::api::auth;
     use crate::utils::test::generate::default_vorgang;
     use crate::{db::merge::MatchState, utils::test::generate};
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
+    use chrono::DateTime;
     use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
     use openapi::models;
 
     #[tokio::test]
     async fn vorgang_test() {
+        let srv = generate::setup_server("test_vorgang_candidates")
+            .await
+            .unwrap();
         let vgs = vec![
             generate::vorgang_with_seed(0),
             generate::vorgang_with_seed(1),
@@ -208,9 +214,6 @@ mod candid_test {
             generate::vorgang_with_seed(5),
             generate::vorgang_with_seed(6),
         ];
-        let srv = generate::setup_server("test_vorgang_candidates")
-            .await
-            .unwrap();
         // insert vorgang 1,2,3, ...
         for vg in vgs.iter() {
             let r = srv
@@ -250,14 +253,101 @@ mod candid_test {
     }
     #[tokio::test]
     async fn station_test() {
-        // insert vorgang
-        // check wether all conditions are "enough" to find a specific station
-        // check wether insufficient uniqueness conditions yield appropriate results
+        let _srv = generate::setup_server("test_station_candidates")
+            .await
+            .unwrap();
     }
     #[tokio::test]
     async fn dokument_test() {
-        // insert vorgang
-        // check wether all conditions are "enough" to find a specific station
-        // check wether insufficient uniqueness conditions yield appropriate results
+        let srv = generate::setup_server("test_dokument_candidates")
+            .await
+            .unwrap();
+        let vgs = vec![
+            models::Vorgang {
+                stationen: vec![models::Station {
+                    dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                        generate::dokument_with_seed(0),
+                    ))],
+                    ..generate::station_with_seed(0)
+                }],
+                ..generate::vorgang_with_seed(0)
+            },
+            generate::vorgang_with_seed(1),
+            generate::vorgang_with_seed(2),
+            generate::vorgang_with_seed(3),
+            generate::vorgang_with_seed(4),
+            generate::vorgang_with_seed(5),
+            generate::vorgang_with_seed(6),
+        ];
+        // insert vorgang 1,2,3, ...
+        for vg in vgs.iter() {
+            let r = srv
+                .vorgang_id_put(
+                    &Method::PUT,
+                    &Host("localhost".to_string()),
+                    &CookieJar::new(),
+                    &(auth::APIScope::Admin, 1),
+                    &models::VorgangIdPutPathParams {
+                        vorgang_id: vg.api_id,
+                    },
+                    vg,
+                )
+                .await
+                .unwrap();
+            assert!(matches!(r, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }));
+        }
+        let mut tx = srv.sqlx_db.begin().await.unwrap();
+        let test_docs = [
+            // by api_id
+            models::Dokument {
+                hash: "91843918479182471".to_string(),
+                drucksnr: Some("123/1241204".to_string()),
+                zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
+                    .unwrap()
+                    .to_utc(),
+                typ: models::Doktyp::Antwort,
+                ..generate::dokument_with_seed(0)
+            },
+            // by hash
+            models::Dokument {
+                api_id: Some(uuid::Uuid::now_v7()),
+                drucksnr: Some("123/1241204".to_string()),
+                zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
+                    .unwrap()
+                    .to_utc(),
+                typ: models::Doktyp::Antwort,
+                ..generate::dokument_with_seed(0)
+            },
+            // by typ, refts, drucksnr
+            models::Dokument {
+                api_id: Some(uuid::Uuid::now_v7()),
+                hash: "91843918479182471".to_string(),
+                ..generate::dokument_with_seed(0)
+            },
+        ];
+        for (i, d) in test_docs.iter().enumerate() {
+            let r = dokument_merge_candidates(&d, &mut *tx, &srv).await.unwrap();
+            assert!(
+                matches!(r, MatchState::ExactlyOne(_)),
+                "Dok {} was {:?}",
+                i,
+                r
+            );
+        }
+        // no matching identifiers
+        let fail = models::Dokument {
+            api_id: Some(uuid::Uuid::now_v7()),
+            hash: "91843918479182471".to_string(),
+            drucksnr: Some("123/1241204".to_string()),
+            zp_referenz: DateTime::parse_from_rfc3339("2025-09-17T12:12:14Z")
+                .unwrap()
+                .to_utc(),
+            typ: models::Doktyp::Antwort,
+            ..generate::dokument_with_seed(0)
+        };
+        let r = dokument_merge_candidates(&fail, &mut *tx, &srv)
+            .await
+            .unwrap();
+        assert!(matches!(r, MatchState::NoMatch));
     }
 }
