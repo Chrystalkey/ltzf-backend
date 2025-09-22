@@ -658,6 +658,7 @@ mod scenariotest {
             Ok(())
         }
     }
+    /// Converts full documents to just their api id for a simplified comparison
     fn vg_to_expected(vg: &models::Vorgang) -> models::Vorgang {
         let mut vg = vg.clone();
         for s in &mut vg.stationen {
