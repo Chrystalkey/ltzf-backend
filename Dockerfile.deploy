@@ -1,4 +1,4 @@
-FROM rust:1.86-slim-bookworm AS builder
+FROM rust:1.90-slim-bookworm AS builder
 
 ENV OPENAPI_GENERATOR_VERSION="7.15.0"
 ENV SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"

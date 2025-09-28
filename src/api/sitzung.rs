@@ -11,11 +11,13 @@ use openapi::apis::collector_schnittstellen_sitzung::*;
 use openapi::apis::data_administration_sitzung::*;
 use openapi::apis::sitzung_unauthorisiert::*;
 use openapi::models;
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
 use super::{compare::*, find_applicable_date_range};
 
+// helper that converts the documents in a sitzung into just their uuids instead of full objects
 fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
     let mut st = st.clone();
     for t in &mut st.tops {
@@ -45,7 +47,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
 impl DataAdministrationSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "SitzungDelete - DELETE /api/v2/sitzung/{sid}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.sid))]
     async fn sitzung_delete(
         &self,
         _method: &Method,
@@ -55,17 +57,20 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         path_params: &models::SitzungDeletePathParams,
     ) -> Result<SitzungDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            warn!("Permission Level too low");
             return Ok(SitzungDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
-        Ok(delete::delete_sitzung_by_api_id(path_params.sid, self).await?)
+        let r = delete::delete_sitzung_by_api_id(path_params.sid, self).await?;
+        info!("Success");
+        Ok(r)
     }
 
     #[doc = "SidPut - PUT /api/v2/sitzung/{sid}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.sid))]
     async fn sid_put(
         &self,
         _method: &Method,
@@ -76,6 +81,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         body: &models::Sitzung,
     ) -> Result<SidPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            warn!("Permission Level too low");
             return Ok(SidPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -91,6 +97,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
             if compare_sitzung(&db_cmpvg, &st_to_uuiddoks(body)) {
+                info!("Sitzung has the same state as the input object");
                 return Ok(SidPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -102,6 +109,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
                     insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
                 }
                 _ => {
+                    error!("Delete was unsuccessful despite session being in the database");
                     unreachable!("If this is reached, some assumptions did not hold")
                 }
             }
@@ -109,6 +117,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
+        info!("Successfully PUT session into database");
         Ok(SidPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -122,7 +131,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
     #[doc = "KalDatePut - PUT /api/v2/kalender/{parlament}/{datum}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claim=%claims.0, date=%path_params.datum))]
     async fn kal_date_put(
         &self,
         _method: &Method,
@@ -141,11 +150,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             || claims.0 == APIScope::KeyAdder
             || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
         {
-            tracing::warn!(
-                "Unauthorized kal_date_put with path date {} and last upd day {}",
-                path_params.datum,
-                last_upd_day
-            );
+            warn!("Permission Level too low");
             return Ok(KalDatePutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -160,8 +165,8 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             .collect();
 
         if len != body.len() {
-            tracing::info!(
-                "Filtered {} Sitzung entries due to date constraints",
+            debug!(
+                "Filtered {} Sitzungen due to date constraints",
                 len - body.len()
             );
         }
@@ -179,6 +184,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             .and_time(chrono::NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap())
             .and_utc();
         // delete all entries that fit the description
+        debug!("Deleting entries from {dt_begin} until {dt_end}");
         sqlx::query!(
             "DELETE FROM sitzung WHERE sitzung.id = ANY(SELECT s.id FROM sitzung s 
         INNER JOIN gremium g ON g.id=s.gr_id 
@@ -196,6 +202,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             insert::insert_sitzung(s, header_params.x_scraper_id, claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
+        info!("Inserted {} sessions into the database", body.len());
         Ok(KalDatePutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -208,7 +215,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "KalDateGet - GET /api/v2/kalender/{parlament}/{datum}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(date=%path_params.datum))]
     async fn kal_date_get(
         &self,
         _method: &Method,
@@ -228,6 +235,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             header_params.if_modified_since,
         );
         if dr.is_none() {
+            info!("Date Range too narrow or invalid");
             return Ok(KalDateGetResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -253,10 +261,9 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         )
         .await?;
 
-        let prp = &result.0;
-
         if result.1.is_empty() {
             tx.rollback().await?;
+            info!("No Sitzungen found in date range {}", dr);
             return Ok(KalDateGetResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -264,6 +271,9 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             });
         }
         tx.commit().await?;
+
+        let prp = &result.0;
+        info!("Successfully fetched Sitzungen");
         Ok(KalDateGetResponse::Status200_SuccessfulResponse {
             body: result.1,
             x_rate_limit_limit: None,
@@ -283,7 +293,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     /// TODO: unify kal_get and kal_date_get by utilising sitzung_retrieve_by_param
     /// find a way to implement pagination and the prp here
     #[doc = "KalGet - GET /api/v2/kalender"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all)]
     async fn kal_get(
         &self,
         _method: &Method,
@@ -304,6 +314,10 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             hparams.if_modified_since,
         );
         if result.is_none() {
+            warn!(
+                "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+                query_params, header_params.if_modified_since
+            );
             return Ok(KalGetResponse::Status416_RequestRangeNotSatisfiable {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -326,12 +340,14 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 .await?;
         if result.1.is_empty() {
             tx.rollback().await?;
+            info!("No Sitzungen found");
             Ok(KalGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             })
         } else if result.1.is_empty() && header_params.if_modified_since.is_some() {
+            info!("All results remain unchanged");
             Ok(KalGetResponse::Status304_NotModified {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -340,6 +356,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         } else {
             tx.commit().await?;
             let prp = &result.0;
+            info!("{} Sitzungen retrieved", result.1.len());
             Ok(KalGetResponse::Status200_SuccessfulResponse {
                 body: result.1,
                 x_rate_limit_limit: None,
@@ -355,7 +372,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
     }
 
     #[doc = "SGetById - GET /api/v2/sitzung/{sid}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(sid=%path_params.sid))]
     async fn s_get_by_id(
         &self,
         _method: &Method,
@@ -371,6 +388,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             .fetch_optional(&mut *tx)
             .await?;
         if id_exists.is_none() {
+            info!("Sitzung doese not exist");
             return Ok(SGetByIdResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -406,29 +424,29 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
                 );
             }
             tx.commit().await?;
+            info!("Success");
             Ok(SGetByIdResponse::Status200_Success {
                 body: result,
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             })
-        } else if header_params.if_modified_since.is_some() {
+        } else if let Some(ims) = header_params.if_modified_since {
+            info!("Success, but not modified since {}", ims);
             Ok(SGetByIdResponse::Status304_NotModified {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             })
         } else {
-            Ok(SGetByIdResponse::Status404_NotFound {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            })
+            error!("Session ID was not found a second time despite if_modified_since being None. This might indicate a grave database state error.\n
+            Call Parameters: {:?}, {:?}", path_params, header_params);
+            unreachable!("This should not happen.")
         }
     }
 
     #[doc = "SGet - GET /api/v2/sitzung"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all)]
     async fn s_get(
         &self,
         _method: &Method,
@@ -446,6 +464,10 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             header_params.if_modified_since,
         );
         if range.is_none() {
+            warn!(
+                "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+                query_params, header_params.if_modified_since
+            );
             return Ok(SGetResponse::Status416_RequestRangeNotSatisfiable {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -468,18 +490,23 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         let prp = result.0;
         tx.commit().await?;
         if result.1.is_empty() && header_params.if_modified_since.is_none() {
+            info!("No Content found matching the date criteria");
             Ok(SGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             })
-        } else if result.1.is_empty() && header_params.if_modified_since.is_some() {
+        } else if let Some(ims) = header_params.if_modified_since
+            && result.1.is_empty()
+        {
+            info!("No Content found that was modified since {}", ims);
             Ok(SGetResponse::Status304_NotModified {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             })
         } else {
+            info!("Successfully retrieved {} Sitzungen", result.1.len());
             Ok(SGetResponse::Status200_SuccessfulResponse {
                 body: result.1,
                 x_rate_limit_limit: None,

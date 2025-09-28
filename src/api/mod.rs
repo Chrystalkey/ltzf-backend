@@ -1,9 +1,13 @@
 use std::cmp::Ordering;
+use std::fmt::Debug;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum_extra::extract::Host;
 use openapi::models;
+use tracing::debug;
+use tracing::instrument;
 
 use crate::Configuration;
 use crate::Result;
@@ -43,6 +47,7 @@ impl LTZFServer {
 
 #[async_trait]
 impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
+    #[instrument(skip_all, fields(%method))]
     async fn handle_error(
         &self,
         method: &axum::http::Method,
@@ -57,6 +62,7 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl Unauthorisiert<LTZFError> for LTZFServer {
+    #[instrument(skip_all, fields(t=?query_params.t))]
     async fn ping(
         &self,
         _method: &axum::http::Method,
@@ -69,18 +75,19 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64();
-            tracing::debug!("Ping with one-way time: {} s", current_time - t);
+            debug!("Ping with one-way time: {} s", current_time - t);
         }
         Ok(PingResponse::Status200_Pong)
     }
 
+    #[instrument(skip_all)]
     async fn status(
         &self,
         _method: &axum::http::Method,
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<StatusResponse> {
-        tracing::debug!("Status Requested");
+        debug!("Status Requested");
         // TODO: implement "API is not running for some reason" markers
         Ok(StatusResponse::Status200_APIIsRunning {
             x_rate_limit_limit: None,
@@ -256,10 +263,32 @@ mod prp_test {
         assert_eq!(prp.end(), 1);
     }
 }
+
 pub struct DateRange {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+impl Debug for DateRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+impl Display for DateRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}, {}]",
+            self.since
+                .map(|x| format!("{}", x))
+                .unwrap_or("-∞".to_string()),
+            self.until
+                .map(|x| format!("{}", x))
+                .unwrap_or("∞".to_string())
+        )
+    }
+}
+
 impl
     From<(
         Option<chrono::DateTime<chrono::Utc>>,
@@ -493,6 +522,8 @@ mod test_applicable_date_range {
     }
 }
 
+/// this is here to implement a PartialEq, Eq, Ord, ...
+/// for hashing
 #[derive(Debug, Clone)]
 pub(crate) struct WrappedAutor {
     pub autor: models::Autor,
