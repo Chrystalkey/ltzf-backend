@@ -16,10 +16,9 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
+          components: rustfmt, clippy
       - name: formatting
         run: cargo fmt --check
-      - name: install ripgrep
-        run: sudo apt install ripgrep
       - name: Generate OAPI Code
         run: sh oapigen.sh
       - name: clippy
