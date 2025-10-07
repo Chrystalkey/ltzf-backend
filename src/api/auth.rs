@@ -158,7 +158,7 @@ async fn internal_extract_claims(
 impl ApiKeyAuthHeader for LTZFServer {
     type Claims = crate::api::Claims;
 
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
     async fn extract_claims_from_header(
         &self,
         headers: &axum::http::header::HeaderMap,

@@ -146,11 +146,9 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             .date_naive()
             .checked_sub_days(chrono::Days::new(1))
             .unwrap();
-        if !(claims.0 == APIScope::Admin
-            || claims.0 == APIScope::KeyAdder
-            || (claims.0 == APIScope::Collector && path_params.datum > last_upd_day))
+        if claims.0 == APIScope::Collector && path_params.datum < last_upd_day
         {
-            warn!("Permission Level too low");
+            warn!("Permission not Granted because you are only a collector and {} < {}", path_params.datum, last_upd_day);
             return Ok(KalDatePutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
