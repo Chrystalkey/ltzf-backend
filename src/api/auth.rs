@@ -556,7 +556,7 @@ mod auth_test {
 
     use crate::LTZFServer;
     use crate::utils::auth::keytag_of;
-    use crate::utils::test::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate};
 
     async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
@@ -602,7 +602,7 @@ mod auth_test {
     // GET /auth/status
     #[tokio::test]
     async fn test_auth_status() {
-        let scenario = crate::utils::test::TestSetup::new("test_auth_status").await;
+        let scenario = TestSetup::new("test_auth_status").await;
         let server = &scenario.server;
         let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
         let key = server

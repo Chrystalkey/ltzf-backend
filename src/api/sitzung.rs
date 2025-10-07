@@ -146,9 +146,11 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             .date_naive()
             .checked_sub_days(chrono::Days::new(1))
             .unwrap();
-        if claims.0 == APIScope::Collector && path_params.datum < last_upd_day
-        {
-            warn!("Permission not Granted because you are only a collector and {} < {}", path_params.datum, last_upd_day);
+        if claims.0 == APIScope::Collector && path_params.datum < last_upd_day {
+            warn!(
+                "Permission not Granted because you are only a collector and {} < {}",
+                path_params.datum, last_upd_day
+            );
             return Ok(KalDatePutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -533,10 +535,9 @@ mod sitzung_test {
     use uuid::Uuid;
 
     use crate::api::auth::APIScope;
-    use crate::utils::test::TestSetup;
+    use crate::utils::testing::{TestSetup, generate};
 
     use super::super::auth;
-    use super::super::endpoint_test::*;
 
     // Calendar tests
     #[tokio::test]
@@ -550,7 +551,7 @@ mod sitzung_test {
         // Create test calendar entry
         let test_date = chrono::Utc::now().date_naive();
         let recent_date = test_date; // Define recent_date at the same scope level
-        let test_session = create_test_session();
+        let test_session = generate::default_sitzung();
         let test_sessions = vec![test_session.clone()];
 
         // Test cases for kal_date_put:
@@ -848,7 +849,7 @@ mod sitzung_test {
         let scenario = TestSetup::new("test_session_get").await;
         let server = &scenario.server;
 
-        let test_session = create_test_session();
+        let test_session = generate::default_sitzung();
         // First create the session
         let create_response = server
             .sid_put(
@@ -1045,7 +1046,7 @@ mod sitzung_test {
             );
         }
 
-        let test_session = create_test_session();
+        let test_session = generate::default_sitzung();
         // First create a session with specific parameters
         let create_response = server
             .sid_put(
@@ -1172,7 +1173,7 @@ mod sitzung_test {
     async fn test_session_modify_endpoints() {
         let scenario = TestSetup::new("session_modify_ep").await;
         let server = &scenario.server;
-        let sitzung = create_test_session();
+        let sitzung = generate::default_sitzung();
         // - Input non-existing session
         {
             let response = server

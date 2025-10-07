@@ -255,9 +255,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // if replacing contains an index larger than the object list: Bad Request
         // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
         let seen = std::collections::BTreeSet::from_iter(
-            body.objects
-                .iter()
-                .map(|x| WrappedAutor { autor: x.clone() }),
+            body.objects.iter().map(|x| WrappedAutor { autor: x }),
         );
         if let Some(replc) = &body.replacing {
             for rpl in replc.iter() {
@@ -265,7 +263,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                     || rpl
                         .values
                         .iter()
-                        .any(|x| seen.contains(&WrappedAutor { autor: x.clone() }))
+                        .any(|x| seen.contains(&WrappedAutor { autor: x }))
                 {
                     info!(
                         "Semantically bad request: Either a circular replacement was detected or 
@@ -981,7 +979,7 @@ mod test_authorisiert {
     use openapi::models::{self, EnumerationNames, StationDokumenteInner};
 
     use crate::LTZFServer;
-    use crate::utils::test::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate};
 
     async fn insert_default_vorgang(server: &LTZFServer) {
         let vorgang = generate::default_vorgang();

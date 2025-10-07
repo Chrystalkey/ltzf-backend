@@ -192,8 +192,8 @@ pub async fn dokument_merge_candidates(
 mod candid_test {
     use super::*;
     use crate::api::auth;
-    use crate::utils::test::generate::default_vorgang;
-    use crate::{db::merge::MatchState, utils::test::generate};
+    use crate::db::merge::MatchState;
+    use crate::utils::testing::{TestSetup, generate};
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use chrono::DateTime;
@@ -202,17 +202,17 @@ mod candid_test {
 
     #[tokio::test]
     async fn vorgang_test() {
-        let srv = generate::setup_server("test_vorgang_candidates")
-            .await
-            .unwrap();
+        let setup = TestSetup::new("test_vorgang_candidates").await;
+        let srv = &setup.server;
+
         let vgs = vec![
-            generate::vorgang_with_seed(0),
-            generate::vorgang_with_seed(1),
-            generate::vorgang_with_seed(2),
-            generate::vorgang_with_seed(3),
-            generate::vorgang_with_seed(4),
-            generate::vorgang_with_seed(5),
-            generate::vorgang_with_seed(6),
+            generate::random::vorgang(0),
+            generate::random::vorgang(1),
+            generate::random::vorgang(2),
+            generate::random::vorgang(3),
+            generate::random::vorgang(4),
+            generate::random::vorgang(5),
+            generate::random::vorgang(6),
         ];
         // insert vorgang 1,2,3, ...
         for vg in vgs.iter() {
@@ -244,40 +244,41 @@ mod candid_test {
         assert!(matches!(candidate, MatchState::ExactlyOne(_)));
         // check wether insufficient uniqueness conditions yield appropriate results:
         // no match for something not in the db
-        let candidate = super::vorgang_merge_candidates(&default_vorgang(), &mut *tx, &srv)
-            .await
-            .unwrap();
+        let candidate =
+            super::vorgang_merge_candidates(&generate::default_vorgang(), &mut *tx, &srv)
+                .await
+                .unwrap();
         assert!(matches!(candidate, MatchState::NoMatch));
         // ambiguous match for ambiguous conditions
         // TODO
+        setup.teardown().await;
     }
     #[tokio::test]
     async fn station_test() {
-        let _srv = generate::setup_server("test_station_candidates")
-            .await
-            .unwrap();
+        let setup = TestSetup::new("test_station_candidates").await;
+        let srv = &setup.server;
+        setup.teardown().await;
     }
     #[tokio::test]
     async fn dokument_test() {
-        let srv = generate::setup_server("test_dokument_candidates")
-            .await
-            .unwrap();
+        let setup = TestSetup::new("test_dokument_candidates").await;
+        let srv = &setup.server;
         let vgs = vec![
             models::Vorgang {
                 stationen: vec![models::Station {
                     dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
-                        generate::dokument_with_seed(0),
+                        generate::random::dokument(0),
                     ))],
-                    ..generate::station_with_seed(0)
+                    ..generate::random::station(0)
                 }],
-                ..generate::vorgang_with_seed(0)
+                ..generate::random::vorgang(0)
             },
-            generate::vorgang_with_seed(1),
-            generate::vorgang_with_seed(2),
-            generate::vorgang_with_seed(3),
-            generate::vorgang_with_seed(4),
-            generate::vorgang_with_seed(5),
-            generate::vorgang_with_seed(6),
+            generate::random::vorgang(1),
+            generate::random::vorgang(2),
+            generate::random::vorgang(3),
+            generate::random::vorgang(4),
+            generate::random::vorgang(5),
+            generate::random::vorgang(6),
         ];
         // insert vorgang 1,2,3, ...
         for vg in vgs.iter() {
@@ -306,7 +307,7 @@ mod candid_test {
                     .unwrap()
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::dokument_with_seed(0)
+                ..generate::random::dokument(0)
             },
             // by hash
             models::Dokument {
@@ -316,13 +317,13 @@ mod candid_test {
                     .unwrap()
                     .to_utc(),
                 typ: models::Doktyp::Antwort,
-                ..generate::dokument_with_seed(0)
+                ..generate::random::dokument(0)
             },
             // by typ, refts, drucksnr
             models::Dokument {
                 api_id: Some(uuid::Uuid::now_v7()),
                 hash: "91843918479182471".to_string(),
-                ..generate::dokument_with_seed(0)
+                ..generate::random::dokument(0)
             },
         ];
         for (i, d) in test_docs.iter().enumerate() {
@@ -343,11 +344,12 @@ mod candid_test {
                 .unwrap()
                 .to_utc(),
             typ: models::Doktyp::Antwort,
-            ..generate::dokument_with_seed(0)
+            ..generate::random::dokument(0)
         };
         let r = dokument_merge_candidates(&fail, &mut *tx, &srv)
             .await
             .unwrap();
         assert!(matches!(r, MatchState::NoMatch));
+        setup.teardown().await;
     }
 }
