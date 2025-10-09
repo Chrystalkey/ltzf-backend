@@ -160,15 +160,29 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
         let len = body.len();
         let body: Vec<_> = body
             .iter()
-            .filter(|&f| f.termin.date_naive() >= last_upd_day)
+            .filter(|&f| {
+                f.termin.date_naive() >= last_upd_day
+                    && f.gremium.parlament == path_params.parlament
+            })
             .cloned()
             .collect();
 
         if len != body.len() {
             debug!(
-                "Filtered {} Sitzungen due to date constraints",
-                len - body.len()
+                "Filtered {}/{} Sitzungen due to date and parlament equality constraints",
+                len - body.len(),
+                len
             );
+        }
+        if len == 0 {
+            warn!("Body was empty");
+        }
+        if body.is_empty() {
+            return Ok(KalDatePutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None,
+            });
         }
 
         let mut tx = self.sqlx_db.begin().await?;
@@ -338,8 +352,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         let result =
             retrieve::sitzung_by_param(&params, query_params.page, query_params.per_page, &mut tx)
                 .await?;
-        if result.1.is_empty() {
-            tx.rollback().await?;
+        if result.1.is_empty() && header_params.if_modified_since.is_none() {
             info!("No Sitzungen found");
             Ok(KalGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
@@ -388,7 +401,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
             .fetch_optional(&mut *tx)
             .await?;
         if id_exists.is_none() {
-            info!("Sitzung doese not exist");
+            info!("Sitzung does not exist");
             return Ok(SGetByIdResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -530,7 +543,13 @@ mod sitzung_test {
     use openapi::apis::collector_schnittstellen_sitzung::*;
     use openapi::apis::data_administration_sitzung::*;
     use openapi::apis::sitzung_unauthorisiert::*;
+    use openapi::models::KalDateGetHeaderParams;
+    use openapi::models::KalDateGetPathParams;
+    use openapi::models::KalDateGetQueryParams;
+    use openapi::models::SidPutPathParams;
+    use tracing_test::traced_test;
 
+    use chrono::Datelike;
     use openapi::models;
     use uuid::Uuid;
 
@@ -541,180 +560,302 @@ mod sitzung_test {
 
     // Calendar tests
     #[tokio::test]
-    async fn test_calendar_endpoints() {
+    async fn test_calendar_auth() {
+        let scenario = TestSetup::new("test_calendar_auth").await;
+        let server = &scenario.server;
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
+        let test_date = chrono::Utc::now().date_naive();
+        let test_session = generate::default_sitzung();
+
+        let response = server
+            .kal_date_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Collector, 1), // Using Collector scope with old date should fail
+                &models::KalDatePutHeaderParams {
+                    x_scraper_id: Uuid::nil(),
+                },
+                &models::KalDatePutPathParams {
+                    datum: test_date.checked_sub_days(chrono::Days::new(5)).unwrap(), // Date more than 1 day old
+                    parlament: models::Parlament::Bt,
+                },
+                &vec![test_session],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            KalDatePutResponse::Status403_Forbidden {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_cal_date_put() {
         // Setup test server and database
-        let scenario = TestSetup::new("test_calendar").await;
+        let scenario = TestSetup::new("test_cal_date_put").await;
         let server = &scenario.server;
         let host = Host("localhost".to_string());
         let cookies = CookieJar::new();
 
         // Create test calendar entry
-        let test_date = chrono::Utc::now().date_naive();
-        let recent_date = test_date; // Define recent_date at the same scope level
-        let test_session = generate::default_sitzung();
-        let test_sessions = vec![test_session.clone()];
+        let today = chrono::Utc::now().date_naive();
+        let outdated_session = generate::default_sitzung();
+        let recent_session = models::Sitzung {
+            termin: chrono::Utc::now(),
+            ..outdated_session.clone()
+        };
+        let parlament = recent_session.gremium.parlament;
 
         // Test cases for kal_date_put:
-        // 1. Update calendar entry with valid data and proper permissions
-        {
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Admin, 1),
-                    &models::KalDatePutHeaderParams {
-                        x_scraper_id: Uuid::nil(),
-                    },
-                    &models::KalDatePutPathParams {
-                        datum: test_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalDatePutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-            // Allow time for database operations to complete
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        }
-
-        // 2. Update calendar entry with insufficient permissions
-        {
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1), // Using Collector scope with old date should fail
-                    &models::KalDatePutHeaderParams {
-                        x_scraper_id: Uuid::nil(),
-                    },
-                    &models::KalDatePutPathParams {
-                        datum: test_date.checked_sub_days(chrono::Days::new(5)).unwrap(), // Date more than 1 day old
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalDatePutResponse::Status403_Forbidden {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-        }
-
-        // 3. Update calendar entry with date constraints (collector is allowed to update recent dates)
-        {
-            // Use the already defined recent_date variable instead of redefining it
-            let response = server
-                .kal_date_put(
-                    &Method::PUT,
-                    &host,
-                    &cookies,
-                    &(auth::APIScope::Collector, 1),
-                    &models::KalDatePutHeaderParams {
-                        x_scraper_id: Uuid::nil(),
-                    },
-                    &models::KalDatePutPathParams {
-                        datum: recent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &test_sessions,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalDatePutResponse::Status201_Created {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-            // Allow time for database operations to complete
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        }
-
-        // Test cases for kal_date_get:
-        // 1. Get calendar entry for valid date and parliament
-        {
-            let response = server
-                .kal_date_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalDateGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalDateGetPathParams {
-                        datum: recent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &models::KalDateGetQueryParams {
-                        page: None,
-                        per_page: None,
-                    },
-                )
-                .await
-                .unwrap();
-            match response {
-                KalDateGetResponse::Status200_SuccessfulResponse { body, .. } => {
-                    assert!(!body.is_empty(), "Expected to find at least one session");
-                    assert_eq!(body[0].gremium.parlament, models::Parlament::Bt);
-                    assert_eq!(
-                        body[0].termin.date_naive(),
-                        recent_date,
-                        "Expected to find a session with the requested date"
-                    );
-                }
-                _ => panic!("Expected to find sessions for the valid date"),
+        // 1. Create calendar entry out of valid date range with admin permissions
+        // result: should not be possible, the invalid data points are silently filtered out
+        let response = server
+            .kal_date_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Admin, 1),
+                &models::KalDatePutHeaderParams {
+                    x_scraper_id: Uuid::nil(),
+                },
+                &models::KalDatePutPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &vec![outdated_session.clone()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            KalDatePutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
             }
-        }
+        );
 
+        // 2. Update calendar entry with date constraints and fail (collector is only allowed to update recent dates)
+        // this is rejected with forbidden
+        let response = server
+            .kal_date_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Collector, 1),
+                &models::KalDatePutHeaderParams {
+                    x_scraper_id: Uuid::nil(),
+                },
+                &models::KalDatePutPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &vec![outdated_session],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            KalDatePutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        // Update calendar entry with date constraints and succeed
+        // this is accepted and an entry is created
+        let response = server
+            .kal_date_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Collector, 1),
+                &models::KalDatePutHeaderParams {
+                    x_scraper_id: Uuid::nil(),
+                },
+                &models::KalDatePutPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &vec![recent_session],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            KalDatePutResponse::Status201_Created {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        let response = server
+            .kal_date_get(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &KalDateGetHeaderParams {
+                    if_modified_since: None,
+                },
+                &KalDateGetPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &KalDateGetQueryParams {
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            KalDateGetResponse::Status200_SuccessfulResponse { body, .. }
+            if body.len() == 1
+        ));
+        scenario.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_kal_date_get() {
+        let setup = TestSetup::new("kal_date_get").await;
+        let server = &setup.server;
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
+        let today = chrono::Utc::now().date_naive();
+        let session = generate::default_sitzung();
+        let parlament = session.gremium.parlament;
+        let date = session.termin;
+
+        let _response = server
+            .kal_date_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Collector, 1),
+                &models::KalDatePutHeaderParams {
+                    x_scraper_id: Uuid::nil(),
+                },
+                &models::KalDatePutPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &vec![session.clone()],
+            )
+            .await
+            .unwrap();
         // 2. Get calendar entry for non-existent date
-        {
-            let non_existent_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
-            let response = server
-                .kal_date_get(
-                    &Method::GET,
-                    &host,
-                    &cookies,
-                    &models::KalDateGetHeaderParams {
-                        if_modified_since: None,
-                    },
-                    &models::KalDateGetPathParams {
-                        datum: non_existent_date,
-                        parlament: models::Parlament::Bt,
-                    },
-                    &models::KalDateGetQueryParams {
-                        page: None,
-                        per_page: None,
-                    },
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                response,
-                KalDateGetResponse::Status404_NotFound {
-                    x_rate_limit_limit: None,
-                    x_rate_limit_remaining: None,
-                    x_rate_limit_reset: None
-                }
-            );
-        }
-        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
+        let response = server
+            .kal_date_get(
+                &Method::GET,
+                &host,
+                &cookies,
+                &models::KalDateGetHeaderParams {
+                    if_modified_since: None,
+                },
+                &models::KalDateGetPathParams {
+                    datum: today,
+                    parlament,
+                },
+                &models::KalDateGetQueryParams {
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response,
+            KalDateGetResponse::Status404_NotFound {
+                x_rate_limit_limit: None,
+                x_rate_limit_remaining: None,
+                x_rate_limit_reset: None
+            }
+        );
+        // successful GET
+        let response = server
+            .kal_date_get(
+                &Method::GET,
+                &host,
+                &cookies,
+                &models::KalDateGetHeaderParams {
+                    if_modified_since: None,
+                },
+                &models::KalDateGetPathParams {
+                    datum: date.date_naive(),
+                    parlament,
+                },
+                &models::KalDateGetQueryParams {
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            KalDateGetResponse::Status200_SuccessfulResponse { body, .. }
+            if body[0] == session
+        ));
+        let response = server
+            .kal_date_get(
+                &Method::GET,
+                &host,
+                &cookies,
+                &models::KalDateGetHeaderParams {
+                    if_modified_since: Some(chrono::Utc::now()),
+                },
+                &models::KalDateGetPathParams {
+                    datum: date.date_naive(),
+                    parlament,
+                },
+                &models::KalDateGetQueryParams {
+                    page: None,
+                    per_page: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            KalDateGetResponse::Status304_NotModified { .. }
+        ));
+        // Cleanup
+        setup.teardown().await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_kal_get() {
+        let setup = TestSetup::new("kal_get").await;
+        let server = &setup.server;
+        let host = Host("localhost".to_string());
+        let cookies = CookieJar::new();
+        let today_utc = chrono::Utc::now();
+        let today = today_utc.date_naive();
+        let session = generate::default_sitzung();
+        let parlament = session.gremium.parlament;
+        let date = session.termin;
+
+        let response = server
+            .sid_put(
+                &Method::PUT,
+                &host,
+                &cookies,
+                &(auth::APIScope::Admin, 1),
+                &SidPutPathParams { sid: Uuid::nil() },
+                &session.clone(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(response, SidPutResponse::Status201_Created { .. }));
 
         // Test cases for kal_get:
         // 1. Get calendar entries with valid parameters
@@ -730,26 +871,29 @@ mod sitzung_test {
                     &models::KalGetQueryParams {
                         page: None,
                         per_page: None,
-                        y: Some(recent_date.format("%Y").to_string().parse::<i32>().unwrap()),
-                        m: Some(recent_date.format("%m").to_string().parse::<i32>().unwrap()),
+                        y: Some(date.year()),
+                        m: Some(date.month0() as i32 + 1),
                         dom: None,
                         gr: None,
-                        p: Some(models::Parlament::Bt),
+                        p: Some(parlament),
                         since: None,
                         until: None,
-                        wp: Some(20),
+                        wp: Some(session.gremium.wahlperiode as i32),
                     },
                 )
                 .await
                 .unwrap();
-            match response {
+            match &response {
                 KalGetResponse::Status200_SuccessfulResponse { body, .. } => {
                     assert!(
                         !body.is_empty(),
-                        "Expected to find sessions with valid filters"
+                        "Expected 204 no content, got 200 OK with empty body"
                     );
                 }
-                _ => panic!("Expected to find sessions with valid filters"),
+                _ => panic!(
+                    "Expected to find sessions with valid filters, got: {:?}",
+                    &response
+                ),
             }
         }
 
@@ -790,15 +934,14 @@ mod sitzung_test {
 
         // 3. Get calendar entries with date range
         {
-            let start_date = recent_date
-                .and_time(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap())
-                .and_utc();
-            let end_date = recent_date
-                .checked_add_days(chrono::Days::new(5))
-                .unwrap()
-                .and_time(chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap())
-                .and_utc();
-
+            let start_date = session
+                .termin
+                .checked_sub_days(chrono::Days::new(1))
+                .unwrap();
+            let end_date = session
+                .termin
+                .checked_add_days(chrono::Days::new(1))
+                .unwrap();
             let response = server
                 .kal_get(
                     &Method::GET,
@@ -814,7 +957,7 @@ mod sitzung_test {
                         m: None,
                         dom: None,
                         gr: None,
-                        p: Some(models::Parlament::Bt),
+                        p: Some(parlament),
                         since: Some(start_date),
                         until: Some(end_date),
                         wp: None,
@@ -836,11 +979,70 @@ mod sitzung_test {
             }
         }
 
-        // TODO: Test for Status304_NotModified with set If-Modified-Since Header
-        // TODO: Test for Status204_NoContent
-
-        // Cleanup
-        scenario.teardown().await;
+        let response = server
+            .kal_get(
+                &Method::GET,
+                &host,
+                &cookies,
+                &models::KalGetHeaderParams {
+                    if_modified_since: Some(
+                        chrono::Utc::now()
+                            .checked_add_days(chrono::Days::new(1))
+                            .unwrap(),
+                    ),
+                },
+                &models::KalGetQueryParams {
+                    page: None,
+                    per_page: None,
+                    y: None,
+                    m: None,
+                    dom: None,
+                    gr: None,
+                    p: Some(parlament),
+                    since: None,
+                    until: None,
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(response, KalGetResponse::Status304_NotModified { .. }),
+            "{:?}",
+            response
+        );
+        let response = server
+            .kal_get(
+                &Method::GET,
+                &host,
+                &cookies,
+                &models::KalGetHeaderParams {
+                    if_modified_since: None,
+                },
+                &models::KalGetQueryParams {
+                    page: None,
+                    per_page: None,
+                    y: None,
+                    m: None,
+                    dom: None,
+                    gr: None,
+                    p: Some(parlament),
+                    since: Some(
+                        chrono::Utc::now()
+                            .checked_add_days(chrono::Days::new(1))
+                            .unwrap(),
+                    ),
+                    until: None,
+                    wp: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            KalGetResponse::Status204_NoContent { .. }
+        ));
+        setup.teardown().await;
     }
 
     #[tokio::test]
@@ -994,7 +1196,7 @@ mod sitzung_test {
                         page: None,
                         gr: None,
                         per_page: None,
-                        p: Some(models::Parlament::Bt),
+                        p: Some(test_session.gremium.parlament),
                         since: None,
                         until: None,
                         wp: Some(20),
@@ -1083,7 +1285,7 @@ mod sitzung_test {
                     &models::SGetQueryParams {
                         page: None,
                         per_page: None,
-                        p: Some(models::Parlament::Bt),
+                        p: Some(test_session.gremium.parlament),
                         since: None,
                         gr: None,
                         until: None,
@@ -1170,10 +1372,11 @@ mod sitzung_test {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_session_modify_endpoints() {
         let scenario = TestSetup::new("session_modify_ep").await;
         let server = &scenario.server;
-        let sitzung = generate::default_sitzung();
+        let sitzung = generate::random::sitzung(12);
         // - Input non-existing session
         {
             let response = server
@@ -1197,7 +1400,6 @@ mod sitzung_test {
                     x_rate_limit_reset: None
                 }
             );
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         }
 
         // - Update existing session with the same data
@@ -1214,32 +1416,12 @@ mod sitzung_test {
             )
             .await
             .unwrap();
-        assert_eq!(
-            response,
-            SidPutResponse::Status304_NotModified {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            },
+        assert!(
+            matches!(response, SidPutResponse::Status304_NotModified { .. }),
             "Failed to update existing session with the same data.\nInput:  {:?}\n\n Output: {:?}",
             sitzung,
-            server
-                .s_get_by_id(
-                    &Method::PUT,
-                    &Host("localhost".to_string()),
-                    &CookieJar::new(),
-                    &(APIScope::Collector, 1),
-                    &models::SGetByIdHeaderParams {
-                        if_modified_since: None
-                    },
-                    &models::SGetByIdPathParams {
-                        sid: sitzung.api_id.unwrap()
-                    },
-                )
-                .await
-                .unwrap()
+            response,
         );
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
         // - Update existing session with valid new data
         let rsp_new = models::Sitzung {

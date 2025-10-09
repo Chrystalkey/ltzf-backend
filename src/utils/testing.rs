@@ -524,6 +524,60 @@ pub(crate) mod generate {
                 lobbyregister,
             }
         }
+        fn random_sitzung(rng: &mut StdRng) -> models::Sitzung {
+            let parlament_variants = [
+                models::Parlament::Bb,
+                models::Parlament::Be,
+                models::Parlament::Br,
+                models::Parlament::Bt,
+                models::Parlament::Bv,
+                models::Parlament::Bw,
+                models::Parlament::By,
+                models::Parlament::Ek,
+                models::Parlament::Hb,
+                models::Parlament::He,
+                models::Parlament::Hh,
+                models::Parlament::Mv,
+                models::Parlament::Ni,
+                models::Parlament::Nw,
+                models::Parlament::Rp,
+                models::Parlament::Sh,
+                models::Parlament::Sl,
+                models::Parlament::Sn,
+                models::Parlament::St,
+                models::Parlament::Th,
+            ];
+            models::Sitzung {
+                api_id: Some(random_uuid(rng)),
+                touched_by: None,
+                titel: Some(random_string(rng, "", 16, 65)),
+                termin: random_date(rng),
+                gremium: models::Gremium {
+                    name: random_string(rng, "", 10, 20),
+                    parlament: random_enum(rng, &parlament_variants),
+                    wahlperiode: rng.random_range(15..=25),
+                    link: None,
+                },
+                nummer: rng.random_range(0..=125),
+                public: rng.random_bool(0.5),
+                link: Some(random_string(rng, "https://", 4, 20)),
+                tops: vec![random_top(rng)],
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    random_dokument(rng),
+                ))]),
+                experten: Some(vec![random_autor(rng)]),
+            }
+        }
+        fn random_top(rng: &mut StdRng) -> models::Top {
+            models::Top {
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                    random_dokument(rng),
+                ))]),
+                nummer: rng.random_range(1..=125),
+                titel: random_string(rng, "", 10, 25),
+                vorgang_id: None,
+            }
+        }
 
         pub(crate) fn autor(seed: u64) -> models::Autor {
             use rand::rngs::StdRng;
@@ -549,6 +603,12 @@ pub(crate) mod generate {
             use rand::{Rng, SeedableRng};
             let mut rng = StdRng::seed_from_u64(seed);
             random_dokument(&mut rng)
+        }
+        pub(crate) fn sitzung(seed: u64) -> models::Sitzung {
+            use rand::rngs::StdRng;
+            use rand::{Rng, SeedableRng};
+            let mut rng = StdRng::seed_from_u64(seed);
+            random_sitzung(&mut rng)
         }
     }
 

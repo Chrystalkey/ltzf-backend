@@ -703,16 +703,18 @@ mod scenariotest {
         scenario.run().await.unwrap();
     }
     #[tokio::test]
-    async fn test_merge_matching_ids() {
+    async fn test_merge_matching_identifier() {
         let vg = generate::default_vorgang();
+
         let mut vg2 = generate::default_vorgang();
         vg2.api_id = Uuid::nil(); // take out api id matching
         vg2.titel = "Anderer Titel".to_string();
-        vg2.stationen = vec![generate::random::station(0)]; // take out vorwort matching
+        vg2.stationen = vec![generate::random::station(12)]; // take out vorwort matching
 
         let mut vg_exp = vg.clone();
         vg_exp.titel = vg2.titel.clone();
-        vg_exp.stationen = vec![generate::default_station(), generate::alternate_station()];
+        vg_exp.stationen = vg.stationen.clone();
+        vg_exp.stationen.push(generate::random::station(12));
 
         let scenario = Scenario::new("merge_matching_ids")
             .with_context(vec![vg])
