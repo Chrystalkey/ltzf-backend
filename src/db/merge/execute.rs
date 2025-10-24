@@ -526,7 +526,7 @@ pub async fn run_integration(
 
 #[cfg(test)]
 mod scenariotest {
-    use crate::utils::test::generate;
+    use crate::utils::testing::{TestSetup, generate};
     use crate::{
         LTZFServer, Result,
         api::{
@@ -544,53 +544,61 @@ mod scenariotest {
         object: models::Vorgang,
         expected: Vec<models::Vorgang>,
         shouldfail: bool,
+        test_setup: TestSetup,
+    }
+    struct ScenarioBuilder {
+        context: Vec<models::Vorgang>,
+        object: Option<models::Vorgang>,
+        expected: Vec<models::Vorgang>,
+        shouldfail: bool,
         name: &'static str,
     }
-    impl Scenario {
-        async fn run(&self) -> Result<()> {
-            let server = self.setup().await?;
-            self.build_context(&server).await?;
-            self.place_object(&server).await?;
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            self.check_result(&server).await?;
-            self.teardown().await?;
-            Ok(())
+    impl ScenarioBuilder {
+        fn with_context(mut self, context: Vec<models::Vorgang>) -> Self {
+            self.context = context;
+            self
         }
-        async fn setup(&self) -> Result<LTZFServer> {
-            generate::setup_server(self.name).await
+        fn with_expectation(mut self, expectation: Vec<models::Vorgang>) -> Self {
+            self.expected = expectation;
+            self
+        }
+        fn with_test_object(mut self, obj: models::Vorgang) -> Self {
+            self.object = Some(obj);
+            self
         }
 
-        async fn teardown(&self) -> Result<()> {
-            let dburl = std::env::var("DATABASE_URL")
-                .expect("Expected to find working DATABASE_URL for testing");
-            let config = crate::Configuration {
-                mail_server: None,
-                mail_user: None,
-                mail_password: None,
-                mail_sender: None,
-                mail_recipient: None,
-                per_object_scraper_log_size: 200,
-                req_limit_count: 4096,
-                req_limit_interval: 2,
-                host: "localhost".to_string(),
-                port: 80,
-                db_url: dburl.clone(),
-                config: None,
-                keyadder_key: "tegernsee-apfelsaft-co2grenzwert".to_string(),
-                merge_title_similarity: 0.8,
+        #[allow(unused)]
+        fn with_should_fail(mut self, shouldfail: bool) -> Self {
+            self.shouldfail = shouldfail;
+            self
+        }
+        async fn build(self) -> Scenario {
+            Scenario {
+                context: self.context,
+                expected: self.expected,
+                object: self.object.expect("Expected object to be set"),
+                shouldfail: self.shouldfail,
+                test_setup: TestSetup::new(self.name).await,
+            }
+        }
+    }
+    impl Scenario {
+        fn new(name: &'static str) -> ScenarioBuilder {
+            return ScenarioBuilder {
+                context: vec![],
+                object: None,
+                expected: vec![],
+                shouldfail: false,
+                name,
             };
-            let master_server = LTZFServer {
-                config: config.clone(),
-                mailbundle: None,
-                sqlx_db: sqlx::postgres::PgPool::connect(&dburl).await?,
-            };
-            let dropquery = format!(
-                "DROP DATABASE IF EXISTS \"testing_{}\" WITH (FORCE);",
-                self.name
-            );
-            sqlx::query(&dropquery)
-                .execute(&master_server.sqlx_db)
-                .await?;
+        }
+
+        async fn run(&self) -> Result<()> {
+            self.build_context(&self.test_setup.server).await?;
+            self.place_object(&self.test_setup.server).await?;
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            self.check_result(&self.test_setup.server).await?;
+            self.test_setup.teardown().await;
             Ok(())
         }
 
@@ -641,24 +649,29 @@ mod scenariotest {
                     .collect::<Vec<_>>()
                     .join(",");
                 std::fs::write(
-                    format!("tests/{}_dump.json", self.name),
+                    format!("tests/{}_dump.json", self.test_setup.name),
                     format!("{{\n\"expected\": [{exp_content}],\n\"actual\": [{dbv_content}]}}"),
                 )
                 .unwrap();
-                assert!(
-                    false,
-                    "Expected and Actual Contents were not equal. Dump: tests/{}_dump.json",
-                    self.name
-                );
+                return Err(crate::error::LTZFError::Other {
+                    message: Box::new(format!(
+                        "Expected and Actual Contents were not equal. Dump: tests/{}_dump.json",
+                        self.test_setup.name
+                    )),
+                });
             }
-            assert!(
-                !(equality && self.shouldfail),
-                "Expected Case to fail, but actual output was equal to expectation"
-            );
+            if equality && self.shouldfail {
+                return Err(crate::error::LTZFError::Other {
+                    message: Box::new(
+                        "Expected Case to fail, but actual output was equal to expectation"
+                            .to_string(),
+                    ),
+                });
+            }
             Ok(())
         }
     }
-    fn vg_to_expected(vg: &models::Vorgang) -> models::Vorgang {
+    fn vg_to_expected_shape(vg: &models::Vorgang) -> models::Vorgang {
         let mut vg = vg.clone();
         for s in &mut vg.stationen {
             for d in &mut s.dokumente {
@@ -681,34 +694,34 @@ mod scenariotest {
     #[tokio::test]
     async fn test_idempotenz() {
         let vg = generate::default_vorgang();
-        let scenario = Scenario {
-            context: vec![vg.clone()],
-            object: vg.clone(),
-            expected: vec![vg_to_expected(&vg)],
-            name: "idempotenz",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("idempotenz")
+            .with_context(vec![vg.clone()])
+            .with_test_object(vg.clone())
+            .with_expectation(vec![vg_to_expected_shape(&vg)])
+            .build()
+            .await;
         scenario.run().await.unwrap();
     }
     #[tokio::test]
-    async fn test_merge_matching_ids() {
+    async fn test_merge_matching_identifier() {
         let vg = generate::default_vorgang();
+
         let mut vg2 = generate::default_vorgang();
         vg2.api_id = Uuid::nil(); // take out api id matching
         vg2.titel = "Anderer Titel".to_string();
-        vg2.stationen = vec![generate::alternate_station()]; // take out vorwort matching
+        vg2.stationen = vec![generate::random::station(12)]; // take out vorwort matching
 
         let mut vg_exp = vg.clone();
         vg_exp.titel = vg2.titel.clone();
-        vg_exp.stationen = vec![generate::default_station(), generate::alternate_station()];
+        vg_exp.stationen = vg.stationen.clone();
+        vg_exp.stationen.push(generate::random::station(12));
 
-        let scenario = Scenario {
-            name: "merge_matching_ids",
-            shouldfail: false,
-            context: vec![vg],
-            object: vg2,
-            expected: vec![vg_to_expected(&vg_exp)],
-        };
+        let scenario = Scenario::new("merge_matching_ids")
+            .with_context(vec![vg])
+            .with_test_object(vg2)
+            .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
+            .build()
+            .await;
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -720,12 +733,7 @@ mod scenariotest {
             id: "einzigartig und anders".to_string(),
             typ: models::VgIdentTyp::Initdrucks,
         }]);
-        vg_mod.initiatoren = vec![models::Autor {
-            person: Some("Max Mustermann".to_string()),
-            organisation: "Musterorganisation".to_string(),
-            fachgebiet: Some("Musterfachgebiet".to_string()),
-            lobbyregister: Some("Musterlobbyregister".to_string()),
-        }];
+        vg_mod.initiatoren = vec![generate::random::autor(0)];
 
         let mut vg_exp = vg.clone();
         vg_exp.links = Some(
@@ -753,13 +761,13 @@ mod scenariotest {
         vg_exp
             .initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
-        let scenario = Scenario {
-            context: vec![vg],
-            object: vg_mod,
-            expected: vec![vg_to_expected(&vg_exp)],
-            name: "link_ini_ids_merging",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("link_ini_ids_merging")
+            .with_context(vec![vg])
+            .with_test_object(vg_mod)
+            .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -770,13 +778,13 @@ mod scenariotest {
         vg_mod.kurztitel = Some("Testkurztitel".to_string());
         vg_mod.wahlperiode = 20;
         vg_mod.verfassungsaendernd = true;
-        let scenario = Scenario {
-            context: vec![vg.clone()],
-            object: vg_mod.clone(),
-            expected: vec![vg_to_expected(&vg_mod)],
-            name: "weak_prop_change_override",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("weak_prop_change_override")
+            .with_context(vec![vg.clone()])
+            .with_test_object(vg_mod.clone())
+            .with_expectation(vec![vg_to_expected_shape(&vg_mod)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -793,13 +801,13 @@ mod scenariotest {
         vg2.stationen = vec![stat];
 
         vg2.titel = "Ich Mag Moneten und deshalb ist das ein anderes Gesetz".to_string();
-        let scenario = Scenario {
-            context: vec![vg.clone()],
-            object: vg2.clone(),
-            expected: vec![vg_to_expected(&vg), vg_to_expected(&vg2)],
-            name: "not_merged_but_separate",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("not_merged_but_separate")
+            .with_context(vec![vg.clone()])
+            .with_test_object(vg2.clone())
+            .with_expectation(vec![vg_to_expected_shape(&vg), vg_to_expected_shape(&vg2)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -814,13 +822,13 @@ mod scenariotest {
 
         let mut vg_exp = vg.clone();
         vg_exp.stationen[0].schlagworte = Some(vec!["ainz".to_string()]);
-        let scenario = Scenario {
-            context: vec![vg],
-            object: vg2,
-            expected: vec![vg_to_expected(&vg_exp)],
-            shouldfail: false,
-            name: "schlagwort_duplicate_elimination_and_formatting",
-        };
+        let scenario = Scenario::new("schlagwort_duplicate_elimination_and_formatting")
+            .with_context(vec![vg])
+            .with_test_object(vg2)
+            .with_expectation(vec![vg_to_expected_shape(&vg_exp)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -834,13 +842,13 @@ mod scenariotest {
         vg2.stationen[0].trojanergefahr = Some(4u8);
         vg2.stationen[0].zp_start = chrono::Utc::now();
 
-        let scenario = Scenario {
-            context: vec![vg],
-            object: vg2.clone(),
-            expected: vec![vg_to_expected(&vg2)],
-            name: "station_weak_props_change",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("station_weak_props_change")
+            .with_context(vec![vg])
+            .with_test_object(vg2.clone())
+            .with_expectation(vec![vg_to_expected_shape(&vg2)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
     #[tokio::test]
@@ -885,13 +893,13 @@ mod scenariotest {
             }],
             ..generate::default_vorgang()
         };
-        let scenario = Scenario {
-            context: vec![generate::default_vorgang()],
-            object: modified_docs_vorgang,
-            expected: vec![vg_to_expected(&expected_vorgang)],
-            name: "dokument_merging_on_weak_property_changes",
-            shouldfail: false,
-        };
+        let scenario = Scenario::new("dokument_merging_on_weak_property_changes")
+            .with_context(vec![generate::default_vorgang()])
+            .with_test_object(modified_docs_vorgang)
+            .with_expectation(vec![vg_to_expected_shape(&expected_vorgang)])
+            .build()
+            .await;
+
         scenario.run().await.unwrap();
     }
 }

@@ -18,7 +18,7 @@ use tower_http::{cors, limit};
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
-use utils::{init_tracing, shutdown_signal};
+use utils::{shutdown_signal, tracing::init_tracing};
 
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 

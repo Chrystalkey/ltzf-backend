@@ -345,16 +345,15 @@ mod test_endpoints {
 
     use crate::api::auth;
     use crate::api::auth::APIScope;
-    use crate::utils::test::TestSetup;
+    use crate::utils::testing::{TestSetup, generate};
 
-    use super::super::endpoint_test::*;
     // Procedure (Vorgang) tests
     #[tokio::test]
     async fn test_vorgang_get_by_id_endpoints() {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_by_id_get").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         // First create the procedure
         let create_response = server
             .vorgang_put(
@@ -490,7 +489,7 @@ mod test_endpoints {
     async fn test_vorgang_get_filtered_endpoints_empty() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_empty").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         // First create the procedure
         {
             let create_response = server
@@ -590,7 +589,7 @@ mod test_endpoints {
     async fn test_vorgang_get_filtered_endpoints_success() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_success").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         {
             // First create a procedure with specific parameters
             let create_response = server
@@ -664,7 +663,7 @@ mod test_endpoints {
         // Test cases for vorgang_id_put:
         // 1. Update existing procedure with valid data and admin permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
@@ -690,7 +689,7 @@ mod test_endpoints {
 
         // 2. Update procedure with insufficient permissions (Collector)
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
@@ -717,7 +716,7 @@ mod test_endpoints {
         // Test cases for vorgang_put:
         // 1. Create new procedure with valid data and collector permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_put(
                     &Method::PUT,
@@ -743,7 +742,7 @@ mod test_endpoints {
 
         // 2. Handle ambiguous matches (conflict)
         {
-            let vg1 = create_test_vorgang();
+            let vg1 = generate::default_vorgang();
             let mut vg2 = vg1.clone();
             let mut vg3 = vg1.clone();
             vg2.api_id = Uuid::now_v7();
@@ -829,7 +828,7 @@ mod test_endpoints {
         // Test cases for vorgang_delete:
         // 1. Delete existing procedure with proper permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             // First create the procedure
             let create_response = server
                 .vorgang_put(
@@ -905,7 +904,7 @@ mod test_endpoints {
 
         // 3. Delete procedure with insufficient permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_delete(
                     &Method::DELETE,
@@ -944,7 +943,7 @@ mod test_endpoints {
 
 #[cfg(test)]
 mod test_failed_irl_scenarios {
-    use crate::{api::auth::APIScope, utils::test::TestSetup};
+    use crate::{api::auth::APIScope, utils::testing::TestSetup};
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::{

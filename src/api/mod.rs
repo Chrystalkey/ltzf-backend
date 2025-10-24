@@ -523,189 +523,28 @@ mod test_applicable_date_range {
 }
 
 /// this is here to implement a PartialEq, Eq, Ord, ...
-/// for hashing
+/// for hashing, since we need t
 #[derive(Debug, Clone)]
-pub(crate) struct WrappedAutor {
-    pub autor: models::Autor,
+pub(crate) struct WrappedAutor<'wrapped> {
+    pub autor: &'wrapped models::Autor,
 }
-impl PartialEq for WrappedAutor {
+impl<'wrapped> PartialEq for WrappedAutor<'wrapped> {
     fn eq(&self, other: &Self) -> bool {
         self.autor.organisation == other.autor.organisation
             && self.autor.person == other.autor.person
     }
 }
-impl Eq for WrappedAutor {}
-impl PartialOrd for WrappedAutor {
+impl<'wrapped> Eq for WrappedAutor<'wrapped> {}
+impl<'wrapped> PartialOrd for WrappedAutor<'wrapped> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(std::cmp::Ord::cmp(self, other))
     }
 }
-impl Ord for WrappedAutor {
+impl<'wrapped> Ord for WrappedAutor<'wrapped> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.autor
             .organisation
             .cmp(&other.autor.organisation)
             .then(self.autor.person.cmp(&other.autor.person))
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod endpoint_test {
-    use openapi::models;
-
-    use crate::utils::test::generate::default_gremium;
-
-    // Session (Sitzung) tests
-    pub(crate) fn create_test_session() -> models::Sitzung {
-        use chrono::Utc;
-        use openapi::models::{
-            Autor, Dokument, Gremium, Parlament, Sitzung, StationDokumenteInner, Top,
-        };
-        use uuid::Uuid;
-
-        // Create a test document
-        let test_doc = Dokument {
-            touched_by: None,
-            api_id: Some(Uuid::now_v7()),
-            titel: "Test Document".to_string(),
-            kurztitel: None,
-            vorwort: Some("Test Vorwort".to_string()),
-            volltext: "Test Volltext".to_string(),
-            zusammenfassung: None,
-            typ: openapi::models::Doktyp::Entwurf,
-            link: "http://example.com/doc".to_string(),
-            hash: "testhash".to_string(),
-            zp_modifiziert: Utc::now(),
-            drucksnr: None,
-            zp_referenz: Utc::now(),
-            zp_erstellt: Some(Utc::now()),
-            meinung: None,
-            schlagworte: None,
-            autoren: vec![Autor {
-                person: Some("Test Person".to_string()),
-                organisation: "Test Organization".to_string(),
-                fachgebiet: Some("Test Fachgebiet".to_string()),
-                lobbyregister: None,
-            }],
-        };
-
-        // Create a test top
-        let test_top = Top {
-            titel: "Test Top".to_string(),
-            dokumente: Some(vec![StationDokumenteInner::Dokument(Box::new(test_doc))]),
-            nummer: 1,
-            vorgang_id: None,
-        };
-
-        // Create a test expert
-        let test_expert = Autor {
-            person: Some("Test Expert".to_string()),
-            organisation: "Test Expert Organization".to_string(),
-            fachgebiet: Some("Test Expert Fachgebiet".to_string()),
-            lobbyregister: None,
-        };
-
-        // Create and return the test Sitzung
-        Sitzung {
-            api_id: Some(Uuid::now_v7()),
-            nummer: 1,
-            titel: Some("Test Sitzung".to_string()),
-            public: true,
-            touched_by: None,
-            termin: Utc::now(),
-            gremium: Gremium {
-                name: "Test Gremium".to_string(),
-                link: Some("http://example.com/gremium".to_string()),
-                wahlperiode: 20,
-                parlament: Parlament::Bt,
-            },
-            tops: vec![test_top],
-            link: Some("http://example.com/sitzung".to_string()),
-            experten: Some(vec![test_expert]),
-            dokumente: None,
-        }
-    }
-
-    pub(crate) fn create_test_vorgang() -> models::Vorgang {
-        use chrono::Utc;
-        use openapi::models::{
-            Autor, Doktyp, Dokument, Station, StationDokumenteInner, Stationstyp, VgIdent,
-            VgIdentTyp, Vorgang, Vorgangstyp,
-        };
-        use uuid::Uuid;
-
-        // Create a test document
-        let test_doc = Dokument {
-            api_id: Some(Uuid::now_v7()),
-            titel: "Test Document".to_string(),
-            touched_by: None,
-            kurztitel: None,
-            vorwort: Some("Test Vorwort".to_string()),
-            volltext: "Test Volltext".to_string(),
-            zusammenfassung: None,
-            typ: Doktyp::Entwurf,
-            link: "http://example.com/doc".to_string(),
-            hash: "testhash".to_string(),
-            zp_modifiziert: Utc::now(),
-            drucksnr: None,
-            zp_referenz: Utc::now(),
-            zp_erstellt: Some(Utc::now()),
-            meinung: None,
-            schlagworte: None,
-            autoren: vec![models::Autor {
-                person: Some("Test Person".to_string()),
-                organisation: "Test Organization".to_string(),
-                fachgebiet: Some("Test Fachgebiet".to_string()),
-                lobbyregister: None,
-            }],
-        };
-
-        // Create a test station
-        let test_station = Station {
-            typ: Stationstyp::ParlInitiativ,
-            dokumente: vec![StationDokumenteInner::Dokument(Box::new(test_doc))],
-            zp_start: Utc::now(),
-            api_id: Some(Uuid::now_v7()),
-            touched_by: None,
-            titel: Some("Test Station".to_string()),
-            gremium_federf: None,
-            link: Some("http://example.com".to_string()),
-            trojanergefahr: None,
-            zp_modifiziert: Some(Utc::now()),
-            gremium: default_gremium(),
-            schlagworte: None,
-            additional_links: None,
-            stellungnahmen: None,
-        };
-
-        // Create a test initiator
-        let test_initiator = Autor {
-            person: Some("Test Person".to_string()),
-            organisation: "Test Organization".to_string(),
-            fachgebiet: Some("Test Fachgebiet".to_string()),
-            lobbyregister: None,
-        };
-
-        // Create a test identifier
-        let test_id = VgIdent {
-            id: "test-id".to_string(),
-            typ: VgIdentTyp::Initdrucks,
-        };
-
-        // Create and return the test Vorgang
-        Vorgang {
-            api_id: Uuid::now_v7(),
-            titel: "Test Vorgang".to_string(),
-            kurztitel: Some("Test".to_string()),
-            lobbyregister: None,
-            touched_by: None,
-            wahlperiode: 20,
-            verfassungsaendernd: false,
-            typ: Vorgangstyp::GgEinspruch,
-            initiatoren: vec![test_initiator],
-            ids: Some(vec![test_id]),
-            links: Some(vec!["http://example.com".to_string()]),
-            stationen: vec![test_station],
-        }
     }
 }

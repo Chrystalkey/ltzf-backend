@@ -278,8 +278,9 @@ mod test_unauthorisiert {
         models,
     };
 
-    use crate::utils::test::TestSetup;
-    use crate::{api::auth::APIScope, utils::test::generate};
+    use crate::api::auth::APIScope;
+    use crate::utils::testing::{TestSetup, generate};
+
     #[tokio::test]
     async fn test_autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;
