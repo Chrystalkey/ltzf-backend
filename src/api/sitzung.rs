@@ -838,8 +838,6 @@ mod sitzung_test {
         let server = &setup.server;
         let host = Host("localhost".to_string());
         let cookies = CookieJar::new();
-        let today_utc = chrono::Utc::now();
-        let today = today_utc.date_naive();
         let session = generate::default_sitzung();
         let parlament = session.gremium.parlament;
         let date = session.termin;

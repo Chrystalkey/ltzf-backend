@@ -197,7 +197,9 @@ mod candid_test {
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use chrono::DateTime;
-    use openapi::apis::data_administration_vorgang::DataAdministrationVorgang;
+    use openapi::apis::data_administration_vorgang::{
+        DataAdministrationVorgang, VorgangIdPutResponse,
+    };
     use openapi::models;
 
     #[tokio::test]
@@ -205,15 +207,7 @@ mod candid_test {
         let setup = TestSetup::new("test_vorgang_candidates").await;
         let srv = &setup.server;
 
-        let vgs = vec![
-            generate::random::vorgang(0),
-            generate::random::vorgang(1),
-            generate::random::vorgang(2),
-            generate::random::vorgang(3),
-            generate::random::vorgang(4),
-            generate::random::vorgang(5),
-            generate::random::vorgang(6),
-        ];
+        let vgs: Vec<_> = (0..7).map(|i| generate::random::vorgang(i)).collect();
         // insert vorgang 1,2,3, ...
         for vg in vgs.iter() {
             let r = srv
@@ -229,7 +223,7 @@ mod candid_test {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(r, openapi::apis::data_administration_vorgang::VorgangIdPutResponse::Status201_Created { .. }));
+            assert!(matches!(r, VorgangIdPutResponse::Status201_Created { .. }));
         }
         let mut tx = srv.sqlx_db.begin().await.unwrap();
         // check wether all conditions are "enough" to find a specific station
@@ -249,8 +243,32 @@ mod candid_test {
                 .await
                 .unwrap();
         assert!(matches!(candidate, MatchState::NoMatch));
+
         // ambiguous match for ambiguous conditions
-        // TODO
+        let double_vg = models::Vorgang {
+            api_id: Uuid::nil(), // different UUID, but same other criteria
+            ..vgs[0].clone()
+        };
+        let ins = srv
+            .vorgang_id_put(
+                &Method::PUT,
+                &Host("localhost".to_string()),
+                &CookieJar::new(),
+                &(auth::APIScope::Admin, 1),
+                &models::VorgangIdPutPathParams {
+                    vorgang_id: double_vg.api_id,
+                },
+                &double_vg,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            ins,
+            VorgangIdPutResponse::Status201_Created { .. }
+        ));
+
+        let candidates = super::vorgang_merge_candidates(&double_vg, &mut *tx, srv).await;
+        assert!(matches!(candidates, Ok(MatchState::Ambiguous(_))));
         setup.teardown().await;
     }
     #[tokio::test]
