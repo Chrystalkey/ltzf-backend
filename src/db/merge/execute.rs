@@ -526,15 +526,9 @@ pub async fn run_integration(
 
 #[cfg(test)]
 mod scenariotest {
+    use crate::api::RoundTimestamp;
     use crate::utils::testing::{TestSetup, generate};
-    use crate::{
-        LTZFServer, Result,
-        api::{
-            PaginationResponsePart,
-            compare::{compare_vorgang, oicomp},
-        },
-        db::retrieve,
-    };
+    use crate::{LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
     use openapi::models::{self, StationDokumenteInner};
     use std::str::FromStr;
     use uuid::Uuid;
@@ -633,8 +627,16 @@ mod scenariotest {
             .await
             .unwrap();
             tx.commit().await?;
-
-            let equality = oicomp(&self.expected, &db_vorgangs.1, &compare_vorgang);
+            let equality = self
+                .expected
+                .iter()
+                .map(|x| x.with_round_timestamps())
+                .collect::<Vec<_>>()
+                == db_vorgangs
+                    .1
+                    .iter()
+                    .map(|x| x.with_round_timestamps())
+                    .collect::<Vec<_>>();
             if !equality && !self.shouldfail {
                 let exp_content = self
                     .expected

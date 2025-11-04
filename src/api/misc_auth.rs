@@ -14,6 +14,8 @@ use sqlx::Row;
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
+use super::RoundTimestamp;
+
 // this query tries to resolve all potential unique constraint conflicts
 // on tables where the enumeration entry are part of a shared unique constraint.
 //
@@ -934,7 +936,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         .await?;
         if let Some(did) = did {
             let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-            if super::compare::compare_dokument(&dok, body) {
+            if dok.with_round_timestamps() == body.with_round_timestamps() {
                 info!("Dokument was not modified");
                 return Ok(DokumentPutIdResponse::Status304_NotModified {
                     x_rate_limit_limit: None,

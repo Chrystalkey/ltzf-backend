@@ -13,8 +13,8 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
-use super::compare::*;
 use super::find_applicable_date_range;
+use crate::api::RoundTimestamp;
 use crate::db;
 
 #[async_trait]
@@ -70,7 +70,8 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
             Some(db_id) => {
                 debug!("Match found: {db_id}");
                 let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
-                if compare_vorgang(&db_cmpvg, body) {
+
+                if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
                     return Ok(VorgangIdPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,

@@ -1,3 +1,4 @@
+use super::RoundTimestamp;
 use crate::db::retrieve::{SitzungFilterParameters, sitzung_by_param};
 use crate::db::{delete, insert, retrieve};
 use crate::error::LTZFError;
@@ -15,7 +16,7 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
-use super::{compare::*, find_applicable_date_range};
+use super::find_applicable_date_range;
 
 // helper that converts the documents in a sitzung into just their uuids instead of full objects
 fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
@@ -96,7 +97,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             .await?;
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
-            if compare_sitzung(&db_cmpvg, &st_to_uuiddoks(body)) {
+            if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(body).with_round_timestamps() {
                 info!("Sitzung has the same state as the input object");
                 return Ok(SidPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,

@@ -1,3 +1,4 @@
+use chrono::DurationRound;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -16,7 +17,6 @@ use crate::utils::notify;
 use openapi::apis::unauthorisiert::*;
 
 pub(crate) mod auth;
-pub(crate) mod compare;
 pub(crate) mod misc;
 pub(crate) mod misc_auth;
 pub(crate) mod sitzung;
@@ -546,5 +546,98 @@ impl<'wrapped> Ord for WrappedAutor<'wrapped> {
             .organisation
             .cmp(&other.autor.organisation)
             .then(self.autor.person.cmp(&other.autor.person))
+    }
+}
+
+/// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
+/// that are stored and re-fetched with whatever precision where only the
+/// very very margins differ by a few nanosecs.
+/// Using this trait the thing can round its dates to a precision of 1 second
+/// We do not really need more
+pub(crate) trait RoundTimestamp: Clone {
+    fn with_round_timestamps(&self) -> Self;
+}
+
+impl RoundTimestamp for models::Dokument {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
+
+        Self {
+            zp_referenz: self.zp_referenz.duration_round(precision).unwrap(),
+            zp_erstellt: self
+                .zp_erstellt
+                .map(|ts| ts.duration_round(precision).unwrap()),
+            zp_modifiziert: self.zp_modifiziert.duration_round(precision).unwrap(),
+            ..self.clone()
+        }
+    }
+}
+impl RoundTimestamp for models::Station {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
+        Self {
+            zp_modifiziert: self
+                .zp_modifiziert
+                .map(|ts| ts.duration_round(precision).unwrap()),
+            zp_start: self.zp_start.duration_round(precision).unwrap(),
+            stellungnahmen: self.stellungnahmen.as_ref().map(|v| {
+                v.iter()
+                    .map(|sn| match sn {
+                        models::StationDokumenteInner::Dokument(d) => {
+                            models::StationDokumenteInner::Dokument(Box::new(
+                                d.with_round_timestamps(),
+                            ))
+                        }
+                        x => x.clone(),
+                    })
+                    .collect()
+            }),
+            dokumente: self
+                .dokumente
+                .iter()
+                .map(|sn| match sn {
+                    models::StationDokumenteInner::Dokument(d) => {
+                        models::StationDokumenteInner::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    x => x.clone(),
+                })
+                .collect(),
+
+            ..self.clone()
+        }
+    }
+}
+
+impl RoundTimestamp for models::Vorgang {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            stationen: self
+                .stationen
+                .iter()
+                .map(|s| s.with_round_timestamps())
+                .collect(),
+            ..self.clone()
+        }
+    }
+}
+impl RoundTimestamp for models::Sitzung {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
+        Self {
+            dokumente: self.dokumente.as_ref().map(|v| {
+                v.iter()
+                    .map(|sn| match sn {
+                        models::StationDokumenteInner::Dokument(d) => {
+                            models::StationDokumenteInner::Dokument(Box::new(
+                                d.with_round_timestamps(),
+                            ))
+                        }
+                        x => x.clone(),
+                    })
+                    .collect()
+            }),
+            termin: self.termin.duration_round(precision).unwrap(),
+            ..self.clone()
+        }
     }
 }
