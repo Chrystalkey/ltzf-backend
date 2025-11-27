@@ -548,7 +548,166 @@ impl<'wrapped> Ord for WrappedAutor<'wrapped> {
             .then(self.autor.person.cmp(&other.autor.person))
     }
 }
+/// This trait enables sorting all arrays contained in an object
+/// to be able to compare them afterwards without caring for ordering
+pub(crate) trait SortArrays: Clone {
+    fn with_sorted_arrays(&mut self);
+}
 
+impl SortArrays for models::Dokument {
+    fn with_sorted_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.schlagworte.as_mut() {
+            x.sort();
+        }
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        self.autoren
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+    }
+}
+impl SortArrays for models::Station {
+    fn with_sorted_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.schlagworte.as_mut() {
+            x.sort();
+        }
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.additional_links.as_mut() {
+            x.sort();
+        }
+        self.dokumente.sort_by(|a, b| match (a, b) {
+            (
+                models::StationDokumenteInner::String(x),
+                models::StationDokumenteInner::String(y),
+            ) => x.cmp(y),
+            (
+                models::StationDokumenteInner::String(x),
+                models::StationDokumenteInner::Dokument(y),
+            ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+            (
+                models::StationDokumenteInner::Dokument(x),
+                models::StationDokumenteInner::String(y),
+            ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+            (
+                models::StationDokumenteInner::Dokument(x),
+                models::StationDokumenteInner::Dokument(y),
+            ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+        });
+        self.dokumente.iter_mut().for_each(|x| {
+            if let models::StationDokumenteInner::Dokument(x) = x {
+                x.with_sorted_arrays();
+            }
+        });
+        if let Some(x) = self.stellungnahmen.as_mut() {
+            x.sort_by(|a, b| match (a, b) {
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::String(y),
+                ) => x.cmp(y),
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::String(y),
+                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+            });
+            x.iter_mut().for_each(|x| {
+                if let models::StationDokumenteInner::Dokument(x) = x {
+                    x.with_sorted_arrays();
+                }
+            });
+        }
+    }
+}
+impl SortArrays for models::Vorgang {
+    fn with_sorted_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.lobbyregister.as_mut() {
+            x.sort_by(|a, b| a.link.cmp(&b.link));
+        }
+        self.stationen
+            .sort_by(|a, b| (a.zp_start, a.api_id).cmp(&(b.zp_start, b.api_id)));
+        self.stationen
+            .iter_mut()
+            .for_each(|a| a.with_sorted_arrays());
+        self.initiatoren
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        if let Some(x) = self.ids.as_mut() {
+            x.sort_by(|a, b| (a.typ, &a.id).cmp(&(b.typ, &b.id)));
+        }
+        if let Some(x) = self.links.as_mut() {
+            x.sort();
+        }
+    }
+}
+impl SortArrays for models::Sitzung {
+    fn with_sorted_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.experten.as_mut() {
+            x.sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        }
+
+        if let Some(x) = self.dokumente.as_mut() {
+            x.sort_by(|a, b| match (a, b) {
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::String(y),
+                ) => x.cmp(y),
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::String(y),
+                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+            });
+
+            x.iter_mut().for_each(|x| {
+                if let models::StationDokumenteInner::Dokument(x) = x {
+                    x.with_sorted_arrays();
+                }
+            });
+        }
+        self.tops.sort_by(|a, b| a.nummer.cmp(&b.nummer));
+    }
+}
 /// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
 /// that are stored and re-fetched with whatever precision where only the
 /// very very margins differ by a few nanosecs.
