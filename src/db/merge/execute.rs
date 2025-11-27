@@ -526,7 +526,7 @@ pub async fn run_integration(
 
 #[cfg(test)]
 mod scenariotest {
-    use crate::api::RoundTimestamp;
+    use crate::api::{RoundTimestamp, SortArrays};
     use crate::utils::testing::{TestSetup, generate};
     use crate::{LTZFServer, Result, api::PaginationResponsePart, db::retrieve};
     use openapi::models::{self, StationDokumenteInner};
@@ -554,6 +554,7 @@ mod scenariotest {
         }
         fn with_expectation(mut self, expectation: Vec<models::Vorgang>) -> Self {
             self.expected = expectation;
+            self.expected.iter_mut().for_each(|x| x.sort_arrays());
             self
         }
         fn with_test_object(mut self, obj: models::Vorgang) -> Self {
@@ -578,13 +579,13 @@ mod scenariotest {
     }
     impl Scenario {
         fn new(name: &'static str) -> ScenarioBuilder {
-            return ScenarioBuilder {
+            ScenarioBuilder {
                 context: vec![],
                 object: None,
                 expected: vec![],
                 shouldfail: false,
                 name,
-            };
+            }
         }
 
         async fn run(&self) -> Result<()> {
@@ -618,7 +619,7 @@ mod scenariotest {
                 upper_date: None,
             };
             let mut tx = server.sqlx_db.begin().await.unwrap();
-            let db_vorgangs = retrieve::vorgang_by_parameter(
+            let mut db_vorgangs = retrieve::vorgang_by_parameter(
                 paramock,
                 None,
                 Some(PaginationResponsePart::MAX_PER_PAGE),
@@ -626,6 +627,8 @@ mod scenariotest {
             )
             .await
             .unwrap();
+            db_vorgangs.1.iter_mut().for_each(|x| x.sort_arrays());
+
             tx.commit().await?;
             let equality = self
                 .expected
