@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT api_id from rel_station_dokument rsd\n        INNER JOIN dokument d ON d.id = rsd.dok_id WHERE rsd.stat_id = $1",
+  "query": "SELECT api_id from rel_sitzung_doks rsd\n        INNER JOIN dokument d ON d.id = rsd.did WHERE rsd.sid = $1",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "8746ab7f81499ee4b1c7521c36d490bebe69ae63a19541339fd98dfd9f2b6332"
+  "hash": "583f0f1884167315e4af048c5c5bcec10c67f831db901c4e1c1691766400c94f"
 }

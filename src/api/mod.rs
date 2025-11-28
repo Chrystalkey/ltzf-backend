@@ -550,10 +550,12 @@ impl<'wrapped> Ord for WrappedAutor<'wrapped> {
 }
 /// This trait enables sorting all arrays contained in an object
 /// to be able to compare them afterwards without caring for ordering
+#[cfg(test)]
 pub(crate) trait SortArrays: Clone {
     fn sort_arrays(&mut self);
 }
 
+#[cfg(test)]
 impl SortArrays for models::Dokument {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
@@ -571,6 +573,7 @@ impl SortArrays for models::Dokument {
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
     }
 }
+#[cfg(test)]
 impl SortArrays for models::Station {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
@@ -637,6 +640,7 @@ impl SortArrays for models::Station {
         }
     }
 }
+#[cfg(test)]
 impl SortArrays for models::Vorgang {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();
@@ -663,6 +667,7 @@ impl SortArrays for models::Vorgang {
         }
     }
 }
+#[cfg(test)]
 impl SortArrays for models::Sitzung {
     fn sort_arrays(&mut self) {
         let nil = uuid::Uuid::nil();

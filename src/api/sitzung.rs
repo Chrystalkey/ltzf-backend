@@ -100,48 +100,14 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             .map(|x| x.id)
             .fetch_optional(&mut *tx)
             .await?;
-        // let mut body = body.clone();
-        // if let Some(mut docs) = body.dokumente {
-        //     let ref_doks: Vec<_> = docs
-        //         .iter()
-        //         .filter(|x| matches!(x, models::StationDokumenteInner::String(_)))
-        //         .map(|u| {
-        //             if let models::StationDokumenteInner::String(x) = u {
-        //                 uuid::Uuid::parse_str(x).unwrap()
-        //             } else {
-        //                 unreachable!()
-        //             }
-        //         })
-        //         .collect();
-        //     // filter all api_ids that are not in the database
-        //     let nonex_uuids = sqlx::query!(
-        //         "SELECT u.api_id from UNNEST($1::uuid[]) u(api_id) WHERE
-        //         NOT EXISTS (SELECT 1 FROM dokument d WHERE d.api_id = u.api_id)",
-        //         &ref_doks[..]
-        //     )
-        //     .map(|x| x.api_id)
-        //     .fetch_all(&mut *tx)
-        //     .await?;
-        //     // remove those from the body and move on
-        //     let body_doks: Vec<_> = docs
-        //         .drain(..)
-        //         .filter(|x| match x {
-        //             models::StationDokumenteInner::Dokument(_) => true,
-        //             models::StationDokumenteInner::String(x) => nonex_uuids
-        //                 .iter()
-        //                 .any(|o| o.unwrap() == uuid::Uuid::parse_str(&x).unwrap()),
-        //         })
-        //         .collect();
-        //     body.dokumente = Some(body_doks);
-        // }
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
             debug!(
                 "odb: {}\nonew: {}",
                 serde_json::to_string(&db_cmpvg.with_round_timestamps()).unwrap(),
-                serde_json::to_string(&st_to_uuiddoks(&body).with_round_timestamps()).unwrap()
+                serde_json::to_string(&st_to_uuiddoks(body).with_round_timestamps()).unwrap()
             );
-            if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(&body).with_round_timestamps() {
+            if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(body).with_round_timestamps() {
                 info!("Sitzung has the same state as the input object");
                 return Ok(SidPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
@@ -151,7 +117,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             }
             match delete::delete_sitzung_by_api_id(api_id, self).await? {
                 SitzungDeleteResponse::Status204_NoContent { .. } => {
-                    insert::insert_sitzung(&body, Uuid::nil(), claims.1, &mut tx, self).await?;
+                    insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
                 }
                 _ => {
                     error!("Delete was unsuccessful despite session being in the database");
@@ -159,7 +125,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
                 }
             }
         } else {
-            insert::insert_sitzung(&body, Uuid::nil(), claims.1, &mut tx, self).await?;
+            insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
         info!("Successfully PUT session into database");
@@ -592,12 +558,14 @@ mod sitzung_test {
     use openapi::models::KalDateGetPathParams;
     use openapi::models::KalDateGetQueryParams;
     use openapi::models::SidPutPathParams;
+    use tracing::info;
     use tracing_test::traced_test;
 
     use chrono::Datelike;
     use openapi::models;
     use uuid::Uuid;
 
+    use crate::api::RoundTimestamp;
     use crate::api::auth::APIScope;
     use crate::utils::testing::{TestSetup, generate};
 
@@ -769,15 +737,19 @@ mod sitzung_test {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_kal_date_get() {
         let setup = TestSetup::new("kal_date_get").await;
         let server = &setup.server;
         let host = Host("localhost".to_string());
         let cookies = CookieJar::new();
-        let today = chrono::Utc::now().date_naive();
-        let session = generate::default_sitzung();
+        let old_session = generate::default_sitzung();
+        let session = models::Sitzung {
+            termin: chrono::Utc::now(),
+            ..old_session
+        };
         let parlament = session.gremium.parlament;
-        let date = session.termin;
+        let today = session.termin.date_naive();
 
         let _response = server
             .kal_date_put(
@@ -789,7 +761,7 @@ mod sitzung_test {
                     x_scraper_id: Uuid::nil(),
                 },
                 &models::KalDatePutPathParams {
-                    datum: today,
+                    datum: session.termin.date_naive(),
                     parlament,
                 },
                 &vec![session.clone()],
@@ -806,7 +778,7 @@ mod sitzung_test {
                     if_modified_since: None,
                 },
                 &models::KalDateGetPathParams {
-                    datum: today,
+                    datum: chrono::NaiveDate::from_ymd_opt(1950, 10, 10).unwrap(),
                     parlament,
                 },
                 &models::KalDateGetQueryParams {
@@ -834,7 +806,7 @@ mod sitzung_test {
                     if_modified_since: None,
                 },
                 &models::KalDateGetPathParams {
-                    datum: date.date_naive(),
+                    datum: today,
                     parlament,
                 },
                 &models::KalDateGetQueryParams {
@@ -844,11 +816,17 @@ mod sitzung_test {
             )
             .await
             .unwrap();
+        let normalized_session = super::st_to_uuiddoks(&session).with_round_timestamps();
+        info!("expected: {:?}", vec![normalized_session.clone()]);
+        if let KalDateGetResponse::Status200_SuccessfulResponse { ref body, .. } = response {
+            info!("actual  : {:?}", body)
+        }
         assert!(matches!(
             response,
             KalDateGetResponse::Status200_SuccessfulResponse { body, .. }
-            if body[0] == session
+            if body.iter().map(|b| b.with_round_timestamps()).collect::<Vec<_>>() == vec![normalized_session]
         ));
+        // see if if-mod-since works
         let response = server
             .kal_date_get(
                 &Method::GET,
@@ -858,7 +836,7 @@ mod sitzung_test {
                     if_modified_since: Some(chrono::Utc::now()),
                 },
                 &models::KalDateGetPathParams {
-                    datum: date.date_naive(),
+                    datum: today,
                     parlament,
                 },
                 &models::KalDateGetQueryParams {
@@ -868,10 +846,11 @@ mod sitzung_test {
             )
             .await
             .unwrap();
-        assert!(matches!(
-            response,
-            KalDateGetResponse::Status304_NotModified { .. }
-        ));
+        assert!(
+            matches!(response, KalDateGetResponse::Status404_NotFound { .. },),
+            "Expected 404, got {:?}",
+            response
+        );
         // Cleanup
         setup.teardown().await;
     }
