@@ -437,6 +437,25 @@ pub async fn insert_sitzung(
     )
     .execute(&mut **tx)
     .await?;
+
+    // insert documents
+    if let Some(docs) = &ass.dokumente {
+        let mut dok_ids = vec![];
+        for d in docs {
+            if let models::StationDokumenteInner::Dokument(d) = d {
+                let id = insert_dokument(*d.clone(), scraper_id, collector_key, tx, srv).await?;
+                dok_ids.push(id);
+            }
+        }
+        sqlx::query!(
+            "INSERT INTO rel_sitzung_doks(sid, did)
+                SELECT $1, dokid from UNNEST($2::int4[]) as dokid",
+            id,
+            &dok_ids[..]
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
     tracing::info!(
         "Neue Sitzung angelegt am {} im Parlament {}",
         ass.termin,

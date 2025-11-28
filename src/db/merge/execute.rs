@@ -555,6 +555,7 @@ mod scenariotest {
         fn with_expectation(mut self, expectation: Vec<models::Vorgang>) -> Self {
             self.expected = expectation;
             self.expected.iter_mut().for_each(|x| x.sort_arrays());
+            self.expected.sort_by(|a, b| a.api_id.cmp(&b.api_id));
             self
         }
         fn with_test_object(mut self, obj: models::Vorgang) -> Self {
@@ -628,6 +629,7 @@ mod scenariotest {
             .await
             .unwrap();
             db_vorgangs.1.iter_mut().for_each(|x| x.sort_arrays());
+            db_vorgangs.1.sort_by(|a, b| a.api_id.cmp(&b.api_id));
 
             tx.commit().await?;
             let equality = self
@@ -693,6 +695,7 @@ mod scenariotest {
                 }
             }
         }
+        vg.sort_arrays();
         return vg;
     }
     // one in, again one in, one out

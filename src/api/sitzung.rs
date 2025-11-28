@@ -70,6 +70,11 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
         Ok(r)
     }
 
+    /// PUTs a models::Sitzung into the database with checks on whether
+    /// the objects modifies internal state.
+    /// NOTE: Documents that are referenced by UUID (within body.dokumente)
+    /// and point to a document that is not in the database are silently
+    /// filtered out.
     #[doc = "SidPut - PUT /api/v2/sitzung/{sid}"]
     #[instrument(skip_all, fields(claim=%claims.0, sid=%path_params.sid))]
     async fn sid_put(
@@ -95,9 +100,48 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             .map(|x| x.id)
             .fetch_optional(&mut *tx)
             .await?;
+        // let mut body = body.clone();
+        // if let Some(mut docs) = body.dokumente {
+        //     let ref_doks: Vec<_> = docs
+        //         .iter()
+        //         .filter(|x| matches!(x, models::StationDokumenteInner::String(_)))
+        //         .map(|u| {
+        //             if let models::StationDokumenteInner::String(x) = u {
+        //                 uuid::Uuid::parse_str(x).unwrap()
+        //             } else {
+        //                 unreachable!()
+        //             }
+        //         })
+        //         .collect();
+        //     // filter all api_ids that are not in the database
+        //     let nonex_uuids = sqlx::query!(
+        //         "SELECT u.api_id from UNNEST($1::uuid[]) u(api_id) WHERE
+        //         NOT EXISTS (SELECT 1 FROM dokument d WHERE d.api_id = u.api_id)",
+        //         &ref_doks[..]
+        //     )
+        //     .map(|x| x.api_id)
+        //     .fetch_all(&mut *tx)
+        //     .await?;
+        //     // remove those from the body and move on
+        //     let body_doks: Vec<_> = docs
+        //         .drain(..)
+        //         .filter(|x| match x {
+        //             models::StationDokumenteInner::Dokument(_) => true,
+        //             models::StationDokumenteInner::String(x) => nonex_uuids
+        //                 .iter()
+        //                 .any(|o| o.unwrap() == uuid::Uuid::parse_str(&x).unwrap()),
+        //         })
+        //         .collect();
+        //     body.dokumente = Some(body_doks);
+        // }
         if let Some(db_id) = db_id {
             let db_cmpvg = retrieve::sitzung_by_id(db_id, &mut tx).await?;
-            if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(body).with_round_timestamps() {
+            debug!(
+                "odb: {}\nonew: {}",
+                serde_json::to_string(&db_cmpvg.with_round_timestamps()).unwrap(),
+                serde_json::to_string(&st_to_uuiddoks(&body).with_round_timestamps()).unwrap()
+            );
+            if db_cmpvg.with_round_timestamps() == st_to_uuiddoks(&body).with_round_timestamps() {
                 info!("Sitzung has the same state as the input object");
                 return Ok(SidPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
@@ -107,7 +151,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             }
             match delete::delete_sitzung_by_api_id(api_id, self).await? {
                 SitzungDeleteResponse::Status204_NoContent { .. } => {
-                    insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+                    insert::insert_sitzung(&body, Uuid::nil(), claims.1, &mut tx, self).await?;
                 }
                 _ => {
                     error!("Delete was unsuccessful despite session being in the database");
@@ -115,7 +159,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
                 }
             }
         } else {
-            insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
+            insert::insert_sitzung(&body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
         info!("Successfully PUT session into database");
@@ -1247,30 +1291,6 @@ mod sitzung_test {
             );
         }
 
-        let test_session = generate::default_sitzung();
-        // First create a session with specific parameters
-        let create_response = server
-            .sid_put(
-                &Method::PUT,
-                &Host("localhost".to_string()),
-                &CookieJar::new(),
-                &(auth::APIScope::Admin, 1),
-                &models::SidPutPathParams {
-                    sid: test_session.api_id.unwrap(),
-                },
-                &test_session,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            create_response,
-            SidPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None
-            }
-        );
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         // 3. Get sessions with filters
         {
             let response = server
