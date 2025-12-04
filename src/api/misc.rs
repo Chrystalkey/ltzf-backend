@@ -24,7 +24,6 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        // TODO: dont wrangle all data in program space, change to count -> new request
         let result = sqlx::query!(
             "SELECT a.id FROM autor a WHERE
             ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND
@@ -90,7 +89,6 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::GremienGetQueryParams,
     ) -> Result<GremienGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        // TODO: dont wrangle all data in program space, change to count -> new request
         let mut result = sqlx::query!(
             "SELECT g.id FROM gremium g
             INNER JOIN parlament p ON p.id = g.parl 

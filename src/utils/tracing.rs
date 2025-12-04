@@ -4,15 +4,69 @@
 // 3. a subscriber that catches the (for now) email warnings (`Actionable`)
 // 4. a subscriber that logs object creations, deletions and merges
 
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use std::path::PathBuf;
+use tracing_subscriber::{Layer, registry::LookupSpan};
 
-// Function to initialize tracing for logging
-pub fn init_tracing() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "RUST_LOG=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+#[derive(Clone)]
+pub struct Logging {
+    error_log: PathBuf,
+    object_log: Option<PathBuf>,
+}
+
+impl Logging {
+    pub fn new(error: PathBuf, object: Option<PathBuf>) -> Self {
+        Self {
+            error_log: error,
+            object_log: object,
+        }
+    }
+
+    pub fn error_layer<S>(&self) -> Box<dyn Layer<S> + Send + Sync + 'static>
+    where
+        S: tracing::subscriber::Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        use std::fs;
+        let fmt = tracing_subscriber::fmt::layer()
+            .with_level(true)
+            .with_file(true)
+            .with_line_number(true);
+
+        let file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.error_log)
+            .unwrap();
+
+        fmt.with_writer(file)
+            .with_filter(tracing::level_filters::LevelFilter::WARN)
+            .boxed()
+    }
+    pub fn object_log_layer<S>(&self) -> Box<dyn Layer<S> + Send + Sync + 'static>
+    where
+        S: tracing::subscriber::Subscriber,
+        for<'a> S: LookupSpan<'a>,
+    {
+        use std::fs;
+        if let Some(object_log) = &self.object_log {
+            let fmt = tracing_subscriber::fmt::layer()
+                .with_level(true)
+                .with_file(true)
+                .with_line_number(true);
+
+            let file = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(object_log)
+                .unwrap();
+
+            fmt.with_writer(file)
+                .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+                    meta.target() == "obj" && meta.is_event()
+                }))
+                .boxed()
+        } else {
+            Box::new(tracing_subscriber::layer::Identity::new())
+        }
+    }
 }

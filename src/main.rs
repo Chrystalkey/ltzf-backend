@@ -15,10 +15,12 @@ use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use tokio::net::TcpListener;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
 use tower_http::{cors, limit};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
-use utils::{shutdown_signal, tracing::init_tracing};
+use utils::shutdown_signal;
 
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 
@@ -76,6 +78,15 @@ pub struct Configuration {
         default_value = "5"
     )]
     pub per_object_scraper_log_size: u32,
+
+    #[arg(long, default_value = "/var/log/ltzf-backend/error.log")]
+    pub error_log_path: String,
+
+    #[arg(
+        long,
+        help = "If you want to log object lifecycle operations(create/delete/merge/...), enter a path"
+    )]
+    pub object_log_path: Option<String>,
 }
 
 impl Configuration {
@@ -144,7 +155,13 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    init_tracing();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "RUST_LOG=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let config = Configuration::init();
     tracing::debug!("Configuration: {:?}", &config);

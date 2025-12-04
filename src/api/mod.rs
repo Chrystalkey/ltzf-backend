@@ -9,11 +9,14 @@ use axum_extra::extract::Host;
 use openapi::models;
 use tracing::debug;
 use tracing::instrument;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::Configuration;
 use crate::Result;
 use crate::error::LTZFError;
 use crate::utils::notify;
+use crate::utils::tracing::Logging;
 use openapi::apis::unauthorisiert::*;
 
 pub(crate) mod auth;
@@ -29,6 +32,7 @@ pub struct LTZFServer {
     pub sqlx_db: sqlx::PgPool,
     pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
+    pub logging: Logging,
 }
 pub type LTZFArc = std::sync::Arc<LTZFServer>;
 impl LTZFServer {
@@ -37,11 +41,27 @@ impl LTZFServer {
         config: Configuration,
         mailbundle: Option<notify::MailBundle>,
     ) -> Self {
+        let logging = Logging::new(
+            config.error_log_path.clone().into(),
+            config.object_log_path.as_ref().map(|x| x.into()),
+        );
         Self {
             config,
             sqlx_db,
             mailbundle: mailbundle.map(Arc::new),
+            logging,
         }
+    }
+    pub fn init_tracing(&self) {
+        tracing_subscriber::registry()
+            .with(self.logging.error_layer())
+            .with(self.logging.object_log_layer())
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "RUST_LOG=info".into()),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
     }
 }
 
