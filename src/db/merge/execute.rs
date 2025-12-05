@@ -14,6 +14,7 @@ use crate::utils::notify::notify_ambiguous_match;
 ///     - if it is not mergeable and has no match it is added to the set.
 use crate::{LTZFServer, Result};
 use openapi::models;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::candidates::*;
@@ -98,7 +99,7 @@ pub async fn execute_merge_dokument(
     )
     .execute(&mut **tx)
     .await?;
-    tracing::info!("Merging Dokument into Database successful");
+    info!("Merging Dokument into Database successful");
     Ok(())
 }
 pub async fn insert_or_merge_dok(
@@ -137,7 +138,7 @@ pub async fn insert_or_merge_dok(
                     Ok(Some(did))
                 }
                 MatchState::ExactlyOne(matchmod) => {
-                    tracing::debug!(
+                    debug!(
                         "Found exactly one match with db id: {}. Merging...",
                         matchmod
                     );
@@ -285,7 +286,7 @@ pub async fn execute_merge_station(
     )
     .execute(&mut **tx)
     .await?;
-    tracing::info!("Merging Station into Database successful");
+    info!("Merging Station into Database successful");
     Ok(())
 }
 
@@ -449,7 +450,7 @@ pub async fn execute_merge_vorgang(
     .execute(&mut **tx)
     .await?;
 
-    tracing::info!(
+    info!(
         "Merging of Vg Successful: Merged `{}`(ext) with  `{}`(db)",
         model.api_id,
         sqlx::query!("SELECT api_id FROM vorgang WHERE id = $1", candidate)
@@ -467,18 +468,19 @@ pub async fn run_integration(
     server: &LTZFServer,
 ) -> Result<()> {
     let mut tx = server.sqlx_db.begin().await?;
-    tracing::debug!(
+    debug!(
         "Looking for Merge Candidates for Vorgang with api_id: {:?}",
         model.api_id
     );
     let candidates = vorgang_merge_candidates(model, &mut *tx, server).await?;
     match candidates {
         MatchState::NoMatch => {
-            tracing::info!(
+            info!(
                 "No Merge Candidate found, Inserting Complete Vorgang with api_id: {:?}",
                 model.api_id
             );
             let model = model.clone();
+            info!(target: "obj", "Merge(Insert New) Vorgang {}", model.api_id);
             insert::insert_vorgang(&model, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::ExactlyOne(one) => {
@@ -486,21 +488,21 @@ pub async fn run_integration(
                 .map(|r| r.api_id)
                 .fetch_one(&mut *tx)
                 .await?;
-            tracing::info!(
+            info!(
                 "Matching Vorgang in the DB has api_id: {}, Updating with data from: {}",
-                api_id,
-                model.api_id
+                api_id, model.api_id
             );
+            info!(target: "obj", "Merge(merge) new Vorgang {} into Vorgang {}", model.api_id, api_id);
             let model = model.clone();
             execute_merge_vorgang(&model, one, scraper_id, collector_key, &mut tx, server).await?;
         }
         MatchState::Ambiguous(many) => {
-            tracing::warn!(
+            warn!(
                 "Ambiguous matches for Vorgang with api_id: {:?}",
                 model.api_id
             );
-            tracing::warn!("Transaction not committed, administrators notified");
-            tracing::debug!("Details:  {:?} \n\n {:?}", model, many);
+            warn!("Transaction not committed, administrators notified");
+            debug!("Details:  {:?} \n\n {:?}", model, many);
             let api_ids = sqlx::query!(
                 "SELECT api_id FROM vorgang WHERE id=ANY($1::int4[])",
                 &many[..]

@@ -66,6 +66,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             });
         }
         let r = delete::delete_sitzung_by_api_id(path_params.sid, self).await?;
+        info!(target: "obj", "Deleted Sitzung {}", path_params.sid);
         info!("Success");
         Ok(r)
     }
@@ -128,6 +129,7 @@ impl DataAdministrationSitzung<LTZFError> for LTZFServer {
             insert::insert_sitzung(body, Uuid::nil(), claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
+        info!(target: "obj", "PUT Sitzung {}", api_id);
         info!("Successfully PUT session into database");
         Ok(SidPutResponse::Status201_Created {
             x_rate_limit_limit: None,
@@ -227,6 +229,7 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
             insert::insert_sitzung(s, header_params.x_scraper_id, claims.1, &mut tx, self).await?;
         }
         tx.commit().await?;
+        info!(target: "obj", "Inserted sitzungen into db: {:?}", body);
         info!("Inserted {} sessions into the database", body.len());
         Ok(KalDatePutResponse::Status201_Created {
             x_rate_limit_limit: None,

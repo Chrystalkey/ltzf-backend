@@ -1,5 +1,6 @@
 use sha256::digest;
 
+use crate::utils::tracing::Logging;
 use crate::{Configuration, LTZFServer, Result};
 pub const MASTER_URL: &str = "postgres://ltzf-user:ltzf-pass@localhost:5432/ltzf";
 pub(crate) struct TestSetup {
@@ -38,6 +39,7 @@ async fn setup_server(dbname: &str) -> Result<LTZFServer> {
             ($1, (SELECT id FROM api_scope WHERE value = 'keyadder' LIMIT 1), (SELECT last_value FROM api_keys_id_seq), $2, $3)
             ON CONFLICT DO NOTHING;", hash, "salziger-salzkeks", "total-nutzlos")
         .execute(&pool).await?;
+    let logging = Logging::new("testing_error.log".into(), None);
     Ok(LTZFServer::new(
         pool,
         Configuration {
@@ -45,6 +47,7 @@ async fn setup_server(dbname: &str) -> Result<LTZFServer> {
             ..Default::default()
         },
         None,
+        logging,
     ))
 }
 
@@ -53,6 +56,8 @@ async fn cleanup_server(dbname: &str) -> Result<()> {
     sqlx::query(&format!("DROP DATABASE {dbname} WITH (FORCE);"))
         .execute(&create_pool)
         .await?;
+    let _ = std::fs::remove_file("testing_error.log");
+
     Ok(())
 }
 

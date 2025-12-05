@@ -21,6 +21,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
 use utils::shutdown_signal;
+use utils::tracing::Logging;
 
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 
@@ -155,7 +156,15 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+
+    let config = Configuration::init();
+    let logging = Logging::new(
+        config.error_log_path.clone().into(),
+        config.object_log_path.as_ref().map(|x| x.into()),
+    );
     tracing_subscriber::registry()
+        .with(logging.error_layer())
+        .with(logging.object_log_layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "RUST_LOG=info".into()),
@@ -163,7 +172,6 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let config = Configuration::init();
     tracing::debug!("Configuration: {:?}", &config);
 
     tracing::info!("Starting the Initialisation process");
@@ -191,7 +199,7 @@ async fn main() -> Result<()> {
     tx.commit().await?;
     let mailbundle = crate::utils::notify::MailBundle::new(&config).await?;
 
-    let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle));
+    let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle, logging));
     tracing::debug!("Constructed Server State");
 
     // Init Axum router

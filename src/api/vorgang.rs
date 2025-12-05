@@ -38,7 +38,9 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
-        db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await
+        let id_vg_del = db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await?;
+        info!(target: "obj", "Deleted Vorgang {}", path_params.vorgang_id);
+        Ok(id_vg_del)
     }
 
     #[doc = "VorgangIdPut - PUT /api/v2/vorgang/{vorgang_id}"]
@@ -94,6 +96,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
             }
         }
         tx.commit().await?;
+        info!(target: "obj", "PUT by ID Vorgang {}", path_params.vorgang_id);
         info!("Successful insert or replace");
         Ok(VorgangIdPutResponse::Status201_Created {
             x_rate_limit_limit: None,

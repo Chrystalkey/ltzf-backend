@@ -111,7 +111,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         }
 
         let mut tx = self.sqlx_db.begin().await?;
-        sqlx::query!(
+        let n_deleted = sqlx::query!(
             "
         DELETE FROM autor a WHERE 
         (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
@@ -123,8 +123,12 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             query_params.fach
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Successfully deleted {} authors matching psn:{:?} org:{:?} fch:{:?}", 
+            n_deleted, query_params.person, query_params.org, query_params.fach);
+
         info!("Successfully deleted matching authors");
         return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
             x_rate_limit_limit: None,
@@ -167,7 +171,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             });
         }
         let mut tx = self.sqlx_db.begin().await?;
-        sqlx::query!(
+        let n_del = sqlx::query!(
             "
         DELETE FROM gremium g WHERE 
         g.name = COALESCE($1, g.name) AND
@@ -179,8 +183,12 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             query_params.p.as_ref().map(|x| x.to_string())
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Deleted {} Gremien matching gr:{:?} wp:{:?} pa:{:?}",
+            n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(|x| x.to_string())
+        );
         info!("Deleted the requested Gremien");
         return Ok(GremienDeleteByParamResponse::Status204_NoContent {
             x_rate_limit_limit: None,
@@ -220,14 +228,17 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             ]
             .drain(..),
         );
-        sqlx::query(&format!(
+        let n_del = sqlx::query(&format!(
             "DELETE FROM {} x WHERE x.value = $1",
             enum_tables[&path_params.name]
         ))
         .bind::<_>(&path_params.item)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Deleted {} Enumeration Entries from {}", 
+            n_del, enum_tables[&path_params.name]);
         info!("Deleted the requested Entries");
         Ok(EnumDeleteResponse::Status204_NoContent {
             x_rate_limit_limit: None,
@@ -338,6 +349,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         if body.replacing.is_none() {
             tx.commit().await?;
+            warn!(target: "obj", "Inserted Authors into the database with no replacements: {:?}",body.objects );
             // if there is nothing to replace, we are done here
             info!("New authors were introduced into the database");
             warn!("CAREFUL: HEREBY DANGLING AUTHOR ENTRIES CAN BE CREATED");
@@ -452,6 +464,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // return 201Created
         tx.commit().await?;
         info!("Successful PUT-and-replace was executed");
+        info!(target: "obj", "Inserted Authors into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(AutorenPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -553,7 +566,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         if body.replacing.is_none() {
             tx.commit().await?;
             // if there is nothing to replace, we are done here
-            info!("New authors were introduced into the database");
+            warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
+            info!("New gremien were introduced into the database");
             warn!("CAREFUL: HEREBY DANGLING GREMIUM ENTRIES CAN BE CREATED");
             return Ok(GremienPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
@@ -627,6 +641,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // return 201Created
         tx.commit().await?;
         info!("Successful PUT-and-replace was executed");
+        info!(target: "obj", "Inserted Gremien into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(GremienPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -733,7 +748,11 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         if body.replacing.is_none() {
             tx.commit().await?;
             // if there is nothing to replace, we are done here
-            // CAREFUL: HERE DANGLING GREMIUM ENTRIES ARE CREATED
+            // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
+            warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
+            warn!(
+                "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
+            );
             return Ok(EnumPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -869,6 +888,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         // return 201Created
         tx.commit().await?;
+        info!(target: "obj", "Inserted Enum into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(EnumPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -899,6 +919,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        info!(target: "obj", "Deleted Dokument {}", path_params.api_id);
         info!("Success");
         return Ok(DokumentDeleteIdResponse::Status204_NoContent {
             x_rate_limit_limit: None,
@@ -948,11 +969,16 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 .execute(&mut *tx)
                 .await?;
         }
-        let _ =
+        let id =
             crate::db::insert::insert_dokument(body.clone(), Uuid::nil(), claims.1, &mut tx, self)
                 .await?;
+        let api_id = sqlx::query!("SELECT api_id FROM dokument WHERE id= $1", id)
+            .map(|r| r.api_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
         tx.commit().await?;
+        info!(target: "obj", "PUT Dokument {}", api_id);
         info!("Created or updated successfully");
         return Ok(DokumentPutIdResponse::Status201_Created {
             x_rate_limit_limit: None,
