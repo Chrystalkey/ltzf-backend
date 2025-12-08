@@ -732,7 +732,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             }
         }
 
-        // insert all gremien, fetch their IDs
+        // insert all enum entries, fetch their IDs
         let new_ids = sqlx::query(&format!(
             "INSERT INTO {} (value)
                 SELECT item FROM UNNEST($1::text[]) as item 
@@ -749,7 +749,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             tx.commit().await?;
             // if there is nothing to replace, we are done here
             // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
-            warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
+            warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
             warn!(
                 "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
             );
@@ -764,7 +764,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         let mut replacement_tuples = vec![];
         for entry in body.replacing.as_ref().unwrap().iter() {
             // first, delete potentially conflicting entries
-            // !!this is a TODO!!
+            // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
 
             // then insert like this:
             let vitems: Vec<String> = entry.values.clone();

@@ -275,13 +275,14 @@ mod candid_test {
     async fn station_test() {
         let setup = TestSetup::new("test_station_candidates").await;
         let srv = &setup.server;
+
         setup.teardown().await;
     }
     #[tokio::test]
     async fn dokument_test() {
         let setup = TestSetup::new("test_dokument_candidates").await;
         let srv = &setup.server;
-        let vgs = vec![
+        let vgs = [
             models::Vorgang {
                 stationen: vec![models::Station {
                     dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
