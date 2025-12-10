@@ -378,8 +378,8 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
     .await?;
 
     let dids = sqlx::query!(
-        "SELECT api_id from rel_station_dokument rsd
-        INNER JOIN dokument d ON d.id = rsd.dok_id WHERE rsd.stat_id = $1",
+        "SELECT api_id from rel_sitzung_doks rsd
+        INNER JOIN dokument d ON d.id = rsd.did WHERE rsd.sid = $1",
         id
     )
     .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))

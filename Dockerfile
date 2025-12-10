@@ -1,6 +1,6 @@
 FROM oapi-preimage AS oapifile
 
-FROM rust:1.86-slim-bookworm AS builder
+FROM rust:1.90-slim-bookworm AS builder
 
 RUN apt update \
 &&  apt install -y --no-install-recommends libssl-dev pkg-config libpq5 \

@@ -9,18 +9,19 @@ use openapi::apis::{
     collector_schnittstellen_vorgang::*, data_administration_vorgang::*, unauthorisiert_vorgang::*,
 };
 use openapi::models;
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::auth::{self, APIScope};
-use super::compare::*;
 use super::find_applicable_date_range;
+use crate::api::RoundTimestamp;
 use crate::db;
 
 #[async_trait]
 impl DataAdministrationVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "VorgangDelete - DELETE /api/v2/vorgang/{vorgang_id}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
     async fn vorgang_delete(
         &self,
         _method: &Method,
@@ -30,17 +31,20 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
         path_params: &models::VorgangDeletePathParams,
     ) -> Result<VorgangDeleteResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            warn!("Permission Level too low");
             return Ok(VorgangDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
-        db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await
+        let id_vg_del = db::delete::delete_vorgang_by_api_id(path_params.vorgang_id, self).await?;
+        info!(target: "obj", "Deleted Vorgang {}", path_params.vorgang_id);
+        Ok(id_vg_del)
     }
 
     #[doc = "VorgangIdPut - PUT /api/v2/vorgang/{vorgang_id}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claims=%claims.0, vg_id=%path_params.vorgang_id))]
     async fn vorgang_id_put(
         &self,
         _method: &Method,
@@ -51,6 +55,7 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
         body: &models::Vorgang,
     ) -> Result<VorgangIdPutResponse> {
         if claims.0 != auth::APIScope::Admin && claims.0 != auth::APIScope::KeyAdder {
+            warn!("Permission Level too low");
             return Ok(VorgangIdPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -65,8 +70,10 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
             .await?;
         match db_id {
             Some(db_id) => {
+                debug!("Match found: {db_id}");
                 let db_cmpvg = retrieve::vorgang_by_id(db_id, &mut tx).await?;
-                if compare_vorgang(&db_cmpvg, body) {
+
+                if body.with_round_timestamps() == db_cmpvg.with_round_timestamps() {
                     return Ok(VorgangIdPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -78,15 +85,19 @@ impl DataAdministrationVorgang<LTZFError> for LTZFServer {
                         insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
                     }
                     _ => {
+                        error!("After successful delete an insert cannot fail");
                         unreachable!("If this is reached, some assumptions did not hold")
                     }
                 }
             }
             None => {
+                debug!("No Match found");
                 insert::insert_vorgang(body, Uuid::nil(), claims.1, &mut tx, self).await?;
             }
         }
         tx.commit().await?;
+        info!(target: "obj", "PUT by ID Vorgang {}", path_params.vorgang_id);
+        info!("Successful insert or replace");
         Ok(VorgangIdPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -100,7 +111,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
     #[doc = "VorgangPut - PUT /api/v2/vorgang"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claims=%claims.0, scraper=%header_params.x_scraper_id))]
     async fn vorgang_put(
         &self,
         _method: &Method,
@@ -115,6 +126,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
             && claims.0 != APIScope::Admin
             && claims.0 != APIScope::Collector
         {
+            warn!("Permission Level too low");
             return Ok(VorgangPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -124,24 +136,30 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
         let rval =
             merge::execute::run_integration(body, header_params.x_scraper_id, claims.1, self).await;
         match rval {
-            Ok(_) => Ok(VorgangPutResponse::Status201_Created {
-                x_rate_limit_limit: None,
-                x_rate_limit_remaining: None,
-                x_rate_limit_reset: None,
-            }),
-            Err(e) => match &e {
-                LTZFError::Validation { source } => match **source {
-                    DataValidationError::AmbiguousMatch { .. } => {
-                        Ok(VorgangPutResponse::Status409_Conflict {
-                            x_rate_limit_limit: None,
-                            x_rate_limit_remaining: None,
-                            x_rate_limit_reset: None,
-                        })
-                    }
+            Ok(_) => {
+                info!("Integration Successful");
+                Ok(VorgangPutResponse::Status201_Created {
+                    x_rate_limit_limit: None,
+                    x_rate_limit_remaining: None,
+                    x_rate_limit_reset: None,
+                })
+            }
+            Err(e) => {
+                warn!("Unsuccessful Integration Attempt: {e}");
+                match &e {
+                    LTZFError::Validation { source } => match **source {
+                        DataValidationError::AmbiguousMatch { .. } => {
+                            Ok(VorgangPutResponse::Status409_Conflict {
+                                x_rate_limit_limit: None,
+                                x_rate_limit_remaining: None,
+                                x_rate_limit_reset: None,
+                            })
+                        }
+                        _ => Err(e),
+                    },
                     _ => Err(e),
-                },
-                _ => Err(e),
-            },
+                }
+            }
         }
     }
 }
@@ -150,7 +168,7 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     #[doc = "VorgangGetById - GET /api/v2/vorgang/{vorgang_id}"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(vg=%path_params.vorgang_id))]
     async fn vorgang_get_by_id(
         &self,
         _method: &Method,
@@ -160,10 +178,6 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         header_params: &models::VorgangGetByIdHeaderParams,
         path_params: &models::VorgangGetByIdPathParams,
     ) -> Result<VorgangGetByIdResponse> {
-        tracing::trace!(
-            "vorgang_get_by_id called with id {}",
-            path_params.vorgang_id
-        );
         let mut tx = self.sqlx_db.begin().await?;
         let exists = sqlx::query!(
             "SELECT 1 as out FROM vorgang WHERE api_id = $1",
@@ -173,6 +187,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         .await?
         .is_some();
         if !exists {
+            warn!("Vorgang was not found");
             return Ok(VorgangGetByIdResponse::Status404_NotFound {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -208,6 +223,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                 );
             }
             tx.commit().await?;
+            info!("Successful retrieval");
             Ok(VorgangGetByIdResponse::Status200_Success {
                 body: result,
                 x_rate_limit_limit: None,
@@ -215,16 +231,20 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             })
         } else {
-            return Ok(VorgangGetByIdResponse::Status304_NotModified {
+            info!(
+                "Successful Retrieval, was unchanged since {}",
+                header_params.if_modified_since.unwrap()
+            );
+            Ok(VorgangGetByIdResponse::Status304_NotModified {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
-            });
+            })
         }
     }
 
     #[doc = "VorgangGet - GET /api/v2/vorgang"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all)]
     async fn vorgang_get(
         &self,
         _method: &Method,
@@ -261,6 +281,10 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
             .await?;
             if result.1.is_empty() && header_params.if_modified_since.is_none() {
                 tx.rollback().await?;
+                info!(
+                    "Parameters did not yield any content: {:?}, ims=None",
+                    query_params
+                );
                 Ok(VorgangGetResponse::Status204_NoContent {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -268,6 +292,10 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
                 })
             } else if result.1.is_empty() && header_params.if_modified_since.is_some() {
                 tx.rollback().await?;
+                info!(
+                    "No modification to result set since {}",
+                    header_params.if_modified_since.unwrap()
+                );
                 Ok(VorgangGetResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -276,6 +304,7 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
             } else {
                 tx.commit().await?;
                 let prp = &result.0;
+                info!("{} Objects matched query Parameters", result.1.len());
                 Ok(VorgangGetResponse::Status200_Successful {
                     body: result.1,
                     x_total_count: Some(prp.x_total_count),
@@ -290,6 +319,10 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
             }
         } else {
             tx.rollback().await?;
+            warn!(
+                "Parameters were chosen such that the request is unsatisfiable: {:?}, ims={:?}",
+                query_params, header_params.if_modified_since
+            );
             Ok(VorgangGetResponse::Status416_RequestRangeNotSatisfiable {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -316,16 +349,15 @@ mod test_endpoints {
 
     use crate::api::auth;
     use crate::api::auth::APIScope;
-    use crate::utils::test::TestSetup;
+    use crate::utils::testing::{TestSetup, generate};
 
-    use super::super::endpoint_test::*;
     // Procedure (Vorgang) tests
     #[tokio::test]
     async fn test_vorgang_get_by_id_endpoints() {
         // Setup test server and database
         let scenario = TestSetup::new("test_vorgang_by_id_get").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         // First create the procedure
         let create_response = server
             .vorgang_put(
@@ -461,7 +493,7 @@ mod test_endpoints {
     async fn test_vorgang_get_filtered_endpoints_empty() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_empty").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         // First create the procedure
         {
             let create_response = server
@@ -561,7 +593,7 @@ mod test_endpoints {
     async fn test_vorgang_get_filtered_endpoints_success() {
         let scenario = TestSetup::new("test_vorgang_get_filtered_success").await;
         let server = &scenario.server;
-        let test_vorgang = create_test_vorgang();
+        let test_vorgang = generate::default_vorgang();
         {
             // First create a procedure with specific parameters
             let create_response = server
@@ -635,7 +667,7 @@ mod test_endpoints {
         // Test cases for vorgang_id_put:
         // 1. Update existing procedure with valid data and admin permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
@@ -661,7 +693,7 @@ mod test_endpoints {
 
         // 2. Update procedure with insufficient permissions (Collector)
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_id_put(
                     &Method::PUT,
@@ -688,7 +720,7 @@ mod test_endpoints {
         // Test cases for vorgang_put:
         // 1. Create new procedure with valid data and collector permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_put(
                     &Method::PUT,
@@ -714,7 +746,7 @@ mod test_endpoints {
 
         // 2. Handle ambiguous matches (conflict)
         {
-            let vg1 = create_test_vorgang();
+            let vg1 = generate::default_vorgang();
             let mut vg2 = vg1.clone();
             let mut vg3 = vg1.clone();
             vg2.api_id = Uuid::now_v7();
@@ -800,7 +832,7 @@ mod test_endpoints {
         // Test cases for vorgang_delete:
         // 1. Delete existing procedure with proper permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             // First create the procedure
             let create_response = server
                 .vorgang_put(
@@ -876,7 +908,7 @@ mod test_endpoints {
 
         // 3. Delete procedure with insufficient permissions
         {
-            let test_vorgang = create_test_vorgang();
+            let test_vorgang = generate::default_vorgang();
             let response = server
                 .vorgang_delete(
                     &Method::DELETE,
@@ -915,7 +947,7 @@ mod test_endpoints {
 
 #[cfg(test)]
 mod test_failed_irl_scenarios {
-    use crate::{api::auth::APIScope, utils::test::TestSetup};
+    use crate::{api::auth::APIScope, utils::testing::TestSetup};
     use axum::http::Method;
     use axum_extra::extract::{CookieJar, Host};
     use openapi::{

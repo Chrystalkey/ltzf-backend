@@ -13,6 +13,7 @@ use openapi::apis::authentifizierung_keyadder_schnittstellen::AuthentifizierungK
 use openapi::apis::authentifizierung_keyadder_schnittstellen::*;
 use openapi::models::RotationResponse;
 use openapi::models::{self, AuthListingKeytag200Response};
+use tracing::{Instrument, debug, error, info, instrument, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum APIScope {
@@ -58,6 +59,7 @@ async fn internal_extract_claims(
 ) -> Result<crate::api::Claims> {
     let key = headers.get(key);
     if key.is_none() {
+        error!("Key was None, expected to find it in the headers");
         return Err(LTZFError::Validation {
             source: Box::new(crate::error::DataValidationError::MissingField {
                 field: "X-API-Key".to_string(),
@@ -66,7 +68,7 @@ async fn internal_extract_claims(
     }
     let key = key.unwrap().to_str()?;
     let tag = crate::utils::auth::keytag_of(key);
-    tracing::trace!("Authenticating Key: `{}`", tag);
+    debug!("Authenticating Key: `{}`", tag);
 
     if let Some((id, deleted_by, expiry, scope, salt, hash)) = sqlx::query!(
         "SELECT k.id, k.deleted_by, k.expires_at, value as scope, k.salt, k.key_hash
@@ -90,6 +92,7 @@ async fn internal_extract_claims(
     {
         let incoming_hash = crate::utils::auth::hash_full_key(&salt, key);
         if hash != incoming_hash {
+            warn!("Hash is not matching");
             Err(LTZFError::Validation {
                 source: Box::new(crate::error::DataValidationError::Unauthorized {
                     reason: format!("API Key is not valid. Tag: {tag}"),
@@ -97,6 +100,7 @@ async fn internal_extract_claims(
             })
         } else if let Some(deleted_by) = deleted_by {
             if deleted_by == id {
+                warn!("API Key was valid but was either rotated or expired");
                 Err(LTZFError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
                         reason: format!(
@@ -109,6 +113,7 @@ async fn internal_extract_claims(
                     .map(|r| r.keytag)
                     .fetch_one(&server.sqlx_db)
                     .await?;
+                warn!("Key was deleted by {delkeytag}");
                 Err(LTZFError::Validation {
                     source: Box::new(crate::error::DataValidationError::Unauthorized {
                         reason: format!(
@@ -121,6 +126,7 @@ async fn internal_extract_claims(
             sqlx::query!("UPDATE api_keys SET deleted_by = $1 WHERE id = $1", id)
                 .execute(&server.sqlx_db)
                 .await?;
+            warn!("Key was valid but has expired since last use");
             Err(LTZFError::Validation {
                 source: Box::new(crate::error::DataValidationError::Unauthorized {
                     reason: format!("API Key was valid but has expired. Tag: {tag}"),
@@ -135,10 +141,11 @@ async fn internal_extract_claims(
             )
             .execute(&server.sqlx_db)
             .await?;
-            tracing::trace!("Scope of key with tag`{}`: {:?}", tag, scope.0);
+            debug!("Scope of key with tag`{}`: {:?}", tag, scope.0);
             Ok(scope)
         }
     } else {
+        warn!("Key was not found in the database");
         Err(LTZFError::Validation {
             source: Box::new(crate::error::DataValidationError::Unauthorized {
                 reason: "API Key was not found in the Database".to_string(),
@@ -150,15 +157,21 @@ async fn internal_extract_claims(
 #[async_trait]
 impl ApiKeyAuthHeader for LTZFServer {
     type Claims = crate::api::Claims;
+
+    #[instrument(skip_all)]
     async fn extract_claims_from_header(
         &self,
         headers: &axum::http::header::HeaderMap,
         key: &str,
     ) -> Option<Self::Claims> {
-        match internal_extract_claims(self, headers, key).await {
+        let current = tracing::span::Span::current().clone();
+        let result = internal_extract_claims(self, headers, key)
+            .instrument(current)
+            .await;
+        match result {
             Ok(claim) => Some(claim),
             Err(error) => {
-                tracing::warn!("Authorization failed: {}", error);
+                warn!("Authorization failed: {}", error);
                 None
             }
         }
@@ -169,6 +182,7 @@ impl ApiKeyAuthHeader for LTZFServer {
 impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
 
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_listing(
         &self,
         _method: &Method,
@@ -178,7 +192,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         query_params: &models::AuthListingQueryParams,
     ) -> Result<AuthListingResponse> {
         if claims.0 != APIScope::KeyAdder {
-            tracing::info!("Tried accessing /auth/keys without proper permission");
+            warn!("Permission level too low");
             return Ok(AuthListingResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -202,7 +216,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         .fetch_all(&mut *tx).await?;
 
         tx.commit().await?;
-        tracing::info!("Listing {} keys with {:?}", &result.len(), prp);
+        info!("Listing {} keys", &result.len());
         return Ok(AuthListingResponse::Status200_OK {
             body: result,
             x_rate_limit_limit: None,
@@ -216,6 +230,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         });
     }
 
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_listing_keytag(
         &self,
         _method: &Method,
@@ -225,6 +240,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         path_params: &models::AuthListingKeytagPathParams,
     ) -> Result<AuthListingKeytagResponse> {
         if claims.0 != APIScope::KeyAdder {
+            warn!("Permission level too low");
             return Ok(AuthListingKeytagResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -296,6 +312,14 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
             sitzungen,
             stationen,
         };
+        let r = &result;
+        info!(
+            "Successfully fetched {}/{}/{}/{} (d/v/si/st) entries",
+            r.dokumente.as_ref().map(|x| x.len()).unwrap_or(0),
+            r.vorgaenge.as_ref().map(|x| x.len()).unwrap_or(0),
+            r.sitzungen.as_ref().map(|x| x.len()).unwrap_or(0),
+            r.stationen.as_ref().map(|x| x.len()).unwrap_or(0),
+        );
         return Ok(AuthListingKeytagResponse::Status200_OK {
             body: result,
             x_rate_limit_limit: None,
@@ -305,7 +329,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     }
 
     #[doc = "AuthDelete - DELETE /api/v2/auth"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claim=%claims.0, keytag=%header_params.api_key_delete))]
     async fn auth_delete(
         &self,
         _method: &Method,
@@ -315,6 +339,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         header_params: &models::AuthDeleteHeaderParams,
     ) -> Result<AuthDeleteResponse> {
         if claims.0 != APIScope::KeyAdder {
+            warn!("Permission level too low");
             return Ok(AuthDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -329,6 +354,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         .execute(&self.sqlx_db)
         .await?;
 
+        info!("Successfully deleted keys");
         Ok(AuthDeleteResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -337,7 +363,7 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
     }
 
     #[doc = "AuthPost - POST /api/v2/auth"]
-    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_post(
         &self,
         _method: &Method,
@@ -347,14 +373,13 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         body: &models::CreateApiKey,
     ) -> Result<AuthPostResponse> {
         if claims.0 != APIScope::KeyAdder {
-            tracing::warn!("Permissions Insufficient");
+            warn!("Permission level too low");
             return Ok(AuthPostResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
-        tracing::debug!("Key Creation Requested!");
         let mut tx = self.sqlx_db.begin().await?;
         let (key, salt) = crate::utils::auth::find_new_key(&mut tx).await?;
         let tag = crate::utils::auth::keytag_of(&key);
@@ -377,7 +402,11 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
         .await?;
         tx.commit().await?;
 
-        tracing::info!("Generated Fresh API Key with Scope: {:?}", body.scope);
+        tracing::info!(
+            "Generated Fresh API Key with Scope: {} and keytag {}",
+            body.scope,
+            tag
+        );
         Ok(AuthPostResponse::Status201_APIKeyWasCreatedSuccessfully(
             key,
         ))
@@ -387,6 +416,18 @@ impl AuthentifizierungKeyadderSchnittstellen<LTZFError> for LTZFServer {
 #[async_trait]
 impl Authentifizierung<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
+    #[instrument(skip_all, fields(claim=%claims.0))]
+    /// SECURITY:
+    /// There should always ever be at most two keys in an active rotation relationship (rotated_for!=NULL && deleted_by!=NULL)
+    /// And the rotation date must never be expanded, otherwise you can just prolong your old key's life indefinitely
+    ///
+    /// Names: old_key: The key that the request has been authenticated with
+    /// new_key: the key that is created and succeeds old_key
+    /// some_key: Any key in the database
+    /// Cases:
+    /// 1. old_key.rotated_for != None  => SET old_key.rotated_for.deleted_by=himself, old_key.rotated_for=new_key,
+    /// 2. some_key.rotated_for=old_key => some_key.deleted_by=some_key, old_key.rotated_for=new_key
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_rotate(
         &self,
         _method: &axum::http::Method,
@@ -428,6 +469,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         // at this point, fix up some failure cases:
         // 1. if the old key is in rotation state (rotated_for is not NULL): invalidate the one it is rotated for
         if let Some(rf) = old_key_entry.rotated_for {
+            debug!("#1: old key is in rotation state: Invalidate the one it is rotated for");
             sqlx::query!("UPDATE api_keys SET deleted_by = id WHERE id = $1", rf)
                 .execute(&mut *tx)
                 .await?;
@@ -439,6 +481,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
             .fetch_optional(&mut *tx)
             .await?;
         if let Some(inv_id) = r {
+            debug!("#2: old key has a 'fresh_key' role for a different key: Invalidate that one");
             sqlx::query!(
                 "UPDATE api_keys SET deleted_by = id WHERE id = $1",
                 inv_id.id
@@ -460,10 +503,9 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         .await?;
         tx.commit().await?;
 
-        tracing::info!(
+        info!(
             "Rotated API Key {} with Scope: {:?}",
-            old_key_entry.keytag,
-            old_key_entry.named_scope
+            old_key_entry.keytag, old_key_entry.named_scope
         );
         Ok(AuthRotateResponse::Status201_RotationSuccessful(
             RotationResponse {
@@ -473,6 +515,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         ))
     }
     /// AuthStatus - GET /api/v2/auth/status
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn auth_status(
         &self,
         _method: &Method,
@@ -480,7 +523,6 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         _cookies: &CookieJar,
         claims: &Self::Claims,
     ) -> Result<AuthStatusResponse> {
-        tracing::debug!("Key {} ({}) requested auth status", claims.1, claims.0);
         let db_row = sqlx::query!(
             "SELECT * FROM 
         api_keys WHERE id = $1",
@@ -490,6 +532,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
         .await?;
         let rotation_is_active =
             db_row.rotated_for.is_some() && db_row.expires_at > chrono::Utc::now();
+        debug!("Key {} ({}) requested auth status", db_row.keytag, claims.0);
         Ok(
             AuthStatusResponse::Status200_SuccessfullyRetrievedAPIKeyStatus(models::ApiKeyStatus {
                 expires_at: db_row.expires_at,
@@ -513,7 +556,7 @@ mod auth_test {
 
     use crate::LTZFServer;
     use crate::utils::auth::keytag_of;
-    use crate::utils::test::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate};
 
     async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
@@ -559,7 +602,7 @@ mod auth_test {
     // GET /auth/status
     #[tokio::test]
     async fn test_auth_status() {
-        let scenario = crate::utils::test::TestSetup::new("test_auth_status").await;
+        let scenario = TestSetup::new("test_auth_status").await;
         let server = &scenario.server;
         let expiry_date = chrono::Utc::now() + chrono::Duration::days(2);
         let key = server

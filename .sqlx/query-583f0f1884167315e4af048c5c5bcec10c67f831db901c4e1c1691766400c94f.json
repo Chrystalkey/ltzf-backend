@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT api_id from rel_sitzung_doks rsd\n        INNER JOIN dokument d ON d.id = rsd.did WHERE rsd.sid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "583f0f1884167315e4af048c5c5bcec10c67f831db901c4e1c1691766400c94f"
+}

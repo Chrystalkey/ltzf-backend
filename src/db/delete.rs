@@ -7,7 +7,7 @@ pub async fn delete_vorgang_by_api_id(
     api_id: Uuid,
     server: &LTZFServer,
 ) -> Result<VorgangDeleteResponse> {
-    let thing = sqlx::query!("SELECT * FROM vorgang WHERE api_id = $1", api_id)
+    let thing = sqlx::query!("SELECT 1 as x FROM vorgang WHERE api_id = $1", api_id)
         .fetch_optional(&server.sqlx_db)
         .await?;
     if thing.is_none() {
@@ -31,7 +31,7 @@ pub async fn delete_sitzung_by_api_id(
     api_id: Uuid,
     server: &LTZFServer,
 ) -> Result<SitzungDeleteResponse> {
-    let thing = sqlx::query!("SELECT id FROM sitzung WHERE api_id = $1", api_id)
+    let thing = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
         .fetch_optional(&server.sqlx_db)
         .await?;
     if thing.is_none() {

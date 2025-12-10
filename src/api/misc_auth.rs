@@ -11,7 +11,10 @@ use axum_extra::extract::Host;
 use openapi::apis::data_administration_miscellaneous::*;
 use openapi::models;
 use sqlx::Row;
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
+
+use super::RoundTimestamp;
 
 // this query tries to resolve all potential unique constraint conflicts
 // on tables where the enumeration entry are part of a shared unique constraint.
@@ -74,6 +77,7 @@ EXISTS (SELECT FROM deletion_select ds WHERE ds.identifier = ",$shorthand,".",$i
 impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     type Claims = crate::api::Claims;
     /// AutorenDeleteByParam - DELETE /api/v2/autoren
+    #[instrument(skip_all, fields(query=?query_params))]
     async fn autoren_delete_by_param(
         &self,
         _method: &Method,
@@ -83,6 +87,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         query_params: &models::AutorenDeleteByParamQueryParams,
     ) -> Result<AutorenDeleteByParamResponse> {
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            warn!("Permission level too low");
             return Ok(AutorenDeleteByParamResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -95,14 +100,18 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             org: None,
         };
         if *query_params == empty_qp {
-            return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
+            warn!(
+                "You tried to delete all Authors with an empty filter. This is not possible for safety reasons. Try to give me at least one filter"
+            );
+            return Ok(AutorenDeleteByParamResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
+
         let mut tx = self.sqlx_db.begin().await?;
-        sqlx::query!(
+        let n_deleted = sqlx::query!(
             "
         DELETE FROM autor a WHERE 
         (a.person IS NULL OR a.person = COALESCE($1, a.person)) AND
@@ -114,8 +123,13 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             query_params.fach
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Successfully deleted {} authors matching psn:{:?} org:{:?} fch:{:?}", 
+            n_deleted, query_params.person, query_params.org, query_params.fach);
+
+        info!("Successfully deleted matching authors");
         return Ok(AutorenDeleteByParamResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -124,6 +138,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// GremienDeleteByParam - DELETE /api/v2/gremien
+    #[instrument(skip_all, fields(query=?query_params, claim=%claims.0))]
     async fn gremien_delete_by_param(
         &self,
         _method: &Method,
@@ -133,6 +148,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         query_params: &models::GremienDeleteByParamQueryParams,
     ) -> Result<GremienDeleteByParamResponse> {
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            warn!("Permission level too low");
             return Ok(GremienDeleteByParamResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -145,6 +161,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             wp: None,
         };
         if *query_params == empty_qp {
+            warn!(
+                "You tried to delete all Gremien with an empty filter. This is not possible for safety reasons. Try to give me at least one filter"
+            );
             return Ok(GremienDeleteByParamResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -152,7 +171,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             });
         }
         let mut tx = self.sqlx_db.begin().await?;
-        sqlx::query!(
+        let n_del = sqlx::query!(
             "
         DELETE FROM gremium g WHERE 
         g.name = COALESCE($1, g.name) AND
@@ -164,8 +183,13 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             query_params.p.as_ref().map(|x| x.to_string())
         )
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Deleted {} Gremien matching gr:{:?} wp:{:?} pa:{:?}",
+            n_del, query_params.gr, query_params.wp, query_params.p.as_ref().map(|x| x.to_string())
+        );
+        info!("Deleted the requested Gremien");
         return Ok(GremienDeleteByParamResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -174,6 +198,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// EnumDelete - DELETE /api/v2/enumeration/{name}/{item}
+    #[instrument(skip_all, fields(name=?path_params.name, claim=%claims.0))]
     async fn enum_delete(
         &self,
         _method: &Method,
@@ -183,6 +208,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         path_params: &models::EnumDeletePathParams,
     ) -> Result<EnumDeleteResponse> {
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            warn!("Permission level too low");
             return Ok(EnumDeleteResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -202,14 +228,18 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             ]
             .drain(..),
         );
-        sqlx::query(&format!(
+        let n_del = sqlx::query(&format!(
             "DELETE FROM {} x WHERE x.value = $1",
             enum_tables[&path_params.name]
         ))
         .bind::<_>(&path_params.item)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
         tx.commit().await?;
+        info!(target: "obj", "Deleted {} Enumeration Entries from {}", 
+            n_del, enum_tables[&path_params.name]);
+        info!("Deleted the requested Entries");
         Ok(EnumDeleteResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -218,6 +248,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// AutorenPut - PUT /api/v2/autoren
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn autoren_put(
         &self,
         _method: &Method,
@@ -227,6 +258,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         body: &models::AutorenPutRequest,
     ) -> Result<AutorenPutResponse> {
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            warn!("Permission level too low");
             return Ok(AutorenPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -236,9 +268,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         // if replacing contains an index larger than the object list: Bad Request
         // if replacing contains circular references (meaning a replacing object is identifiable with an object in the object list): Bad Request
         let seen = std::collections::BTreeSet::from_iter(
-            body.objects
-                .iter()
-                .map(|x| WrappedAutor { autor: x.clone() }),
+            body.objects.iter().map(|x| WrappedAutor { autor: x }),
         );
         if let Some(replc) = &body.replacing {
             for rpl in replc.iter() {
@@ -246,8 +276,13 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                     || rpl
                         .values
                         .iter()
-                        .any(|x| seen.contains(&WrappedAutor { autor: x.clone() }))
+                        .any(|x| seen.contains(&WrappedAutor { autor: x }))
                 {
+                    info!(
+                        "Semantically bad request: Either a circular replacement was detected or 
+                        there were more replacement rules than new entries. 
+                        An entry must be bound to at most one replacement rule."
+                    );
                     return Ok(AutorenPutResponse::Status400_BadRequest {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -274,6 +309,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 let flattened: Vec<models::Autor> =
                     repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
                 if count_existing_authors(&mut tx, &flattened).await? == 0 {
+                    info!(
+                        "All Entries already exist in the database and no replacement entry was found"
+                    );
                     return Ok(AutorenPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -281,6 +319,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                     });
                 }
             } else {
+                info!(
+                    "All Entries already exist in the database and no replacement entry was found"
+                );
                 return Ok(AutorenPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -289,6 +330,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             }
         }
 
+        debug!("Request was valid");
         // insert all authors, fetch their IDs
         let new_ids = sqlx::query!("
         INSERT INTO autor(person, organisation, fachgebiet, lobbyregister) 
@@ -307,8 +349,10 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         if body.replacing.is_none() {
             tx.commit().await?;
+            warn!(target: "obj", "Inserted Authors into the database with no replacements: {:?}",body.objects );
             // if there is nothing to replace, we are done here
-            // CAREFUL: HERE DANGLING AUTHOR ENTRIES ARE CREATED
+            info!("New authors were introduced into the database");
+            warn!("CAREFUL: HEREBY DANGLING AUTHOR ENTRIES CAN BE CREATED");
             return Ok(AutorenPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -419,6 +463,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         // return 201Created
         tx.commit().await?;
+        info!("Successful PUT-and-replace was executed");
+        info!(target: "obj", "Inserted Authors into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(AutorenPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -427,6 +473,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// GremienPut - PUT /api/v2/gremien
+    #[instrument(skip_all, fields(claim=%claims.0))]
     async fn gremien_put(
         &self,
         _method: &Method,
@@ -436,6 +483,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         body: &models::GremienPutRequest,
     ) -> Result<GremienPutResponse> {
         if claims.0 != APIScope::KeyAdder && claims.0 != APIScope::Admin {
+            warn!("Permission level too low");
             return Ok(GremienPutResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -447,6 +495,11 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         if let Some(replc) = &body.replacing {
             for rpl in replc.iter() {
                 if rpl.replaced_by as usize >= body.objects.len() {
+                    info!(
+                        "Semantically bad request: Either a circular replacement was detected or 
+                        there were more replacement rules than new entries. 
+                        An entry must be bound to at most one replacement rule."
+                    );
                     return Ok(GremienPutResponse::Status400_BadRequest {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -473,6 +526,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 let flattened: Vec<models::Gremium> =
                     repl.iter().flat_map(|o| o.values.iter()).cloned().collect();
                 if count_existing_gremien(&mut tx, &flattened).await? == 0 {
+                    info!(
+                        "All Entries already exist in the database and no replacement entry was found"
+                    );
                     return Ok(GremienPutResponse::Status304_NotModified {
                         x_rate_limit_limit: None,
                         x_rate_limit_remaining: None,
@@ -480,6 +536,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                     });
                 }
             } else {
+                info!(
+                    "All Entries already exist in the database and no replacement entry was found"
+                );
                 return Ok(GremienPutResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -488,6 +547,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             }
         }
 
+        debug!("Request was valid");
         // insert all gremien, fetch their IDs
         let new_ids = sqlx::query!("
         INSERT INTO gremium(name, parl, wp, link) 
@@ -506,7 +566,9 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         if body.replacing.is_none() {
             tx.commit().await?;
             // if there is nothing to replace, we are done here
-            // CAREFUL: HERE DANGLING GREMIUM ENTRIES ARE CREATED
+            warn!(target: "obj", "Inserted Gremien into the database with no replacements: {:?}", body.objects);
+            info!("New gremien were introduced into the database");
+            warn!("CAREFUL: HEREBY DANGLING GREMIUM ENTRIES CAN BE CREATED");
             return Ok(GremienPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -578,6 +640,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         // return 201Created
         tx.commit().await?;
+        info!("Successful PUT-and-replace was executed");
+        info!(target: "obj", "Inserted Gremien into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(GremienPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -586,6 +650,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// EnumPut - PUT /api/v2/enumeration/{name}
+    #[instrument(skip_all, fields(name=%path_params.name, claim=%claims.0))]
     async fn enum_put(
         &self,
         _method: &Method,
@@ -667,7 +732,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             }
         }
 
-        // insert all gremien, fetch their IDs
+        // insert all enum entries, fetch their IDs
         let new_ids = sqlx::query(&format!(
             "INSERT INTO {} (value)
                 SELECT item FROM UNNEST($1::text[]) as item 
@@ -683,7 +748,11 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         if body.replacing.is_none() {
             tx.commit().await?;
             // if there is nothing to replace, we are done here
-            // CAREFUL: HERE DANGLING GREMIUM ENTRIES ARE CREATED
+            // CAREFUL: HERE DANGLING ENUM ENTRIES ARE CREATED
+            warn!(target: "obj", "Inserted Enumeration Entries into the database with no replacements: {:?}", body.objects);
+            warn!(
+                "Inserted Enumeration Entries into db without replacements, these are dangling as of now"
+            );
             return Ok(EnumPutResponse::Status201_Created {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -695,7 +764,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         let mut replacement_tuples = vec![];
         for entry in body.replacing.as_ref().unwrap().iter() {
             // first, delete potentially conflicting entries
-            // !!this is a TODO!!
+            // !!this is a TODO!! (but its like, ten years later and i have no idea what i meant
 
             // then insert like this:
             let vitems: Vec<String> = entry.values.clone();
@@ -819,6 +888,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
 
         // return 201Created
         tx.commit().await?;
+        info!(target: "obj", "Inserted Enum into the database with: {:?}, replacing: {:?}", body.objects, body.replacing );
         Ok(EnumPutResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -827,6 +897,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// DokumentDeleteId - DELETE /api/v2/dokument/{api_id}
+    #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
     async fn dokument_delete_id(
         &self,
         _method: &Method,
@@ -836,6 +907,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         path_params: &models::DokumentDeleteIdPathParams,
     ) -> Result<DokumentDeleteIdResponse> {
         if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
+            warn!("Permission level too low");
             return Ok(DokumentDeleteIdResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -847,6 +919,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        info!(target: "obj", "Deleted Dokument {}", path_params.api_id);
+        info!("Success");
         return Ok(DokumentDeleteIdResponse::Status204_NoContent {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -855,6 +929,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
     }
 
     /// DokumentPutId - PUT /api/v2/dokument/{api_id}
+    #[instrument(skip_all, fields(dok=%path_params.api_id, claim=%claims.0))]
     async fn dokument_put_id(
         &self,
         _method: &Method,
@@ -865,6 +940,7 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         body: &models::Dokument,
     ) -> Result<DokumentPutIdResponse> {
         if claims.0 != super::auth::APIScope::Admin && claims.0 != super::auth::APIScope::KeyAdder {
+            warn!("Permission level too low");
             return Ok(DokumentPutIdResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -881,7 +957,8 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
         .await?;
         if let Some(did) = did {
             let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
-            if super::compare::compare_dokument(&dok, body) {
+            if dok.with_round_timestamps() == body.with_round_timestamps() {
+                info!("Dokument was not modified");
                 return Ok(DokumentPutIdResponse::Status304_NotModified {
                     x_rate_limit_limit: None,
                     x_rate_limit_remaining: None,
@@ -892,11 +969,17 @@ impl DataAdministrationMiscellaneous<LTZFError> for LTZFServer {
                 .execute(&mut *tx)
                 .await?;
         }
-        let _ =
+        let id =
             crate::db::insert::insert_dokument(body.clone(), Uuid::nil(), claims.1, &mut tx, self)
                 .await?;
+        let api_id = sqlx::query!("SELECT api_id FROM dokument WHERE id= $1", id)
+            .map(|r| r.api_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
         tx.commit().await?;
+        info!(target: "obj", "PUT Dokument {}", api_id);
+        info!("Created or updated successfully");
         return Ok(DokumentPutIdResponse::Status201_Created {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -924,7 +1007,7 @@ mod test_authorisiert {
     use openapi::models::{self, EnumerationNames, StationDokumenteInner};
 
     use crate::LTZFServer;
-    use crate::utils::test::{TestSetup, generate};
+    use crate::utils::testing::{TestSetup, generate};
 
     async fn insert_default_vorgang(server: &LTZFServer) {
         let vorgang = generate::default_vorgang();
@@ -1053,7 +1136,7 @@ mod test_authorisiert {
             .unwrap();
         assert_eq!(
             r,
-            AutorenDeleteByParamResponse::Status204_NoContent {
+            AutorenDeleteByParamResponse::Status403_Forbidden {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None

@@ -1,18 +1,23 @@
+use chrono::DurationRound;
 use std::cmp::Ordering;
+use std::fmt::Debug;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum_extra::extract::Host;
 use openapi::models;
+use tracing::debug;
+use tracing::instrument;
 
 use crate::Configuration;
 use crate::Result;
 use crate::error::LTZFError;
 use crate::utils::notify;
+use crate::utils::tracing::Logging;
 use openapi::apis::unauthorisiert::*;
 
 pub(crate) mod auth;
-pub(crate) mod compare;
 pub(crate) mod misc;
 pub(crate) mod misc_auth;
 pub(crate) mod sitzung;
@@ -25,6 +30,7 @@ pub struct LTZFServer {
     pub sqlx_db: sqlx::PgPool,
     pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
+    pub logging: Logging,
 }
 pub type LTZFArc = std::sync::Arc<LTZFServer>;
 impl LTZFServer {
@@ -32,17 +38,20 @@ impl LTZFServer {
         sqlx_db: sqlx::PgPool,
         config: Configuration,
         mailbundle: Option<notify::MailBundle>,
+        logging: Logging,
     ) -> Self {
         Self {
             config,
             sqlx_db,
             mailbundle: mailbundle.map(Arc::new),
+            logging,
         }
     }
 }
 
 #[async_trait]
 impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
+    #[instrument(skip_all, fields(%method))]
     async fn handle_error(
         &self,
         method: &axum::http::Method,
@@ -57,6 +66,7 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl Unauthorisiert<LTZFError> for LTZFServer {
+    #[instrument(skip_all, fields(t=?query_params.t))]
     async fn ping(
         &self,
         _method: &axum::http::Method,
@@ -69,18 +79,19 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64();
-            tracing::debug!("Ping with one-way time: {} s", current_time - t);
+            debug!("Ping with one-way time: {} s", current_time - t);
         }
         Ok(PingResponse::Status200_Pong)
     }
 
+    #[instrument(skip_all)]
     async fn status(
         &self,
         _method: &axum::http::Method,
         _host: &Host,
         _cookies: &axum_extra::extract::CookieJar,
     ) -> Result<StatusResponse> {
-        tracing::debug!("Status Requested");
+        debug!("Status Requested");
         // TODO: implement "API is not running for some reason" markers
         Ok(StatusResponse::Status200_APIIsRunning {
             x_rate_limit_limit: None,
@@ -256,10 +267,32 @@ mod prp_test {
         assert_eq!(prp.end(), 1);
     }
 }
+
 pub struct DateRange {
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+impl Debug for DateRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+impl Display for DateRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}, {}]",
+            self.since
+                .map(|x| format!("{}", x))
+                .unwrap_or("-∞".to_string()),
+            self.until
+                .map(|x| format!("{}", x))
+                .unwrap_or("∞".to_string())
+        )
+    }
+}
+
 impl
     From<(
         Option<chrono::DateTime<chrono::Utc>>,
@@ -493,23 +526,25 @@ mod test_applicable_date_range {
     }
 }
 
+/// this is here to implement a PartialEq, Eq, Ord, ...
+/// for hashing, since we need t
 #[derive(Debug, Clone)]
-pub(crate) struct WrappedAutor {
-    pub autor: models::Autor,
+pub(crate) struct WrappedAutor<'wrapped> {
+    pub autor: &'wrapped models::Autor,
 }
-impl PartialEq for WrappedAutor {
+impl<'wrapped> PartialEq for WrappedAutor<'wrapped> {
     fn eq(&self, other: &Self) -> bool {
         self.autor.organisation == other.autor.organisation
             && self.autor.person == other.autor.person
     }
 }
-impl Eq for WrappedAutor {}
-impl PartialOrd for WrappedAutor {
+impl<'wrapped> Eq for WrappedAutor<'wrapped> {}
+impl<'wrapped> PartialOrd for WrappedAutor<'wrapped> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(std::cmp::Ord::cmp(self, other))
     }
 }
-impl Ord for WrappedAutor {
+impl<'wrapped> Ord for WrappedAutor<'wrapped> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.autor
             .organisation
@@ -517,164 +552,258 @@ impl Ord for WrappedAutor {
             .then(self.autor.person.cmp(&other.autor.person))
     }
 }
+/// This trait enables sorting all arrays contained in an object
+/// to be able to compare them afterwards without caring for ordering
+#[cfg(test)]
+pub(crate) trait SortArrays: Clone {
+    fn sort_arrays(&mut self);
+}
 
 #[cfg(test)]
-pub(crate) mod endpoint_test {
-    use openapi::models;
-
-    use crate::utils::test::generate::default_gremium;
-
-    // Session (Sitzung) tests
-    pub(crate) fn create_test_session() -> models::Sitzung {
-        use chrono::Utc;
-        use openapi::models::{
-            Autor, Dokument, Gremium, Parlament, Sitzung, StationDokumenteInner, Top,
-        };
-        use uuid::Uuid;
-
-        // Create a test document
-        let test_doc = Dokument {
-            touched_by: None,
-            api_id: Some(Uuid::now_v7()),
-            titel: "Test Document".to_string(),
-            kurztitel: None,
-            vorwort: Some("Test Vorwort".to_string()),
-            volltext: "Test Volltext".to_string(),
-            zusammenfassung: None,
-            typ: openapi::models::Doktyp::Entwurf,
-            link: "http://example.com/doc".to_string(),
-            hash: "testhash".to_string(),
-            zp_modifiziert: Utc::now(),
-            drucksnr: None,
-            zp_referenz: Utc::now(),
-            zp_erstellt: Some(Utc::now()),
-            meinung: None,
-            schlagworte: None,
-            autoren: vec![Autor {
-                person: Some("Test Person".to_string()),
-                organisation: "Test Organization".to_string(),
-                fachgebiet: Some("Test Fachgebiet".to_string()),
-                lobbyregister: None,
-            }],
-        };
-
-        // Create a test top
-        let test_top = Top {
-            titel: "Test Top".to_string(),
-            dokumente: Some(vec![StationDokumenteInner::Dokument(Box::new(test_doc))]),
-            nummer: 1,
-            vorgang_id: None,
-        };
-
-        // Create a test expert
-        let test_expert = Autor {
-            person: Some("Test Expert".to_string()),
-            organisation: "Test Expert Organization".to_string(),
-            fachgebiet: Some("Test Expert Fachgebiet".to_string()),
-            lobbyregister: None,
-        };
-
-        // Create and return the test Sitzung
-        Sitzung {
-            api_id: Some(Uuid::now_v7()),
-            nummer: 1,
-            titel: Some("Test Sitzung".to_string()),
-            public: true,
-            touched_by: None,
-            termin: Utc::now(),
-            gremium: Gremium {
-                name: "Test Gremium".to_string(),
-                link: Some("http://example.com/gremium".to_string()),
-                wahlperiode: 20,
-                parlament: Parlament::Bt,
-            },
-            tops: vec![test_top],
-            link: Some("http://example.com/sitzung".to_string()),
-            experten: Some(vec![test_expert]),
-            dokumente: None,
+impl SortArrays for models::Dokument {
+    fn sort_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.schlagworte.as_mut() {
+            x.sort();
+        }
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        self.autoren
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+    }
+}
+#[cfg(test)]
+impl SortArrays for models::Station {
+    fn sort_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.schlagworte.as_mut() {
+            x.sort();
+        }
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.additional_links.as_mut() {
+            x.sort();
+        }
+        self.dokumente.sort_by(|a, b| match (a, b) {
+            (
+                models::StationDokumenteInner::String(x),
+                models::StationDokumenteInner::String(y),
+            ) => x.cmp(y),
+            (
+                models::StationDokumenteInner::String(x),
+                models::StationDokumenteInner::Dokument(y),
+            ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+            (
+                models::StationDokumenteInner::Dokument(x),
+                models::StationDokumenteInner::String(y),
+            ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+            (
+                models::StationDokumenteInner::Dokument(x),
+                models::StationDokumenteInner::Dokument(y),
+            ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+        });
+        self.dokumente.iter_mut().for_each(|x| {
+            if let models::StationDokumenteInner::Dokument(x) = x {
+                x.sort_arrays();
+            }
+        });
+        if let Some(x) = self.stellungnahmen.as_mut() {
+            x.sort_by(|a, b| match (a, b) {
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::String(y),
+                ) => x.cmp(y),
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::String(y),
+                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+            });
+            x.iter_mut().for_each(|x| {
+                if let models::StationDokumenteInner::Dokument(x) = x {
+                    x.sort_arrays();
+                }
+            });
         }
     }
+}
+#[cfg(test)]
+impl SortArrays for models::Vorgang {
+    fn sort_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.lobbyregister.as_mut() {
+            x.sort_by(|a, b| a.link.cmp(&b.link));
+        }
+        self.stationen
+            .sort_by(|a, b| (a.zp_start, a.api_id).cmp(&(b.zp_start, b.api_id)));
+        self.stationen.iter_mut().for_each(|a| a.sort_arrays());
+        self.initiatoren
+            .sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        if let Some(x) = self.ids.as_mut() {
+            x.sort_by(|a, b| (a.typ, &a.id).cmp(&(b.typ, &b.id)));
+        }
+        if let Some(x) = self.links.as_mut() {
+            x.sort();
+        }
+    }
+}
+#[cfg(test)]
+impl SortArrays for models::Sitzung {
+    fn sort_arrays(&mut self) {
+        let nil = uuid::Uuid::nil();
+        let emp = "".to_owned();
+        if let Some(x) = self.touched_by.as_mut() {
+            x.sort_by(|a, b| {
+                (a.key.as_ref().unwrap_or(&emp), a.scraper_id.unwrap_or(nil))
+                    .cmp(&(b.key.as_ref().unwrap_or(&emp), b.scraper_id.unwrap_or(nil)))
+            })
+        }
+        if let Some(x) = self.experten.as_mut() {
+            x.sort_by(|a, b| a.organisation.cmp(&b.organisation));
+        }
 
-    pub(crate) fn create_test_vorgang() -> models::Vorgang {
-        use chrono::Utc;
-        use openapi::models::{
-            Autor, Doktyp, Dokument, Station, StationDokumenteInner, Stationstyp, VgIdent,
-            VgIdentTyp, Vorgang, Vorgangstyp,
-        };
-        use uuid::Uuid;
+        if let Some(x) = self.dokumente.as_mut() {
+            x.sort_by(|a, b| match (a, b) {
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::String(y),
+                ) => x.cmp(y),
+                (
+                    models::StationDokumenteInner::String(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => (**x).cmp(&y.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::String(y),
+                ) => (**y).cmp(&x.api_id.unwrap_or(nil).to_string()),
+                (
+                    models::StationDokumenteInner::Dokument(x),
+                    models::StationDokumenteInner::Dokument(y),
+                ) => x.api_id.unwrap_or(nil).cmp(&y.api_id.unwrap_or(nil)),
+            });
 
-        // Create a test document
-        let test_doc = Dokument {
-            api_id: Some(Uuid::now_v7()),
-            titel: "Test Document".to_string(),
-            touched_by: None,
-            kurztitel: None,
-            vorwort: Some("Test Vorwort".to_string()),
-            volltext: "Test Volltext".to_string(),
-            zusammenfassung: None,
-            typ: Doktyp::Entwurf,
-            link: "http://example.com/doc".to_string(),
-            hash: "testhash".to_string(),
-            zp_modifiziert: Utc::now(),
-            drucksnr: None,
-            zp_referenz: Utc::now(),
-            zp_erstellt: Some(Utc::now()),
-            meinung: None,
-            schlagworte: None,
-            autoren: vec![models::Autor {
-                person: Some("Test Person".to_string()),
-                organisation: "Test Organization".to_string(),
-                fachgebiet: Some("Test Fachgebiet".to_string()),
-                lobbyregister: None,
-            }],
-        };
+            x.iter_mut().for_each(|x| {
+                if let models::StationDokumenteInner::Dokument(x) = x {
+                    x.sort_arrays();
+                }
+            });
+        }
+        self.tops.sort_by(|a, b| a.nummer.cmp(&b.nummer));
+    }
+}
+/// Helper Trait that allows me to compare objects (vorgang, dokument, ...)
+/// that are stored and re-fetched with whatever precision where only the
+/// very very margins differ by a few nanosecs.
+/// Using this trait the thing can round its dates to a precision of 1 second
+/// We do not really need more
+pub(crate) trait RoundTimestamp: Clone {
+    fn with_round_timestamps(&self) -> Self;
+}
 
-        // Create a test station
-        let test_station = Station {
-            typ: Stationstyp::ParlInitiativ,
-            dokumente: vec![StationDokumenteInner::Dokument(Box::new(test_doc))],
-            zp_start: Utc::now(),
-            api_id: Some(Uuid::now_v7()),
-            touched_by: None,
-            titel: Some("Test Station".to_string()),
-            gremium_federf: None,
-            link: Some("http://example.com".to_string()),
-            trojanergefahr: None,
-            zp_modifiziert: Some(Utc::now()),
-            gremium: default_gremium(),
-            schlagworte: None,
-            additional_links: None,
-            stellungnahmen: None,
-        };
+impl RoundTimestamp for models::Dokument {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
 
-        // Create a test initiator
-        let test_initiator = Autor {
-            person: Some("Test Person".to_string()),
-            organisation: "Test Organization".to_string(),
-            fachgebiet: Some("Test Fachgebiet".to_string()),
-            lobbyregister: None,
-        };
+        Self {
+            zp_referenz: self.zp_referenz.duration_round(precision).unwrap(),
+            zp_erstellt: self
+                .zp_erstellt
+                .map(|ts| ts.duration_round(precision).unwrap()),
+            zp_modifiziert: self.zp_modifiziert.duration_round(precision).unwrap(),
+            ..self.clone()
+        }
+    }
+}
+impl RoundTimestamp for models::Station {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
+        Self {
+            zp_modifiziert: self
+                .zp_modifiziert
+                .map(|ts| ts.duration_round(precision).unwrap()),
+            zp_start: self.zp_start.duration_round(precision).unwrap(),
+            stellungnahmen: self.stellungnahmen.as_ref().map(|v| {
+                v.iter()
+                    .map(|sn| match sn {
+                        models::StationDokumenteInner::Dokument(d) => {
+                            models::StationDokumenteInner::Dokument(Box::new(
+                                d.with_round_timestamps(),
+                            ))
+                        }
+                        x => x.clone(),
+                    })
+                    .collect()
+            }),
+            dokumente: self
+                .dokumente
+                .iter()
+                .map(|sn| match sn {
+                    models::StationDokumenteInner::Dokument(d) => {
+                        models::StationDokumenteInner::Dokument(Box::new(d.with_round_timestamps()))
+                    }
+                    x => x.clone(),
+                })
+                .collect(),
 
-        // Create a test identifier
-        let test_id = VgIdent {
-            id: "test-id".to_string(),
-            typ: VgIdentTyp::Initdrucks,
-        };
+            ..self.clone()
+        }
+    }
+}
 
-        // Create and return the test Vorgang
-        Vorgang {
-            api_id: Uuid::now_v7(),
-            titel: "Test Vorgang".to_string(),
-            kurztitel: Some("Test".to_string()),
-            lobbyregister: None,
-            touched_by: None,
-            wahlperiode: 20,
-            verfassungsaendernd: false,
-            typ: Vorgangstyp::GgEinspruch,
-            initiatoren: vec![test_initiator],
-            ids: Some(vec![test_id]),
-            links: Some(vec!["http://example.com".to_string()]),
-            stationen: vec![test_station],
+impl RoundTimestamp for models::Vorgang {
+    fn with_round_timestamps(&self) -> Self {
+        Self {
+            stationen: self
+                .stationen
+                .iter()
+                .map(|s| s.with_round_timestamps())
+                .collect(),
+            ..self.clone()
+        }
+    }
+}
+impl RoundTimestamp for models::Sitzung {
+    fn with_round_timestamps(&self) -> Self {
+        let precision = chrono::Duration::seconds(1);
+        Self {
+            dokumente: self.dokumente.as_ref().map(|v| {
+                v.iter()
+                    .map(|sn| match sn {
+                        models::StationDokumenteInner::Dokument(d) => {
+                            models::StationDokumenteInner::Dokument(Box::new(
+                                d.with_round_timestamps(),
+                            ))
+                        }
+                        x => x.clone(),
+                    })
+                    .collect()
+            }),
+            termin: self.termin.duration_round(precision).unwrap(),
+            ..self.clone()
         }
     }
 }

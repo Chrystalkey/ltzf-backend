@@ -8,11 +8,14 @@ use axum_extra::extract::Host;
 use openapi::apis::miscellaneous_unauthorisiert::*;
 use openapi::models;
 use sqlx::Row;
+use tracing::info;
+use tracing::instrument;
 
 use super::PaginationResponsePart;
 
 #[async_trait]
 impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
+    #[instrument(skip_all, fields(query=?query_params))]
     async fn autoren_get(
         &self,
         _method: &Method,
@@ -21,7 +24,6 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::AutorenGetQueryParams,
     ) -> Result<AutorenGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        tracing::info!("Autoren Get with Query Params {:?}", query_params);
         let result = sqlx::query!(
             "SELECT a.id FROM autor a WHERE
             ($1::text IS NULL AND person IS NULL OR person LIKE CONCAT('%',$1,'%')) AND
@@ -57,12 +59,14 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         tx.commit().await?;
 
         if output.is_empty() {
+            info!("No matching Authors found");
             return Ok(AutorenGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
                 x_rate_limit_reset: None,
             });
         }
+        info!("{} Authors found and returned", output.len());
         return Ok(AutorenGetResponse::Status200_Success {
             body: output,
             x_rate_limit_limit: None,
@@ -76,6 +80,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         });
     }
 
+    #[instrument(skip_all, fields(query=?query_params))]
     async fn gremien_get(
         &self,
         _method: &Method,
@@ -84,13 +89,12 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         query_params: &models::GremienGetQueryParams,
     ) -> Result<GremienGetResponse> {
         let mut tx = self.sqlx_db.begin().await?;
-        tracing::info!("Gremien Get with Query Params {:?}", query_params);
         let mut result = sqlx::query!(
             "SELECT g.id FROM gremium g
-        INNER JOIN parlament p ON p.id = g.parl 
-        WHERE p.value = COALESCE($1, p.value) AND
-        g.wp = COALESCE($2, g.wp) AND
-        ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))",
+            INNER JOIN parlament p ON p.id = g.parl 
+            WHERE p.value = COALESCE($1, p.value) AND
+            g.wp = COALESCE($2, g.wp) AND
+            ($3::text IS NULL OR g.name LIKE CONCAT('%',$3,'%'))",
             query_params.p.map(|x| x.to_string()),
             query_params.wp,
             query_params.gr
@@ -99,6 +103,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .fetch_all(&mut *tx)
         .await?;
         if result.is_empty() {
+            info!("No matching Gremium found");
             return Ok(GremienGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -125,6 +130,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         })
         .fetch_all(&mut *tx)
         .await?;
+        info!("{} matching Gremien found and returned", result.len());
         Ok(GremienGetResponse::Status200_Success {
             body: result,
             x_rate_limit_limit: None,
@@ -139,6 +145,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
     }
 
     /// EnumGet - GET /api/v2/enumeration/{name}
+    #[instrument(skip_all, fields(enum=%path_params.name, contains=?query_params.contains, page=?query_params.page, per_page=?query_params.per_page))]
     async fn enum_get(
         &self,
         _method: &Method,
@@ -180,6 +187,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .await?;
 
         if filtered_ids.is_empty() {
+            info!("No matching Enumeration entry found");
             return Ok(EnumGetResponse::Status204_NoContent {
                 x_rate_limit_limit: None,
                 x_rate_limit_remaining: None,
@@ -201,7 +209,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         .map(|r| r.get(0))
         .fetch_all(&mut *tx)
         .await?;
-
+        info!("{} matching entries found", values.len());
         return Ok(EnumGetResponse::Status200_Success {
             body: values,
             x_rate_limit_limit: None,
@@ -218,6 +226,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
     }
 
     /// DokumentGetById - GET /api/v2/dokument/{api_id}
+    #[instrument(skip_all, fields(dok=%path_params.api_id))]
     async fn dokument_get_by_id(
         &self,
         _method: &Method,
@@ -236,6 +245,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
         if let Some(did) = did {
             let dok = crate::db::retrieve::dokument_by_id(did, &mut tx).await?;
             tx.commit().await?;
+            info!("Document found");
             return Ok(DokumentGetByIdResponse::Status200_Success {
                 body: dok,
                 x_rate_limit_limit: None,
@@ -243,6 +253,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
                 x_rate_limit_reset: None,
             });
         }
+        info!("Not Found");
         return Ok(DokumentGetByIdResponse::Status404_NotFound {
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
@@ -265,8 +276,9 @@ mod test_unauthorisiert {
         models,
     };
 
-    use crate::utils::test::TestSetup;
-    use crate::{api::auth::APIScope, utils::test::generate};
+    use crate::api::auth::APIScope;
+    use crate::utils::testing::{TestSetup, generate};
+
     #[tokio::test]
     async fn test_autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;

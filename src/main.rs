@@ -15,10 +15,14 @@ use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use tokio::net::TcpListener;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
 use tower_http::{cors, limit};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 pub use api::{LTZFArc, LTZFServer};
 pub use error::Result;
-use utils::{init_tracing, shutdown_signal};
+use std::process::exit;
+use utils::shutdown_signal;
+use utils::tracing::Logging;
 
 pub type DateTime = chrono::DateTime<chrono::Utc>;
 
@@ -41,10 +45,8 @@ pub struct Configuration {
     pub host: String,
     #[arg(long, env = "LTZF_PORT", default_value = "80")]
     pub port: u16,
-    #[arg(long, short, env = "DATABASE_URL")]
+    #[arg(long, short, env = "DATABASE_URL", help = "URL to the database")]
     pub db_url: String,
-    #[arg(long, short)]
-    pub config: Option<String>,
 
     #[arg(
         long,
@@ -76,6 +78,27 @@ pub struct Configuration {
         default_value = "5"
     )]
     pub per_object_scraper_log_size: u32,
+
+    #[arg(
+        long,
+        env = "LTZF_ERROR_LOG",
+        default_value = "/var/log/ltzf-backend/error.log"
+    )]
+    pub error_log_path: String,
+
+    #[arg(
+        long,
+        env = "LTZF_OBJECT_LOG",
+        help = "If you want to log object lifecycle operations(create/delete/merge/...), enter a path"
+    )]
+    pub object_log_path: Option<String>,
+
+    #[arg(
+        long,
+        help = "If you want to check the config before executing the server, run this and 
+        the server will print it's configuration considering all inputs and then exit."
+    )]
+    pub dump_config: bool,
 }
 
 impl Configuration {
@@ -144,9 +167,26 @@ async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    init_tracing();
 
     let config = Configuration::init();
+    if config.dump_config {
+        println!("{:#?}", config);
+        exit(0);
+    }
+    let logging = Logging::new(
+        config.error_log_path.clone().into(),
+        config.object_log_path.as_ref().map(|x| x.into()),
+    );
+    tracing_subscriber::registry()
+        .with(logging.error_layer())
+        .with(logging.object_log_layer())
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "RUST_LOG=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     tracing::debug!("Configuration: {:?}", &config);
 
     tracing::info!("Starting the Initialisation process");
@@ -174,7 +214,7 @@ async fn main() -> Result<()> {
     tx.commit().await?;
     let mailbundle = crate::utils::notify::MailBundle::new(&config).await?;
 
-    let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle));
+    let state = Arc::new(LTZFServer::new(sqlx_db, config, mailbundle, logging));
     tracing::debug!("Constructed Server State");
 
     // Init Axum router

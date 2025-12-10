@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rel_sitzung_doks(sid, did)\n                SELECT $1, dokid from UNNEST($2::int4[]) as dokid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd4f7de3097beb0c812aa59733b5584a6b3941567347dd0e84a5fad65d8ca692"
+}
