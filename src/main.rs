@@ -14,7 +14,7 @@ use error::LTZFError;
 use lettre::{SmtpTransport, transport::smtp::authentication::Credentials};
 use tokio::net::TcpListener;
 use tower_governor::{governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, *};
-use tower_http::{cors, limit};
+use tower_http::{compression::CompressionLayer, cors, limit};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -248,11 +248,18 @@ async fn main() -> Result<()> {
         .expose_headers(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
 
+    let compression_layer = CompressionLayer::new()
+        .br(true)
+        .deflate(true)
+        .gzip(true)
+        .zstd(true);
+
     let app = openapi::server::new(state.clone())
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
         .layer(rate_limiter)
-        .layer(cors_layer);
+        .layer(cors_layer)
+        .layer(compression_layer);
 
     tracing::debug!("Constructed Router");
     tracing::info!(
