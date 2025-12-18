@@ -285,9 +285,9 @@ mod candid_test {
         let vgs = [
             models::Vorgang {
                 stationen: vec![models::Station {
-                    dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                    dokumente: vec![models::StationDokumenteInner::Dokument(
                         generate::random::dokument(0),
-                    ))],
+                    )],
                     ..generate::random::station(0)
                 }],
                 ..generate::random::vorgang(0)

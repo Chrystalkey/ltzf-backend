@@ -27,9 +27,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
         }
         for d in t.dokumente.as_mut().unwrap() {
             if let models::StationDokumenteInner::Dokument(dok) = d {
-                *d = models::StationDokumenteInner::String(Box::new(
-                    dok.api_id.unwrap().to_string(),
-                ));
+                *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
             }
         }
     }
@@ -38,7 +36,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
     }
     for d in st.dokumente.as_mut().unwrap() {
         if let models::StationDokumenteInner::Dokument(dok) = d {
-            *d = models::StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+            *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
         }
     }
     st

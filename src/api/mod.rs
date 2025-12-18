@@ -750,9 +750,7 @@ impl RoundTimestamp for models::Station {
                 v.iter()
                     .map(|sn| match sn {
                         models::StationDokumenteInner::Dokument(d) => {
-                            models::StationDokumenteInner::Dokument(Box::new(
-                                d.with_round_timestamps(),
-                            ))
+                            models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                         }
                         x => x.clone(),
                     })
@@ -763,7 +761,7 @@ impl RoundTimestamp for models::Station {
                 .iter()
                 .map(|sn| match sn {
                     models::StationDokumenteInner::Dokument(d) => {
-                        models::StationDokumenteInner::Dokument(Box::new(d.with_round_timestamps()))
+                        models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                     }
                     x => x.clone(),
                 })
@@ -794,9 +792,7 @@ impl RoundTimestamp for models::Sitzung {
                 v.iter()
                     .map(|sn| match sn {
                         models::StationDokumenteInner::Dokument(d) => {
-                            models::StationDokumenteInner::Dokument(Box::new(
-                                d.with_round_timestamps(),
-                            ))
+                            models::StationDokumenteInner::Dokument(d.with_round_timestamps())
                         }
                         x => x.clone(),
                     })

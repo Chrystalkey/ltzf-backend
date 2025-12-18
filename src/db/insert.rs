@@ -443,7 +443,7 @@ pub async fn insert_sitzung(
         let mut dok_ids = vec![];
         for d in docs {
             if let models::StationDokumenteInner::Dokument(d) = d {
-                let id = insert_dokument(*d.clone(), scraper_id, collector_key, tx, srv).await?;
+                let id = insert_dokument(d.clone(), scraper_id, collector_key, tx, srv).await?;
                 dok_ids.push(id);
             }
         }
@@ -641,7 +641,7 @@ pub async fn insert_or_retrieve_dok(
 ) -> Result<i32> {
     match dr {
         models::StationDokumenteInner::Dokument(dok) => {
-            Ok(insert_dokument((**dok).clone(), scraper_id, collector_key, tx, srv).await?)
+            Ok(insert_dokument(dok.clone(), scraper_id, collector_key, tx, srv).await?)
         }
         models::StationDokumenteInner::String(dapi_id) => {
             let api_id = uuid::Uuid::from_str(dapi_id.as_str())?;
