@@ -128,7 +128,7 @@ pub async fn insert_or_merge_dok(
             match matches {
                 MatchState::NoMatch => {
                     let did = crate::db::insert::insert_dokument(
-                        (**dok).clone(),
+                        dok.clone(),
                         scraper_id,
                         collector_key,
                         tx,
@@ -154,12 +154,7 @@ pub async fn insert_or_merge_dok(
                     .map(|r| r.api_id)
                     .fetch_all(&mut **tx)
                     .await?;
-                    notify_ambiguous_match(
-                        api_ids,
-                        &**dok,
-                        "execute merge station.dokumente",
-                        srv,
-                    )?;
+                    notify_ambiguous_match(api_ids, &dok, "execute merge station.dokumente", srv)?;
                     Err(DataValidationError::AmbiguousMatch {
                         message: "Ambiguous document match(station), see notification".to_string(),
                     }
@@ -685,7 +680,7 @@ mod scenariotest {
         for s in &mut vg.stationen {
             for d in &mut s.dokumente {
                 if let StationDokumenteInner::Dokument(dok) = d {
-                    *d = StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+                    *d = StationDokumenteInner::String(dok.api_id.unwrap().to_string());
                 }
             }
             if s.stellungnahmen.is_none() {
@@ -693,7 +688,7 @@ mod scenariotest {
             }
             for d in s.stellungnahmen.as_mut().unwrap() {
                 if let StationDokumenteInner::Dokument(dok) = d {
-                    *d = StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+                    *d = StationDokumenteInner::String(dok.api_id.unwrap().to_string());
                 }
             }
         }
@@ -875,30 +870,28 @@ mod scenariotest {
         };
         let modified_docs_vorgang = models::Vorgang {
             stationen: vec![models::Station {
-                dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
+                dokumente: vec![models::StationDokumenteInner::Dokument(
                     modified_dokument.clone(),
-                ))],
-                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                )],
+                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
                     modified_stellungnahme.clone(),
-                ))]),
+                )]),
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()
         };
         let expected_vorgang = models::Vorgang {
             stationen: vec![models::Station {
-                dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
-                    models::Dokument {
-                        api_id: generate::default_dokument().api_id,
-                        ..modified_dokument.clone()
-                    },
-                ))],
-                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                dokumente: vec![models::StationDokumenteInner::Dokument(models::Dokument {
+                    api_id: generate::default_dokument().api_id,
+                    ..modified_dokument.clone()
+                })],
+                stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
                     models::Dokument {
                         api_id: generate::default_stellungnahme().api_id,
                         ..modified_stellungnahme.clone()
                     },
-                ))]),
+                )]),
                 ..generate::default_station()
             }],
             ..generate::default_vorgang()

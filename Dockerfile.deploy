@@ -1,6 +1,6 @@
-FROM rust:1.90-slim-bookworm AS builder
+FROM rust:1.92-slim-bookworm AS builder
 
-ENV OPENAPI_GENERATOR_VERSION="7.15.0"
+ENV OPENAPI_GENERATOR_VERSION="7.17.0"
 ENV SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
 
 WORKDIR /app
@@ -47,7 +47,7 @@ FROM busybox:latest AS runner
 
 LABEL maintainer="Benedikt Schäfer"
 LABEL description="Backend for the LTZF"
-LABEL version="0.2.5"
+LABEL version="0.2.6"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
             CMD curl -f "http://localhost:80" || exit 1

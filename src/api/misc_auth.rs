@@ -1695,7 +1695,7 @@ mod test_authorisiert {
         modified_default.stationen[0]
             .stellungnahmen
             .as_mut()
-            .unwrap()[0] = StationDokumenteInner::Dokument(Box::new(mod_stln));
+            .unwrap()[0] = StationDokumenteInner::Dokument(mod_stln);
 
         run_integration(&modified_default, uuid::Uuid::nil(), 1, &scenario.server)
             .await
