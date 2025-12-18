@@ -166,7 +166,6 @@ impl CollectorSchnittstellenVorgang<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     #[doc = "VorgangGetById - GET /api/v2/vorgang/{vorgang_id}"]
     #[instrument(skip_all, fields(vg=%path_params.vorgang_id))]
     async fn vorgang_get_by_id(
@@ -174,10 +173,15 @@ impl UnauthorisiertVorgang<LTZFError> for LTZFServer {
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
-        claims: &Self::Claims,
         header_params: &models::VorgangGetByIdHeaderParams,
         path_params: &models::VorgangGetByIdPathParams,
     ) -> Result<VorgangGetByIdResponse> {
+        // TODO: find a better way to handle admin-only info for every object
+        // in the past this was done by optional authentication, but that
+        // turned out not to neatly fit into the oapi spec.
+        // for now this is just a disabled feature
+        let claims = (APIScope::Collector, 0);
+
         let mut tx = self.sqlx_db.begin().await?;
         let exists = sqlx::query!(
             "SELECT 1 as out FROM vorgang WHERE api_id = $1",
@@ -389,7 +393,6 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -416,7 +419,6 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -444,7 +446,6 @@ mod test_endpoints {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::VorgangGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -468,7 +469,6 @@ mod test_endpoints {
                 &Method::GET,
                 &Host("localhost".to_string()),
                 &CookieJar::new(),
-                &(APIScope::Collector, 1),
                 &models::VorgangGetByIdHeaderParams {
                     if_modified_since: Some(chrono::Utc::now()),
                 },
