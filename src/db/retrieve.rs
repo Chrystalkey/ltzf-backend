@@ -149,7 +149,7 @@ pub async fn station_by_id(
         ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
     .fetch_all(&mut **executor)
     .await?;
     let stellungnahmen = sqlx::query!(
@@ -159,7 +159,7 @@ pub async fn station_by_id(
         ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
     .fetch_all(&mut **executor)
     .await?;
     let sw = sqlx::query!(
@@ -304,7 +304,7 @@ pub async fn top_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<mode
     ORDER BY d.link ASC",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
     .fetch_all(&mut **tx)
     .await?;
     // vgs
@@ -382,7 +382,7 @@ pub async fn sitzung_by_id(id: i32, tx: &mut sqlx::PgTransaction<'_>) -> Result<
         INNER JOIN dokument d ON d.id = rsd.did WHERE rsd.sid = $1",
         id
     )
-    .map(|r| models::StationDokumenteInner::String(Box::new(r.api_id.to_string())))
+    .map(|r| models::StationDokumenteInner::String(r.api_id.to_string()))
     .fetch_all(&mut **tx)
     .await?;
     Ok(models::Sitzung {

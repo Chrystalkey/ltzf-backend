@@ -27,9 +27,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
         }
         for d in t.dokumente.as_mut().unwrap() {
             if let models::StationDokumenteInner::Dokument(dok) = d {
-                *d = models::StationDokumenteInner::String(Box::new(
-                    dok.api_id.unwrap().to_string(),
-                ));
+                *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
             }
         }
     }
@@ -38,7 +36,7 @@ fn st_to_uuiddoks(st: &models::Sitzung) -> models::Sitzung {
     }
     for d in st.dokumente.as_mut().unwrap() {
         if let models::StationDokumenteInner::Dokument(dok) = d {
-            *d = models::StationDokumenteInner::String(Box::new(dok.api_id.unwrap().to_string()));
+            *d = models::StationDokumenteInner::String(dok.api_id.unwrap().to_string());
         }
     }
     st
@@ -241,7 +239,6 @@ impl CollectorSchnittstellenSitzung<LTZFError> for LTZFServer {
 
 #[async_trait]
 impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
-    type Claims = crate::api::Claims;
     #[doc = "KalDateGet - GET /api/v2/kalender/{parlament}/{datum}"]
     #[instrument(skip_all, fields(date=%path_params.datum))]
     async fn kal_date_get(
@@ -405,10 +402,14 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
         _method: &Method,
         _host: &Host,
         _cookies: &CookieJar,
-        claims: &Self::Claims,
         header_params: &models::SGetByIdHeaderParams,
         path_params: &models::SGetByIdPathParams,
     ) -> Result<SGetByIdResponse> {
+        // TODO: find a better way to handle admin-only info for every object
+        // in the past this was done by optional authentication, but that
+        // turned out not to neatly fit into the oapi spec.
+        // for now this is just a disabled feature
+        let claims = (APIScope::Collector, 0);
         let mut tx = self.sqlx_db.begin().await?;
         let api_id = path_params.sid;
         let id_exists = sqlx::query!("SELECT 1 as x FROM sitzung WHERE api_id = $1", api_id)
@@ -569,7 +570,7 @@ mod sitzung_test {
     use uuid::Uuid;
 
     use crate::api::RoundTimestamp;
-    use crate::api::auth::APIScope;
+
     use crate::utils::testing::{TestSetup, generate};
 
     use super::super::auth;
@@ -1108,7 +1109,6 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -1135,7 +1135,6 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -1163,7 +1162,6 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
                     },
@@ -1186,7 +1184,6 @@ mod sitzung_test {
                     &Method::GET,
                     &Host("localhost".to_string()),
                     &CookieJar::new(),
-                    &(APIScope::Collector, 1),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: Some(chrono::Utc::now()),
                     },

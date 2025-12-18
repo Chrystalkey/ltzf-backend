@@ -1,8 +1,8 @@
 // TODO:
-// 1. console logging according to RUST_LOG (already exists)
-// 2. error logging for everything {warn, error}
+// 1. DONE console logging according to RUST_LOG (already exists)
+// 2. DONE error logging for everything {warn, error}
 // 3. a subscriber that catches the (for now) email warnings (`Actionable`)
-// 4. a subscriber that logs object creations, deletions and merges
+// 4. DONE a subscriber that logs object creations, deletions and merges
 
 use std::path::PathBuf;
 use tracing::info;

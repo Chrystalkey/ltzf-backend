@@ -289,8 +289,8 @@ pub(crate) mod generate {
             let num_dokumente = rng.random_range(1..=4);
             let mut dokumente = Vec::new();
             for _ in 0..num_dokumente {
-                dokumente.push(models::StationDokumenteInner::Dokument(Box::new(
-                    random_dokument(rng),
+                dokumente.push(models::StationDokumenteInner::Dokument(random_dokument(
+                    rng,
                 )));
             }
 
@@ -336,9 +336,9 @@ pub(crate) mod generate {
             let stellungnahmen = if has_stellungnahmen {
                 let mut stn = Vec::new();
                 for _ in 0..stellungnahmen_count {
-                    stn.push(models::StationDokumenteInner::Dokument(Box::new(
+                    stn.push(models::StationDokumenteInner::Dokument(
                         random_stellungnahme(rng),
-                    )));
+                    ));
                 }
                 Some(stn)
             } else {
@@ -567,17 +567,17 @@ pub(crate) mod generate {
                 public: rng.random_bool(0.5),
                 link: Some(random_string(rng, "https://", 4, 20)),
                 tops: vec![random_top(rng)],
-                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(
                     random_dokument(rng),
-                ))]),
+                )]),
                 experten: Some(vec![random_autor(rng)]),
             }
         }
         fn random_top(rng: &mut StdRng) -> models::Top {
             models::Top {
-                dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+                dokumente: Some(vec![models::StationDokumenteInner::Dokument(
                     random_dokument(rng),
-                ))]),
+                )]),
                 nummer: rng.random_range(1..=125),
                 titel: random_string(rng, "", 10, 25),
                 vorgang_id: None,
@@ -652,15 +652,13 @@ pub(crate) mod generate {
             trojanergefahr: Some(2u8),
             schlagworte: Some(vec!["stationär".to_string()]),
             touched_by: None,
-            stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+            stellungnahmen: Some(vec![models::StationDokumenteInner::Dokument(
                 default_stellungnahme(),
-            ))]),
+            )]),
             additional_links: Some(vec![
                 "https://example.com/videos/aus/der/hoelle".to_string(),
             ]),
-            dokumente: vec![models::StationDokumenteInner::Dokument(Box::new(
-                default_dokument(),
-            ))],
+            dokumente: vec![models::StationDokumenteInner::Dokument(default_dokument())],
             gremium: default_gremium(),
         }
     }
@@ -765,17 +763,17 @@ pub(crate) mod generate {
             public: true,
             link: Some("https://klogefueh.le".to_string()),
             tops: vec![default_top()],
-            dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+            dokumente: Some(vec![models::StationDokumenteInner::Dokument(
                 default_dokument(),
-            ))]),
+            )]),
             experten: Some(vec![default_autor_experte()]),
         }
     }
     pub(crate) fn default_top() -> models::Top {
         models::Top {
-            dokumente: Some(vec![models::StationDokumenteInner::Dokument(Box::new(
+            dokumente: Some(vec![models::StationDokumenteInner::Dokument(
                 default_dokument(),
-            ))]),
+            )]),
             nummer: 1,
             titel: "Lektüre und Haptik".to_string(),
             vorgang_id: None,
