@@ -60,13 +60,15 @@ COPY --from=builder /usr/lib/x86_64-linux-gnu/libcrypto.so.* /usr/lib/
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libpq.so.* /usr/lib/
 COPY --from=builder /usr/lib/x86_64-linux-gnu/libgcc_s.so.* /usr/lib
 
-RUN mkdir /app && chmod 0700 /app
+RUN mkdir -p /var/log/ltzf-backend && chmod 0766 /var/log/ltzf-backend && chown ltzf-backend /var/log/ltzf-backend
+
+RUN mkdir /app && chmod 0766 /app && chown ltzf-backend /app
+
 
 COPY --from=builder --chmod=0100 --chown=ltzf-backend:ltzf-backend /app/target/release/ltzf-backend /app/ltzf-backend
 
 WORKDIR /app
 
 USER ltzf-backend
-RUN chown ltzf-backend /app
-
+ 
 ENTRYPOINT ["./ltzf-backend"]
