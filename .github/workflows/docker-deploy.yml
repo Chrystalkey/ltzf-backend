@@ -1,4 +1,4 @@
-name: Testing the LTZF Backend
+name: Deploying Image to Docker hub
 
 on:
   pull_request:

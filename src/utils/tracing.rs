@@ -29,6 +29,7 @@ impl Logging {
     {
         use std::fs;
         let fmt = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
             .with_level(true)
             .with_file(true)
             .with_line_number(true);
@@ -65,6 +66,7 @@ impl Logging {
         use std::fs;
         if let Some(object_log) = &self.object_log {
             let fmt = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
                 .with_level(true)
                 .with_file(true)
                 .with_line_number(true);

@@ -570,6 +570,7 @@ mod sitzung_test {
     use uuid::Uuid;
 
     use crate::api::RoundTimestamp;
+
     use crate::utils::testing::{TestSetup, generate};
 
     use super::super::auth;
