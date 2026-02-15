@@ -6,8 +6,9 @@ use crate::utils::as_option;
 use crate::{LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
-use axum_extra::extract::{CookieJar, Host};
+use axum_extra::extract::CookieJar;
 use chrono::Datelike;
+use headers::Host;
 use openapi::apis::collector_schnittstellen_sitzung::*;
 use openapi::apis::data_administration_sitzung::*;
 use openapi::apis::sitzung_unauthorisiert::*;
@@ -553,7 +554,7 @@ impl SitzungUnauthorisiert<LTZFError> for LTZFServer {
 #[cfg(test)]
 mod sitzung_test {
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use chrono::Utc;
     use openapi::apis::collector_schnittstellen_sitzung::*;
     use openapi::apis::data_administration_sitzung::*;
@@ -575,12 +576,17 @@ mod sitzung_test {
 
     use super::super::auth;
 
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
+
     // Calendar tests
     #[tokio::test]
     async fn test_calendar_auth() {
         let scenario = TestSetup::new("test_calendar_auth").await;
         let server = &scenario.server;
-        let host = Host("localhost".to_string());
+        let host = localhost();
         let cookies = CookieJar::new();
         let test_date = chrono::Utc::now().date_naive();
         let test_session = generate::default_sitzung();
@@ -618,7 +624,7 @@ mod sitzung_test {
         // Setup test server and database
         let scenario = TestSetup::new("test_cal_date_put").await;
         let server = &scenario.server;
-        let host = Host("localhost".to_string());
+        let host = localhost();
         let cookies = CookieJar::new();
 
         // Create test calendar entry
@@ -745,7 +751,7 @@ mod sitzung_test {
     async fn test_kal_date_get() {
         let setup = TestSetup::new("kal_date_get").await;
         let server = &setup.server;
-        let host = Host("localhost".to_string());
+        let host = localhost();
         let cookies = CookieJar::new();
         let old_session = generate::default_sitzung();
         let session = models::Sitzung {
@@ -864,7 +870,7 @@ mod sitzung_test {
     async fn test_kal_get() {
         let setup = TestSetup::new("kal_get").await;
         let server = &setup.server;
-        let host = Host("localhost".to_string());
+        let host = localhost();
         let cookies = CookieJar::new();
         let session = generate::default_sitzung();
         let parlament = session.gremium.parlament;
@@ -1082,7 +1088,7 @@ mod sitzung_test {
         let create_response = server
             .sid_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
@@ -1107,7 +1113,7 @@ mod sitzung_test {
             let response = server
                 .s_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
@@ -1133,7 +1139,7 @@ mod sitzung_test {
             let response = server
                 .s_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
@@ -1160,7 +1166,7 @@ mod sitzung_test {
             let response = server
                 .s_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: None,
@@ -1182,7 +1188,7 @@ mod sitzung_test {
             let response = server
                 .s_get_by_id(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetByIdHeaderParams {
                         if_modified_since: Some(chrono::Utc::now()),
@@ -1209,7 +1215,7 @@ mod sitzung_test {
             let response = server
                 .s_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetHeaderParams {
                         if_modified_since: None,
@@ -1241,7 +1247,7 @@ mod sitzung_test {
             let response = server
                 .s_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetHeaderParams {
                         if_modified_since: None,
@@ -1275,7 +1281,7 @@ mod sitzung_test {
             let response = server
                 .s_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetHeaderParams {
                         if_modified_since: None,
@@ -1305,7 +1311,7 @@ mod sitzung_test {
             let response = server
                 .s_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetHeaderParams {
                         if_modified_since: Some(chrono::Utc::now()),
@@ -1337,7 +1343,7 @@ mod sitzung_test {
             let response = server
                 .s_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::SGetHeaderParams {
                         if_modified_since: None,
@@ -1380,7 +1386,7 @@ mod sitzung_test {
             let response = server
                 .sid_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Admin, 1),
                     &models::SidPutPathParams {
@@ -1404,7 +1410,7 @@ mod sitzung_test {
         let response = server
             .sid_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
@@ -1429,7 +1435,7 @@ mod sitzung_test {
         let response = server
             .sid_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::SidPutPathParams {
@@ -1453,7 +1459,7 @@ mod sitzung_test {
         let response = server
             .sid_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Collector, 1),
                 &models::SidPutPathParams {
@@ -1478,7 +1484,7 @@ mod sitzung_test {
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::KeyAdder, 1),
                     &models::SitzungDeletePathParams {
@@ -1500,7 +1506,7 @@ mod sitzung_test {
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::KeyAdder, 1),
                     &models::SitzungDeletePathParams {
@@ -1522,7 +1528,7 @@ mod sitzung_test {
             let response = server
                 .sitzung_delete(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Collector, 1),
                     &models::SitzungDeletePathParams {

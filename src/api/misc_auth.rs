@@ -7,7 +7,7 @@ use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::Host;
+use headers::Host;
 use openapi::apis::data_administration_miscellaneous::*;
 use openapi::models;
 use sqlx::Row;
@@ -995,7 +995,7 @@ mod test_authorisiert {
     use crate::api::auth::APIScope;
     use crate::db::merge::execute::run_integration;
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use openapi::apis::data_administration_miscellaneous::{
         AutorenDeleteByParamResponse, AutorenPutResponse, DataAdministrationMiscellaneous,
         EnumDeleteResponse, EnumPutResponse, GremienDeleteByParamResponse, GremienPutResponse,
@@ -1008,13 +1008,16 @@ mod test_authorisiert {
 
     use crate::LTZFServer;
     use crate::utils::testing::{TestSetup, generate};
-
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     async fn insert_default_vorgang(server: &LTZFServer) {
         let vorgang = generate::default_vorgang();
         let rsp = server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -1030,7 +1033,7 @@ mod test_authorisiert {
         let autoren = server
             .autoren_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
                     page: None,
@@ -1051,7 +1054,7 @@ mod test_authorisiert {
         let autoren = server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     page: None,
@@ -1072,7 +1075,7 @@ mod test_authorisiert {
         let entries = server
             .enum_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::EnumGetPathParams { name },
                 &models::EnumGetQueryParams {
@@ -1098,7 +1101,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1123,7 +1126,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1152,7 +1155,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1181,7 +1184,7 @@ mod test_authorisiert {
             .server
             .autoren_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::AutorenDeleteByParamQueryParams {
@@ -1213,7 +1216,7 @@ mod test_authorisiert {
         server
             .enum_delete(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 pp,
@@ -1227,7 +1230,7 @@ mod test_authorisiert {
             .server
             .enum_delete(
                 &Method::DELETE,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::EnumDeletePathParams {
@@ -1268,7 +1271,7 @@ mod test_authorisiert {
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1311,7 +1314,7 @@ mod test_authorisiert {
             .server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -1331,7 +1334,7 @@ mod test_authorisiert {
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1354,7 +1357,7 @@ mod test_authorisiert {
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1377,7 +1380,7 @@ mod test_authorisiert {
             .server
             .gremien_delete_by_param(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::GremienDeleteByParamQueryParams {
@@ -1404,7 +1407,7 @@ mod test_authorisiert {
         server
             .gremien_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 gpr,
@@ -1421,7 +1424,7 @@ mod test_authorisiert {
             .server
             .gremien_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::GremienPutRequest {
@@ -1541,7 +1544,7 @@ mod test_authorisiert {
         server
             .autoren_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 apr,
@@ -1558,7 +1561,7 @@ mod test_authorisiert {
             .server
             .autoren_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::AutorenPutRequest {
@@ -1733,7 +1736,7 @@ mod test_authorisiert {
         server
             .enum_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::EnumPutPathParams { name: tp },
@@ -1752,7 +1755,7 @@ mod test_authorisiert {
             .server
             .enum_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::Collector, 1),
                 &models::EnumPutPathParams {

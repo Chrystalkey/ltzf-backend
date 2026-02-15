@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OPENAPI_GENERATOR_VERSION="7.17.0"
+OPENAPI_GENERATOR_VERSION="7.19.0"
 DIRECTORY="oapi-generator"
 SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
 

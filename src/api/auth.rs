@@ -6,7 +6,7 @@ use crate::{LTZFServer, Result, error::LTZFError};
 use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::Host;
+use headers::Host;
 use openapi::apis::ApiKeyAuthHeader;
 use openapi::apis::authentifizierung::*;
 use openapi::apis::authentifizierung_keyadder_schnittstellen::AuthentifizierungKeyadderSchnittstellen;
@@ -431,8 +431,8 @@ impl Authentifizierung<LTZFError> for LTZFServer {
     async fn auth_rotate(
         &self,
         _method: &axum::http::Method,
-        _host: &axum_extra::extract::Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _host: &Host,
+        _cookies: &CookieJar,
         claims: &Self::Claims,
     ) -> Result<AuthRotateResponse> {
         let mut tx = self.sqlx_db.begin().await?;
@@ -546,7 +546,7 @@ impl Authentifizierung<LTZFError> for LTZFServer {
 #[cfg(test)]
 mod auth_test {
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use openapi::apis::authentifizierung::{
         AuthRotateResponse, AuthStatusResponse, Authentifizierung,
     };
@@ -561,7 +561,10 @@ mod auth_test {
     async fn fetch_key_index(server: &LTZFServer, keytag: String) -> i32 {
         fetch_key_row(server, keytag).await.id
     }
-
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     #[allow(unused)]
     struct KeyRow {
         id: i32,
@@ -608,7 +611,7 @@ mod auth_test {
         let key = server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1), // one is the default keyadder key
                 &models::CreateApiKey {
@@ -628,7 +631,7 @@ mod auth_test {
         let resp = server
             .auth_status(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, original_key_idx),
             )
@@ -643,7 +646,7 @@ mod auth_test {
         let rotstruct = server
             .auth_rotate(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, original_key_idx),
             )
@@ -660,7 +663,7 @@ mod auth_test {
         let key_status_rot = server
             .auth_status(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, original_key_idx),
             )
@@ -680,7 +683,7 @@ mod auth_test {
         match server
             .auth_status(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, index),
             )
@@ -701,7 +704,7 @@ mod auth_test {
             let resp = server
                 .auth_post(
                     &Method::POST,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(super::APIScope::Collector, 1),
                     &models::CreateApiKey {
@@ -723,7 +726,7 @@ mod auth_test {
             let resp = server
                 .auth_post(
                     &Method::POST,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(super::APIScope::Admin, 1),
                     &models::CreateApiKey {
@@ -747,7 +750,7 @@ mod auth_test {
         let resp = server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -780,7 +783,7 @@ mod auth_test {
         match server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -796,7 +799,7 @@ mod auth_test {
         match server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -812,7 +815,7 @@ mod auth_test {
         match server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -828,7 +831,7 @@ mod auth_test {
         match server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -845,7 +848,7 @@ mod auth_test {
         let response = server
             .auth_listing(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &AuthListingQueryParams {
@@ -883,7 +886,7 @@ mod auth_test {
         let response = server
             .auth_listing(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::Admin, 1),
                 &AuthListingQueryParams {
@@ -901,7 +904,7 @@ mod auth_test {
         let response = server
             .auth_listing(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::Collector, 1),
                 &AuthListingQueryParams {
@@ -928,7 +931,7 @@ mod auth_test {
         let rsp = server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -946,7 +949,7 @@ mod auth_test {
         let _ = server
             .vorgang_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, key_idx),
                 &models::VorgangPutHeaderParams {
@@ -960,7 +963,7 @@ mod auth_test {
         let rsp = server
             .auth_listing_keytag(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::AuthListingKeytagPathParams {
@@ -989,7 +992,7 @@ mod auth_test {
         let rsp = server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -1015,7 +1018,7 @@ mod auth_test {
         let rsp = server
             .auth_delete(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::AuthDeleteHeaderParams {
@@ -1039,7 +1042,7 @@ mod auth_test {
         let rsp = server
             .auth_delete(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::AuthDeleteHeaderParams {
@@ -1063,7 +1066,7 @@ mod auth_test {
         let rsp = server
             .auth_delete(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::Admin, 1),
                 &models::AuthDeleteHeaderParams {
@@ -1092,7 +1095,7 @@ mod auth_test {
         let resp = server
             .auth_post(
                 &Method::POST,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(super::APIScope::KeyAdder, 1),
                 &models::CreateApiKey {
@@ -1116,7 +1119,7 @@ mod auth_test {
             let rrsp = server
                 .auth_rotate(
                     &Method::POST,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(super::APIScope::KeyAdder, 2),
                 )
@@ -1165,7 +1168,7 @@ mod auth_test {
             let rrsp = server
                 .auth_rotate(
                     &Method::POST,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(super::APIScope::KeyAdder, 3),
                 )
@@ -1200,7 +1203,7 @@ mod auth_test {
             let rrsp = server
                 .auth_rotate(
                     &Method::POST,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(super::APIScope::KeyAdder, 3),
                 )

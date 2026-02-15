@@ -195,13 +195,17 @@ mod candid_test {
     use crate::db::merge::MatchState;
     use crate::utils::testing::{TestSetup, generate};
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use chrono::DateTime;
     use openapi::apis::data_administration_vorgang::{
         DataAdministrationVorgang, VorgangIdPutResponse,
     };
     use openapi::models;
 
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     #[tokio::test]
     async fn vorgang_test() {
         let setup = TestSetup::new("test_vorgang_candidates").await;
@@ -213,7 +217,7 @@ mod candid_test {
             let r = srv
                 .vorgang_id_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Admin, 1),
                     &models::VorgangIdPutPathParams {
@@ -252,7 +256,7 @@ mod candid_test {
         let ins = srv
             .vorgang_id_put(
                 &Method::PUT,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(auth::APIScope::Admin, 1),
                 &models::VorgangIdPutPathParams {
@@ -304,7 +308,7 @@ mod candid_test {
             let r = srv
                 .vorgang_id_put(
                     &Method::PUT,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &(auth::APIScope::Admin, 1),
                     &models::VorgangIdPutPathParams {

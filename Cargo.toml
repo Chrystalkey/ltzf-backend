@@ -9,7 +9,7 @@ authors = ["Benedikt Schäfer"]
 [dependencies]
 
 axum = "0.8"
-axum-extra = {version = "0.10", features= ["cookie"]}
+axum-extra = {version = "0.12", features= ["cookie"]}
 axum-macros = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
@@ -33,7 +33,9 @@ tower-http = { version = "0.6", features = ["limit", "cors", "compression-br", "
 tower_governor = { version = "0.7" }
 async-trait = "0.1"
 split-iter = "0.1.0"
+headers = "0.4.1"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
 similar = "2.7"
+http = "1"

@@ -5,7 +5,8 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum_extra::extract::Host;
+use axum_extra::extract::CookieJar;
+use headers::Host;
 use openapi::models;
 use tracing::debug;
 use tracing::instrument;
@@ -56,7 +57,7 @@ impl openapi::apis::ErrorHandler<LTZFError> for LTZFServer {
         &self,
         method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
         error: LTZFError,
     ) -> std::result::Result<axum::response::Response, axum::http::StatusCode> {
         tracing::error!("An error occurred during {method} that was not expected: {error}\n");
@@ -71,7 +72,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         &self,
         _method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
         query_params: &models::PingQueryParams,
     ) -> Result<PingResponse> {
         if let Some(t) = query_params.t {
@@ -89,7 +90,7 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
         &self,
         _method: &axum::http::Method,
         _host: &Host,
-        _cookies: &axum_extra::extract::CookieJar,
+        _cookies: &CookieJar,
     ) -> Result<StatusResponse> {
         debug!("Status Requested");
         // TODO: implement "API is not running for some reason" markers

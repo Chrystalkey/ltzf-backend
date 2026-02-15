@@ -4,7 +4,7 @@ use crate::{LTZFError, LTZFServer, Result};
 use async_trait::async_trait;
 use axum::http::Method;
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::Host;
+use headers::Host;
 use openapi::apis::miscellaneous_unauthorisiert::*;
 use openapi::models;
 use sqlx::Row;
@@ -264,7 +264,7 @@ impl MiscellaneousUnauthorisiert<LTZFError> for LTZFServer {
 #[cfg(test)]
 mod test_unauthorisiert {
     use axum::http::Method;
-    use axum_extra::extract::{CookieJar, Host};
+    use axum_extra::extract::CookieJar;
     use openapi::{
         apis::{
             data_administration_vorgang::DataAdministrationVorgang,
@@ -279,6 +279,10 @@ mod test_unauthorisiert {
     use crate::api::auth::APIScope;
     use crate::utils::testing::{TestSetup, generate};
 
+    fn localhost() -> headers::Host {
+        use http::uri::Authority;
+        Authority::from_static("localhost").into()
+    }
     #[tokio::test]
     async fn test_autor_get_nocontent() {
         let scenario = TestSetup::new("autor_get_nocontent").await;
@@ -286,7 +290,7 @@ mod test_unauthorisiert {
             .server
             .autoren_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
                     fach: None,
@@ -311,7 +315,7 @@ mod test_unauthorisiert {
             .server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -327,7 +331,7 @@ mod test_unauthorisiert {
             .server
             .autoren_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::AutorenGetQueryParams {
                     fach: None,
@@ -359,7 +363,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: None,
@@ -385,7 +389,7 @@ mod test_unauthorisiert {
             .server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -401,7 +405,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: None,
@@ -422,7 +426,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: Some("Inneres".to_string()),
@@ -442,7 +446,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: None,
@@ -462,7 +466,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: None,
@@ -482,7 +486,7 @@ mod test_unauthorisiert {
             .server
             .gremien_get(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &models::GremienGetQueryParams {
                     gr: None,
@@ -515,7 +519,7 @@ mod test_unauthorisiert {
                 .server
                 .enum_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::EnumGetPathParams { name: tp },
                     &models::EnumGetQueryParams {
@@ -549,7 +553,7 @@ mod test_unauthorisiert {
             .server
             .vorgang_id_put(
                 &Method::GET,
-                &Host("localhost".to_string()),
+                &localhost(),
                 &CookieJar::new(),
                 &(APIScope::KeyAdder, 1),
                 &models::VorgangIdPutPathParams {
@@ -566,7 +570,7 @@ mod test_unauthorisiert {
                 .server
                 .enum_get(
                     &Method::GET,
-                    &Host("localhost".to_string()),
+                    &localhost(),
                     &CookieJar::new(),
                     &models::EnumGetPathParams { name },
                     &models::EnumGetQueryParams {
