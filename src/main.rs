@@ -7,7 +7,7 @@ pub(crate) mod utils;
 
 use std::sync::Arc;
 
-use axum::{extract::DefaultBodyLimit, http::Method};
+use axum::{extract::DefaultBodyLimit, http::Method, routing::get};
 use clap::Parser;
 
 use error::LTZFError;
@@ -127,6 +127,10 @@ impl Configuration {
     pub fn init() -> Self {
         Configuration::parse()
     }
+}
+async fn handle_root() -> impl axum::response::IntoResponse {
+    let s = include_str!("index.html");
+    (axum::http::StatusCode::OK, s)
 }
 async fn init_db_conn(db_url: &str) -> Result<sqlx::PgPool> {
     let sqlx_db = sqlx::postgres::PgPoolOptions::new()
@@ -255,6 +259,7 @@ async fn main() -> Result<()> {
         .zstd(true);
 
     let app = openapi::server::new(state.clone())
+        .route("/", get(handle_root))
         .layer(DefaultBodyLimit::max(body_size_limit))
         .layer(request_size_limit)
         .layer(rate_limiter)
