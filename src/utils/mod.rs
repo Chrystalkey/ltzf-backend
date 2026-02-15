@@ -2,6 +2,7 @@ use tokio::signal;
 
 pub(crate) mod auth;
 pub mod notify;
+pub mod status;
 #[cfg(test)]
 pub mod testing;
 pub mod tracing;

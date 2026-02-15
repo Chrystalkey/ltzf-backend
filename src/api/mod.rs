@@ -15,6 +15,7 @@ use crate::Configuration;
 use crate::Result;
 use crate::error::LTZFError;
 use crate::utils::notify;
+use crate::utils::status::Statistics;
 use crate::utils::tracing::Logging;
 use openapi::apis::unauthorisiert::*;
 
@@ -32,6 +33,7 @@ pub struct LTZFServer {
     pub mailbundle: Option<Arc<notify::MailBundle>>,
     pub config: Configuration,
     pub logging: Logging,
+    pub statistics: Arc<Statistics>,
 }
 pub type LTZFArc = std::sync::Arc<LTZFServer>;
 impl LTZFServer {
@@ -46,6 +48,7 @@ impl LTZFServer {
             sqlx_db,
             mailbundle: mailbundle.map(Arc::new),
             logging,
+            statistics: Arc::new(Statistics::new()),
         }
     }
 }
