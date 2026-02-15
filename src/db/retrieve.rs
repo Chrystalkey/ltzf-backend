@@ -52,12 +52,7 @@ pub async fn vorgang_by_id(
         id
     )
     .map(|row| models::VgIdent {
-        typ: models::VgIdentTyp::from_str(row.typ.as_str()).unwrap_or_else(|_| {
-            panic!(
-                "Could not convert database value `{}`into VgIdentTyp Variant",
-                row.typ
-            )
-        }),
+        typ: row.typ,
         id: row.ident,
     })
     .fetch_all(&mut **executor)

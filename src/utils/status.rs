@@ -1,6 +1,6 @@
+use chrono::DateTime;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use tokio::time::Instant;
 use tracing::{instrument, warn};
 
 // the maxmium number of user agents / pathcount entries.
@@ -11,7 +11,7 @@ const MAX_COUNT: usize = 1024;
 pub struct Statistics {
     pub pathcounts: RwLock<HashMap<String, u32>>,
     pub useragents: RwLock<HashMap<String, u32>>,
-    pub up_since: Instant,
+    pub up_since: DateTime<chrono::Utc>,
     pub objects_created: RwLock<u32>,
     pub put_with_no_change: RwLock<u32>,
 }
@@ -21,7 +21,7 @@ impl Statistics {
         Self {
             pathcounts: HashMap::new().into(),
             useragents: HashMap::new().into(),
-            up_since: tokio::time::Instant::now(),
+            up_since: chrono::Utc::now(),
             objects_created: 0.into(),
             put_with_no_change: 0.into(),
         }
@@ -52,5 +52,20 @@ impl Statistics {
         let mut r = self.pathcounts.write().await;
         let cnt: u32 = *r.get(path).unwrap_or(&0);
         r.insert(path.to_owned(), cnt + 1);
+    }
+    pub async fn output(&self) -> String {
+        format!(
+            r#"{{"unique_uas":{}, "objects-created":{}, "up-since":{}, "most-common-ua": "{}"}}"#,
+            self.useragents.read().await.len(),
+            *self.objects_created.read().await,
+            self.up_since.to_rfc3339(),
+            self.useragents
+                .read()
+                .await
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1))
+                .unwrap_or((&"None recorded".to_owned(), &0))
+                .0
+        )
     }
 }

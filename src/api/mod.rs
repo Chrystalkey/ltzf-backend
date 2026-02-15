@@ -97,7 +97,9 @@ impl Unauthorisiert<LTZFError> for LTZFServer {
     ) -> Result<StatusResponse> {
         debug!("Status Requested");
         // TODO: implement "API is not running for some reason" markers
+        let body = self.statistics.output().await;
         Ok(StatusResponse::Status200_APIIsRunning {
+            body,
             x_rate_limit_limit: None,
             x_rate_limit_remaining: None,
             x_rate_limit_reset: None,
@@ -668,7 +670,7 @@ impl SortArrays for models::Vorgang {
         self.initiatoren
             .sort_by(|a, b| a.organisation.cmp(&b.organisation));
         if let Some(x) = self.ids.as_mut() {
-            x.sort_by(|a, b| (a.typ, &a.id).cmp(&(b.typ, &b.id)));
+            x.sort_by(|a, b| (&a.typ, &a.id).cmp(&(&b.typ, &b.id)));
         }
         if let Some(x) = self.links.as_mut() {
             x.sort();

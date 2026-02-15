@@ -25,7 +25,7 @@ pub async fn vorgang_merge_candidates(
         .as_ref()
         .unwrap_or(&vec![])
         .iter()
-        .map(|x| srv.guard_ts(x.typ, model.api_id, obj).unwrap())
+        .map(|x| x.typ.clone())
         .collect();
 
     let result = sqlx::query!(

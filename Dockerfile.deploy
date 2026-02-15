@@ -1,7 +1,7 @@
 FROM rust:1.92-slim-bookworm AS builder
 
 ENV OPENAPI_GENERATOR_VERSION="7.19.0"
-ENV SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
+ENV SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/266e1fafcc88ebe4f0557ad1948c72154d1be207/docs/specs/openapi.yml"
 
 WORKDIR /app
 

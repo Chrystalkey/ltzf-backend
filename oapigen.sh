@@ -2,7 +2,7 @@
 
 OPENAPI_GENERATOR_VERSION="7.19.0"
 DIRECTORY="oapi-generator"
-SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/refs/heads/main/docs/specs/openapi.yml"
+SPEC_PATH="https://raw.githubusercontent.com/Chrystalkey/landtagszusammenfasser/266e1fafcc88ebe4f0557ad1948c72154d1be207/docs/specs/openapi.yml"
 
 echo "Checking for openapi-generator-cli"
 

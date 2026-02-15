@@ -343,11 +343,10 @@ pub async fn execute_merge_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = model.ids.as_ref().map(|x| {
-        x.iter()
-            .map(|el| srv.guard_ts(el.typ, model.api_id, obj).unwrap())
-            .collect::<Vec<_>>()
-    });
+    let identt_list = model
+        .ids
+        .as_ref()
+        .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
 
     sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator)
@@ -736,7 +735,7 @@ mod scenariotest {
         vg_mod.links = Some(vec!["https://example.com".to_string()]);
         vg_mod.ids = Some(vec![models::VgIdent {
             id: "einzigartig und anders".to_string(),
-            typ: models::VgIdentTyp::Initdrucks,
+            typ: "initdrucks".to_owned(),
         }]);
         vg_mod.initiatoren = vec![generate::random::autor(0)];
 

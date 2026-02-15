@@ -410,12 +410,7 @@ pub(crate) mod generate {
                 models::Vorgangstyp::Sonstig,
             ];
 
-            let vgident_typ_variants = [
-                models::VgIdentTyp::Initdrucks,
-                models::VgIdentTyp::Vorgnr,
-                models::VgIdentTyp::ApiId,
-                models::VgIdentTyp::Sonstig,
-            ];
+            let vgident_typ_variants = ["initdrucks", "vorgnr", "api-id", "sonstig"];
 
             let has_kurztitel = rng.random_bool(0.6);
             let has_links = rng.random_bool(0.7);
@@ -460,7 +455,8 @@ pub(crate) mod generate {
                 for _ in 0..ids_count {
                     id_list.push(models::VgIdent {
                         id: random_string(rng, "id_", 5, 15),
-                        typ: random_enum(rng, &vgident_typ_variants),
+                        typ: vgident_typ_variants[rng.random_range(0..vgident_typ_variants.len())]
+                            .to_owned(),
                     });
                 }
                 Some(id_list)
@@ -795,7 +791,7 @@ pub(crate) mod generate {
             initiatoren: at,
             ids: Some(vec![models::VgIdent {
                 id: "einzigartig".to_string(),
-                typ: models::VgIdentTyp::Initdrucks,
+                typ: "initdrucks".to_owned(),
             }]),
             lobbyregister: Some(vec![models::Lobbyregeintrag {
                 betroffene_drucksachen: vec!["20/2014".to_string()],

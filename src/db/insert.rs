@@ -67,17 +67,17 @@ pub async fn insert_vorgang(
         .as_ref()
         .map(|x| x.iter().map(|el| el.id.clone()).collect::<Vec<_>>());
 
-    let identt_list = vg.ids.as_ref().map(|x| {
-        x.iter()
-            .map(|el| server.guard_ts(el.typ, vg.api_id, obj).unwrap())
-            .collect::<Vec<_>>()
-    });
+    let identt_list = vg
+        .ids
+        .as_ref()
+        .map(|x| x.iter().map(|el| el.typ.clone()).collect::<Vec<_>>());
 
     sqlx::query!(
         "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator) 
     SELECT $1, t.id, ident.ident FROM 
     UNNEST($2::text[], $3::text[]) as ident(ident, typ)
-    INNER JOIN vg_ident_typ t ON t.value = ident.typ",
+    INNER JOIN vg_ident_typ t ON t.value = ident.typ
+    ON CONFLICT DO NOTHING",
         vg_id,
         ident_list.as_ref().map(|x| &x[..]),
         identt_list.as_ref().map(|x| &x[..])
