@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rel_vorgang_ident (vg_id, typ, identifikator) \n    SELECT $1, t.id, ident.ident FROM \n    UNNEST($2::text[], $3::text[]) as ident(ident, typ)\n    INNER JOIN vg_ident_typ t ON t.value = ident.typ\n    ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fc87a3fa7531da649cb8a680a48116f99a6c5311ad3217b5ff3e51d7b3b4440e"
+}
