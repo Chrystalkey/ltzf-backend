@@ -1,4 +1,11 @@
 # LTZF-Backend
+
+# WE HAVE MOVED
+
+This project is now hosted here: https://codeberg.org/PaZuFa/pazufa-backend
+
+And this repository is being archived.
+
 ## Arguments for LTZF-Backend
 ```bash
 Usage: ltzf-backend.exe [OPTIONS] --db-url <DB_URL> --keyadder-key <KEYADDER_KEY>
