@@ -2,7 +2,7 @@
 
 # WE HAVE MOVED
 
-This project is now hosted here: https://codeberg.org/PaZuFa/parlamentszusammenfasser
+This project is now hosted here: https://codeberg.org/PaZuFa/pazufa-backend
 
 And this repository is being archived.
 
